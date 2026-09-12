@@ -6,7 +6,7 @@ import php.runtime.lang.BaseException;
 import php.runtime.memory.ObjectMemory;
 import php.runtime.memory.StringMemory;
 import php.runtime.reflection.ClassEntity;
-import php.runtime.util.JVMStackTracer;
+import java.io.PrintStream;
 
 import static php.runtime.annotation.Reflection.*;
 
@@ -81,12 +81,7 @@ public class JavaException extends BaseException {
         if (throwable == null)
             return Memory.NULL;
 
-        JVMStackTracer tracer = new JVMStackTracer(
-                env.scope.getClassLoader(), throwable.getStackTrace()
-        );
-        for(JVMStackTracer.Item el : tracer){
-            env.echo(el.toString() + "\n");
-        }
+        throwable.printStackTrace(new PrintStream(env.getDefaultBuffer().getOutput()));
         return Memory.NULL;
     }
 }

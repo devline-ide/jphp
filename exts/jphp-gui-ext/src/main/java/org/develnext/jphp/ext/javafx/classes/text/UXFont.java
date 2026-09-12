@@ -221,7 +221,7 @@ public class UXFont extends BaseWrapper<Font> {
 
     @Getter
     public float getLineHeight() {
-        return com.sun.javafx.tk.Toolkit.getToolkit().getFontLoader().getFontMetrics(getWrappedObject()).getLineHeight();
+        return (float) getLineHeight(getWrappedObject());
     }
 
     public static double getLineHeight(Font font) {
