@@ -29,7 +29,7 @@ import javafx.scene.shape.Circle;
 import javafx.scene.shape.Line;
 import javafx.scene.shape.StrokeLineCap;
 
-import com.sun.javafx.css.converters.PaintConverter;
+import javafx.css.converter.PaintConverter;
 
 /**
  * Marker which can be used to show an insert position {@link TabPane}

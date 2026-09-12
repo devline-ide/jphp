@@ -422,7 +422,7 @@ public class ClassWrapper {
             );
 
             for (Class _interface : wrapInterfaces) {
-                for (Method method : _interface.getDeclaredMethods()) {
+                for (Method method : _interface.getMethods()) {
 
                     try {
                         if (method.isAnnotationPresent(Reflection.Property.class)) {
@@ -491,7 +491,7 @@ public class ClassWrapper {
                             classEntity.addProperty(propertyEntity).check(null);
                         } else {
                             MethodEntity entity = onWrapWrapCompileMethod(
-                                    classEntity, bindClass.getDeclaredMethod(method.getName(), method.getParameterTypes()), method,
+                                    classEntity, bindClass.getMethod(method.getName(), method.getParameterTypes()), method,
                                     interfaces != null && interfaces.skipConflicts()
                             );
 

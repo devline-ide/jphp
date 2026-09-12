@@ -10,17 +10,21 @@ import php.runtime.lang.BaseObject;
 import php.runtime.memory.ObjectMemory;
 import php.runtime.reflection.ClassEntity;
 
+import java.util.Set;
 import java.util.concurrent.*;
 
 import static php.runtime.annotation.Reflection.*;
 
 @Name("php\\lang\\ThreadPool")
 public class WrapThreadPool extends BaseObject {
+    private static final Set<ExecutorService> SERVICES = ConcurrentHashMap.newKeySet();
+
     protected ExecutorService service;
 
     public WrapThreadPool(Environment env, ExecutorService service) {
         super(env);
         this.service = service;
+        SERVICES.add(service);
     }
 
     public WrapThreadPool(Environment env, ClassEntity clazz) {
@@ -136,12 +140,24 @@ public class WrapThreadPool extends BaseObject {
     @Signature
     public Memory shutdown(Environment env, Memory... args){
         service.shutdown();
+        SERVICES.remove(service);
         return Memory.NULL;
     }
 
     @Signature
     public Memory shutdownNow(Environment env, Memory... args){
         service.shutdownNow();
+        SERVICES.remove(service);
+        return Memory.NULL;
+    }
+
+    @Signature
+    public static Memory shutdownAll(Environment env, Memory... args){
+        for (ExecutorService service : SERVICES) {
+            service.shutdownNow();
+        }
+
+        SERVICES.clear();
         return Memory.NULL;
     }
 

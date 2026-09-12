@@ -1886,6 +1886,16 @@ public abstract class IList<E>
     }
 
     /**
+     * Resolves the covariant List/Deque reversed() defaults added in modern JDKs.
+     */
+    @Override
+    public IList<E> reversed() {
+        IList<E> reversed = copy();
+        reversed.reverse();
+        return reversed;
+    }
+
+    /**
      * Reverses the order of the specified elements in the list.
      *
      * @param index	index of first element to reverse

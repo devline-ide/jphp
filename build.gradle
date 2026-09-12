@@ -1,92 +1,69 @@
-def javaVersion    = '1.8';
-def projectVersion = '0.9.3';
-
-buildscript {
-    repositories {
-        maven {
-            url "https://plugins.gradle.org/m2/"
-        }
-    }
-    dependencies {
-        classpath "com.github.jengelman.gradle.plugins:shadow:2.0.2"
-    }
-}
+def javaVersion = JavaVersion.VERSION_25
+def projectVersion = '0.9.3'
+def sourceRepository = file(System.getProperty('maven.repo.local', "$rootDir/../../.gradle/source-repo"))
 
 allprojects {
     apply plugin: 'idea'
-    apply plugin: 'signing'
-    apply plugin: 'java'
+    apply plugin: 'java-library'
+    apply plugin: 'maven-publish'
 
-    project.group = 'org.develnext.jphp'
-    project.version = projectVersion
-    project.ext.isSnapshot = !Boolean.getBoolean("release");
-
-    if (project.ext.isSnapshot) {
-        version += '-SNAPSHOT'
-    }
+    group = 'org.develnext.jphp'
+    version = projectVersion + (Boolean.getBoolean('release') ? '' : '-SNAPSHOT')
 
     repositories {
-        mavenLocal()
         mavenCentral()
     }
 
-    task sourcesJar(type: Jar, dependsOn: 'classes') {
-        classifier = 'sources'
-        from sourceSets.main.allSource
+    dependencies {
+        compileOnly('org.openjfx:javafx-base:25.0.4:win') { transitive = false }
+        compileOnly('org.openjfx:javafx-graphics:25.0.4:win') { transitive = false }
+        compileOnly('org.openjfx:javafx-controls:25.0.4:win') { transitive = false }
+        compileOnly('org.openjfx:javafx-fxml:25.0.4:win') { transitive = false }
+        compileOnly('org.openjfx:javafx-media:25.0.4:win') { transitive = false }
+        compileOnly('org.openjfx:javafx-swing:25.0.4:win') { transitive = false }
+        compileOnly('org.openjfx:javafx-web:25.0.4:win') { transitive = false }
     }
 
-    configurations {
-        provided
+    java {
+        sourceCompatibility = javaVersion
+        targetCompatibility = javaVersion
+        toolchain {
+            languageVersion = JavaLanguageVersion.of(25)
+        }
+        withSourcesJar()
     }
 
-    sourceSets {
-        main {
-            compileClasspath += configurations.provided
+    tasks.withType(JavaCompile).configureEach {
+        options.encoding = 'UTF-8'
+    }
+
+    tasks.withType(Javadoc).configureEach {
+        options.encoding = 'UTF-8'
+    }
+}
+
+subprojects {
+    publishing {
+        publications {
+            mavenJava(MavenPublication) {
+                from components.java
+            }
+        }
+        repositories {
+            maven {
+                name = 'sourceRepository'
+                url = sourceRepository.toURI()
+            }
         }
     }
 }
 
-configure(subprojects) {
-    apply plugin: 'java'
+wrapper {
+    gradleVersion = '9.7.1'
+}
 
-    if (it.name.endsWith("-ext")) {
-        apply plugin: 'maven'
-    }
-
-    apply plugin: 'com.github.johnrengelman.shadow'
-
-    sourceCompatibility = javaVersion
-    targetCompatibility = javaVersion
-
-    /*sourceSets {
-        main.java.srcDirs = ['src/main/java']
-        main.resources.srcDirs = ['src/main/resources']
-
-        test.java.srcDirs = ["src/main/tests"]
-        test.resources.srcDirs = ["src/main/tests"]
-    }*/
-
-    [compileJava, compileTestJava, javadoc]*.options*.encoding = 'UTF-8'
-
-    def extDir = "exts/";
-
-    if (it.name.startsWith(extDir)) {
-        def pr = it
-
-        install {
-            repositories.mavenInstaller {
-                pom.artifactId = pr.name.substring(extDir.length())
-            }
-        }
-
-        def installer = install.repositories.mavenInstaller
-
-        [installer]*.pom*.whenConfigured {pom ->
-            pom.dependencies.each { dep ->
-                if (dep.artifactId.startsWith(extDir)) {
-                    dep.artifactId = dep.artifactId.substring(extDir.length())
-                }
-            }
-        }
+tasks.register('publishSource') {
+    dependsOn subprojects.collect {
+        it.tasks.named('publishAllPublicationsToSourceRepositoryRepository')
     }
 }

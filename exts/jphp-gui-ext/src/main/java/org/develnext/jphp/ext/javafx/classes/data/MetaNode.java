@@ -31,11 +31,6 @@ public abstract class MetaNode extends Label {
     }
 
     @Override
-    protected final boolean containsBounds(double localX, double localY) {
-        return false;
-    }
-
-    @Override
     public final boolean contains(Point2D localPoint) {
         return false;
     }

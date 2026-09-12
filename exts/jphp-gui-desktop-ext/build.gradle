@@ -1,4 +1,4 @@
 dependencies {
-    provided project(":jphp-runtime")
-    provided project(":exts/jphp-gui-ext")
+    compileOnly project(":jphp-runtime")
+    compileOnly project(":exts:jphp-gui-ext")
 }

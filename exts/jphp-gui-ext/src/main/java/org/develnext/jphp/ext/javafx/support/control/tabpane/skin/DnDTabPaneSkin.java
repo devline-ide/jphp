@@ -36,7 +36,7 @@ import javafx.scene.layout.Pane;
 import javafx.scene.layout.StackPane;
 import javafx.scene.paint.Color;
 
-import com.sun.javafx.scene.control.skin.TabPaneSkin;
+import javafx.scene.control.skin.TabPaneSkin;
 import org.develnext.jphp.ext.javafx.support.control.tabpane.DndTabPaneFactory;
 import org.develnext.jphp.ext.javafx.support.control.tabpane.DndTabPaneFactory.DropType;
 import org.develnext.jphp.ext.javafx.support.control.tabpane.DndTabPaneFactory.DroppedData;

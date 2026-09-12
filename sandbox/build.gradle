@@ -1,17 +1,19 @@
 apply plugin: 'application'
 
-mainClassName = 'php.runtime.launcher.Launcher'
+application {
+    mainClass = 'php.runtime.launcher.Launcher'
+}
 
 sourceSets {
     main.resources.srcDirs = ['src']
 }
 
 dependencies {
-    compile project(':jphp-core')
-    compile project(':exts/jphp-zend-ext')
-    compile project(':exts/jphp-yaml-ext')
-    compile project(':exts/jphp-xml-ext')
-    compile project(':exts/jphp-graphic-ext')
+    api project(':jphp-core')
+    api project(':exts:jphp-zend-ext')
+    api project(':exts:jphp-yaml-ext')
+    api project(':exts:jphp-xml-ext')
+    api project(':exts:jphp-graphic-ext')
     //compile project(':jphp-json-ext')
     //compile project(':jphp-jsoup-ext')
     //compile project(':jphp-gdx-ext')
@@ -20,9 +22,9 @@ dependencies {
     //compile project(':jphp-orientdb-ext')
     //compile project(':jphp-webserver-ext')
 
-    compile project(':jphp-debugger')
+    api project(':jphp-debugger')
 
-    compile 'org.xerial:sqlite-jdbc:3.8.7'
+    api 'org.xerial:sqlite-jdbc:3.8.7'
 }
 
 run {

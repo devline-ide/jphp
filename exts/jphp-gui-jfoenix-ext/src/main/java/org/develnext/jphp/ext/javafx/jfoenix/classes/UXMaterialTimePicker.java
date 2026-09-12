@@ -115,7 +115,7 @@ public class UXMaterialTimePicker extends UXComboBoxBase<JFXTimePicker> {
 
     @Setter
     public void setHourView24(boolean value) {
-        getWrappedObject().setIs24HourView(value);
+        getWrappedObject().set24HourView(value);
     }
 
     @Override

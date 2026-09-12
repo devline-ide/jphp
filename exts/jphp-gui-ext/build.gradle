@@ -1,7 +1,15 @@
 dependencies {
-    provided project(":jphp-runtime")
+    compileOnly project(":jphp-runtime")
 
-    provided project(":jphp-core")
-    compile project(":exts/jphp-xml-ext")
-    compile project(":exts/jphp-graphic-ext")
+    compileOnly project(":jphp-core")
+    api project(":exts:jphp-xml-ext")
+    api project(":exts:jphp-graphic-ext")
+
+    api('org.openjfx:javafx-base:25.0.4:win') { transitive = false }
+    api('org.openjfx:javafx-graphics:25.0.4:win') { transitive = false }
+    api('org.openjfx:javafx-controls:25.0.4:win') { transitive = false }
+    api('org.openjfx:javafx-fxml:25.0.4:win') { transitive = false }
+    api('org.openjfx:javafx-media:25.0.4:win') { transitive = false }
+    api('org.openjfx:javafx-swing:25.0.4:win') { transitive = false }
+    api('org.openjfx:javafx-web:25.0.4:win') { transitive = false }
 }

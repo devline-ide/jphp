@@ -12,8 +12,9 @@ include 'jphp-runtime',
 
 file("$rootDir.path/exts").listFiles().each { file ->
     if (file.directory && file.name.startsWith("jphp-") && file.name.endsWith("-ext")) {
-        println "include 'exts/$file.name'"
+        println "include ':exts:$file.name'"
 
-        include "exts/$file.name"
+        include ":exts:$file.name"
+        project(":exts:$file.name").projectDir = file
     }
 }

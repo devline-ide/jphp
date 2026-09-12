@@ -9,7 +9,6 @@ import org.develnext.jphp.ext.javafx.classes.UXTextArea;
 import org.develnext.jphp.ext.javafx.classes.UXTextField;
 import org.develnext.jphp.ext.javafx.jfoenix.JFoenixExtension;
 import org.develnext.jphp.ext.javafx.jfoenix.support.JFXTextAreaFixed;
-import org.develnext.jphp.ext.javafx.jfoenix.support.JFXTextAreaSkin;
 import php.runtime.annotation.Reflection.Getter;
 import php.runtime.annotation.Reflection.Namespace;
 import php.runtime.annotation.Reflection.Setter;

@@ -5,11 +5,13 @@ sourceSets {
 }
 
 dependencies {
-    compile project(':jphp-core')
-    compile project(':exts/jphp-zend-ext')
+    api project(':jphp-core')
+    api project(':exts:jphp-zend-ext')
 }
 
-mainClassName = 'php.runtime.launcher.Launcher'
+application {
+    mainClass = 'php.runtime.launcher.Launcher'
+}
 
 task bench(dependsOn: run) {
 }

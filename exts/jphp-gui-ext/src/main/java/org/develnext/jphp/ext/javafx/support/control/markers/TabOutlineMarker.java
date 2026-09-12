@@ -27,7 +27,7 @@ import javafx.scene.paint.Paint;
 import javafx.scene.shape.Polyline;
 import javafx.scene.shape.StrokeType;
 
-import com.sun.javafx.css.converters.PaintConverter;
+import javafx.css.converter.PaintConverter;
 
 /**
  * Marks a Tab-Position

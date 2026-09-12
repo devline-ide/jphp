@@ -284,7 +284,7 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
     }
 
     protected Memory yield(Environment env, TraceInfo trace) {
-        return yield(env, trace, Memory.NULL);
+        return this.yield(env, trace, Memory.NULL);
     }
 
     protected Bucket setCurrent(Memory value) {

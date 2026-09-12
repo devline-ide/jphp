@@ -1,21 +1,12 @@
-apply plugin: 'maven'
 
 sourceSets {
-    main {
-        java {
-            srcDir 'src/main/java'
-        }
-        resources {
-            srcDir 'src/main/resources'
-        }
-    }
     test.resources.srcDirs = ["src/main/tests"]
 }
 
 dependencies {
-    compile project(':jphp-core')
-    compile project(':exts/jphp-zend-ext')
+    api project(':jphp-core')
+    api project(':exts:jphp-zend-ext')
 
-    testCompile 'junit:junit:4.+'
-    testCompile project(':jphp-core').sourceSets.test.output
+    testImplementation 'junit:junit:4.+'
+    testImplementation project.project(':jphp-core').sourceSets.test.output
 }

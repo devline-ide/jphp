@@ -32,7 +32,7 @@ public abstract class Generator<T> implements Iterable<T> {
     }
 
     public final T yield() {
-        return yield(null);
+        return this.yield(null);
     }
 
     /**

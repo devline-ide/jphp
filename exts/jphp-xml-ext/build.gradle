@@ -1,5 +1,4 @@
-apply plugin: 'maven'
 
 dependencies {
-    provided project(':jphp-runtime')
+    compileOnly project(':jphp-runtime')
 }

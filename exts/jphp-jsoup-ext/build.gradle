@@ -1,10 +1,9 @@
-apply plugin: 'maven'
 
 dependencies {
-    provided project(':jphp-runtime')
-    compile 'org.jsoup:jsoup:1.10.2'
+    compileOnly project(':jphp-runtime')
+    api 'org.jsoup:jsoup:1.10.2'
 
-    testCompile 'junit:junit:4.+'
-    testCompile project(':exts/jphp-zend-ext')
-    testCompile project(':jphp-core').sourceSets.test.output
+    testImplementation 'junit:junit:4.+'
+    testImplementation project(':exts:jphp-zend-ext')
+    testImplementation project.project(':jphp-core').sourceSets.test.output
 }
