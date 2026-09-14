@@ -2,11 +2,11 @@ package org.develnext.jphp.ext.javafx.classes;
 
 import javafx.application.Application;
 import javafx.application.Platform;
-import javafx.embed.swing.JFXPanel;
 import javafx.scene.control.Button;
 import javafx.stage.Stage;
 import org.develnext.jphp.ext.javafx.FXLauncher;
 import org.develnext.jphp.ext.javafx.JavaFXExtension;
+import org.develnext.jphp.ext.javafx.support.JavaFXRuntime;
 import php.runtime.Memory;
 import php.runtime.annotation.Reflection.Abstract;
 import php.runtime.annotation.Reflection.Name;
@@ -115,7 +115,7 @@ public class UXApplication extends BaseWrapper<Application> {
 
     @Signature
     public static void setTheme(final Memory value) {
-        new JFXPanel();
+        JavaFXRuntime.ensureStarted();
 
         Platform.runLater(new Runnable() {
             @Override
@@ -147,7 +147,7 @@ public class UXApplication extends BaseWrapper<Application> {
             return callback.call();
         }
 
-        new JFXPanel();
+        JavaFXRuntime.ensureStarted();
 
         FutureTask<Memory> futureTask = new FutureTask<>(() -> {
             try {
@@ -173,7 +173,7 @@ public class UXApplication extends BaseWrapper<Application> {
             return;
         }
 
-        new JFXPanel();
+        JavaFXRuntime.ensureStarted();
 
         Platform.runLater(() -> {
             try {

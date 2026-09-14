@@ -7,8 +7,6 @@ import php.runtime.env.Environment;
 import php.runtime.lang.BaseObject;
 import php.runtime.reflection.ClassEntity;
 
-import java.awt.*;
-
 @Reflection.Namespace(GuiDesktopExtension.NS)
 public class Mouse extends BaseObject {
     public Mouse(Environment env, ClassEntity clazz) {
@@ -21,11 +19,11 @@ public class Mouse extends BaseObject {
 
     @Signature
     public static int x() {
-        return MouseInfo.getPointerInfo().getLocation().x;
+        return Robot.mouseX();
     }
 
     @Signature
     public static int y() {
-        return MouseInfo.getPointerInfo().getLocation().y;
+        return Robot.mouseY();
     }
 }

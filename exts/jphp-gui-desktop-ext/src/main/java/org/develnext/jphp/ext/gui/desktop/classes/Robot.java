@@ -1,13 +1,14 @@
 package org.develnext.jphp.ext.gui.desktop.classes;
 
-import javafx.embed.swing.SwingFXUtils;
 import javafx.geometry.Rectangle2D;
-import javafx.scene.image.*;
 import javafx.scene.image.Image;
+import javafx.scene.input.Clipboard;
+import javafx.scene.input.ClipboardContent;
+import javafx.scene.input.KeyCode;
 import javafx.scene.input.MouseButton;
 import javafx.stage.Screen;
 import org.develnext.jphp.ext.gui.desktop.GuiDesktopExtension;
-import org.develnext.jphp.ext.javafx.classes.UXScreen;
+import org.develnext.jphp.ext.javafx.support.JavaFXRuntime;
 import php.runtime.annotation.Reflection;
 import php.runtime.annotation.Reflection.Getter;
 import php.runtime.annotation.Reflection.Nullable;
@@ -19,21 +20,14 @@ import php.runtime.lang.BaseObject;
 import php.runtime.lang.BaseWrapper;
 import php.runtime.reflection.ClassEntity;
 
-import java.awt.*;
-import java.awt.datatransfer.Clipboard;
-import java.awt.datatransfer.StringSelection;
-import java.awt.event.InputEvent;
-import java.awt.event.KeyEvent;
-import java.awt.image.BufferedImage;
-import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static java.awt.event.KeyEvent.*;
-
 @Reflection.Namespace(GuiDesktopExtension.NS)
-public class Robot extends BaseWrapper<java.awt.Robot> {
+public class Robot extends BaseWrapper<javafx.scene.robot.Robot> {
+    private static javafx.scene.robot.Robot sharedRobot;
+
     interface WrappedInterface {
 
     }
@@ -42,45 +36,74 @@ public class Robot extends BaseWrapper<java.awt.Robot> {
         super(env, clazz);
     }
 
-    public Robot(Environment env, java.awt.Robot wrappedObject) {
+    public Robot(Environment env, javafx.scene.robot.Robot wrappedObject) {
         super(env, wrappedObject);
     }
 
     @Signature
-    public void __construct() throws AWTException {
-        __wrappedObject = new java.awt.Robot();
+    public void __construct() {
+        __wrappedObject = getSharedRobot();
+    }
+
+    private static javafx.scene.robot.Robot getSharedRobot() {
+        return JavaFXRuntime.runAndWait(() -> {
+            if (sharedRobot == null) {
+                sharedRobot = new javafx.scene.robot.Robot();
+            }
+
+            return sharedRobot;
+        });
+    }
+
+    static int mouseX() {
+        return JavaFXRuntime.runAndWait(() -> (int) getSharedRobot().getMouseX());
+    }
+
+    static int mouseY() {
+        return JavaFXRuntime.runAndWait(() -> (int) getSharedRobot().getMouseY());
     }
 
     @Getter
     public int getX() {
-        return Mouse.x();
+        return mouseX();
     }
 
     @Setter
     public void setX(int x) {
-        getWrappedObject().mouseMove(x, Mouse.y());
+        JavaFXRuntime.runAndWait(() -> {
+            getWrappedObject().mouseMove(x, getWrappedObject().getMouseY());
+            return null;
+        });
     }
 
     @Getter
     public int getY() {
-        return Mouse.y();
+        return mouseY();
     }
 
     @Setter
     public void setY(int y) {
-        getWrappedObject().mouseMove(Mouse.x(), y);
+        JavaFXRuntime.runAndWait(() -> {
+            getWrappedObject().mouseMove(getWrappedObject().getMouseX(), y);
+            return null;
+        });
     }
 
     @Getter
     public int[] getPosition() {
-        return new int[] { getX(), getY() };
+        return JavaFXRuntime.runAndWait(() -> new int[] {
+                (int) getWrappedObject().getMouseX(),
+                (int) getWrappedObject().getMouseY()
+        });
     }
 
     @Setter
     public void setPosition(int[] pos) {
         if (pos.length >= 2) {
-            setX(pos[0]);
-            setY(pos[1]);
+            JavaFXRuntime.runAndWait(() -> {
+                getWrappedObject().mouseMove(pos[0], pos[1]);
+                return null;
+            });
         }
     }
 
@@ -102,17 +125,10 @@ public class Robot extends BaseWrapper<java.awt.Robot> {
 
     @Signature
     public void mouseDown(MouseButton button) {
-        switch (button) {
-            case PRIMARY:
-                getWrappedObject().mousePress(InputEvent.BUTTON1_MASK);
-                break;
-            case MIDDLE:
-                getWrappedObject().mousePress(InputEvent.BUTTON2_MASK);
-                break;
-            case SECONDARY:
-                getWrappedObject().mousePress(InputEvent.BUTTON3_MASK);
-                break;
-        }
+        JavaFXRuntime.runAndWait(() -> {
+            getWrappedObject().mousePress(button);
+            return null;
+        });
     }
 
     @Signature
@@ -122,51 +138,58 @@ public class Robot extends BaseWrapper<java.awt.Robot> {
 
     @Signature
     public void mouseUp(MouseButton button) {
-        switch (button) {
-            case PRIMARY:
-                getWrappedObject().mouseRelease(InputEvent.BUTTON1_MASK);
-                break;
-            case MIDDLE:
-                getWrappedObject().mouseRelease(InputEvent.BUTTON2_MASK);
-                break;
-            case SECONDARY:
-                getWrappedObject().mouseRelease(InputEvent.BUTTON3_MASK);
-                break;
-        }
+        JavaFXRuntime.runAndWait(() -> {
+            getWrappedObject().mouseRelease(button);
+            return null;
+        });
     }
 
     @Signature
     public void mouseScroll(int wheelAmt) {
-        getWrappedObject().mouseWheel(wheelAmt);
+        JavaFXRuntime.runAndWait(() -> {
+            getWrappedObject().mouseWheel(wheelAmt);
+            return null;
+        });
     }
 
     @Signature
     public void type(String characters) {
-        Clipboard clipboard = Toolkit.getDefaultToolkit().getSystemClipboard();
-        StringSelection stringSelection = new StringSelection( characters );
-        clipboard.setContents(stringSelection, null);
+        JavaFXRuntime.runAndWait(() -> {
+            ClipboardContent content = new ClipboardContent();
+            content.putString(characters);
+            Clipboard.getSystemClipboard().setContent(content);
 
-        getWrappedObject().keyPress(KeyEvent.VK_CONTROL);
-        getWrappedObject().keyPress(KeyEvent.VK_V);
-        getWrappedObject().keyRelease(KeyEvent.VK_V);
-        getWrappedObject().keyRelease(KeyEvent.VK_CONTROL);
+            getWrappedObject().keyPress(KeyCode.CONTROL);
+            getWrappedObject().keyPress(KeyCode.V);
+            getWrappedObject().keyRelease(KeyCode.V);
+            getWrappedObject().keyRelease(KeyCode.CONTROL);
+            return null;
+        });
     }
 
-    protected List<Integer> keyCodes(String keys) {
+    protected List<KeyCode> keyCodes(String keys) {
         String[] strings = StringUtils.split(keys, '+');
 
-        List<Integer> codes = new ArrayList<>();
+        List<KeyCode> codes = new ArrayList<>();
 
         for (String string : strings) {
             string = string.trim().replace(' ', '_').replace('-', '_').toUpperCase();
+            KeyCode matched = null;
 
-            try {
-                Field field = KeyEvent.class.getField("VK_" + string);
-                int code = field.getInt(null);
-                codes.add(code);
-            } catch (NoSuchFieldException|IllegalAccessException e) {
+            for (KeyCode code : KeyCode.values()) {
+                String name = code.getName().replace(' ', '_').replace('-', '_').toUpperCase();
+
+                if (code.name().equals(string) || name.equals(string)) {
+                    matched = code;
+                    break;
+                }
+            }
+
+            if (matched == null) {
                 throw new IllegalArgumentException("Unknown key - " + string);
             }
+
+            codes.add(matched);
         }
 
         if (codes.isEmpty()) {
@@ -178,31 +201,40 @@ public class Robot extends BaseWrapper<java.awt.Robot> {
 
     @Signature
     public void keyDown(String keys) {
-        for (Integer code : keyCodes(keys)) {
-            getWrappedObject().keyPress(code);
-        }
+        JavaFXRuntime.runAndWait(() -> {
+            for (KeyCode code : keyCodes(keys)) {
+                getWrappedObject().keyPress(code);
+            }
+            return null;
+        });
     }
 
     @Signature
     public void keyUp(String keys) {
-        for (Integer code : keyCodes(keys)) {
-            getWrappedObject().keyRelease(code);
-        }
+        JavaFXRuntime.runAndWait(() -> {
+            for (KeyCode code : keyCodes(keys)) {
+                getWrappedObject().keyRelease(code);
+            }
+            return null;
+        });
     }
 
     @Signature
     public void keyPress(String keys) {
-        List<Integer> codes = keyCodes(keys);
+        JavaFXRuntime.runAndWait(() -> {
+            List<KeyCode> codes = keyCodes(keys);
 
-        for (Integer code : codes) {
-            getWrappedObject().keyPress(code);
-        }
+            for (KeyCode code : codes) {
+                getWrappedObject().keyPress(code);
+            }
 
-        Collections.reverse(codes);
+            Collections.reverse(codes);
 
-        for (Integer code : codes) {
-            getWrappedObject().keyRelease(code);
-        }
+            for (KeyCode code : codes) {
+                getWrappedObject().keyRelease(code);
+            }
+            return null;
+        });
     }
 
     @Signature
@@ -217,15 +249,27 @@ public class Robot extends BaseWrapper<java.awt.Robot> {
 
     @Signature
     public Image screenshot(@Nullable Rectangle2D bounds, @Nullable Screen screen) {
-        screen = screen == null ? Screen.getPrimary() : screen;
-        bounds = bounds == null ? screen.getVisualBounds() : bounds;
+        final Rectangle2D requestedBounds = bounds;
+        final Screen requestedScreen = screen;
 
-        return screenshotArea((int) bounds.getMinX(), (int) bounds.getMinY(), (int) bounds.getWidth(), (int) bounds.getHeight());
+        return JavaFXRuntime.runAndWait(() -> {
+            Screen actualScreen = requestedScreen == null ? Screen.getPrimary() : requestedScreen;
+            Rectangle2D actualBounds = requestedBounds == null ? actualScreen.getVisualBounds() : requestedBounds;
+
+            return getWrappedObject().getScreenCapture(
+                    null,
+                    actualBounds.getMinX(),
+                    actualBounds.getMinY(),
+                    actualBounds.getWidth(),
+                    actualBounds.getHeight(),
+                    false
+            );
+        });
     }
 
     protected Image screenshotArea(int x, int y, int width, int height) {
-        BufferedImage capture = getWrappedObject().createScreenCapture(new Rectangle(x, y, width, height));
-
-        return SwingFXUtils.toFXImage(capture, null);
+        return JavaFXRuntime.runAndWait(() ->
+                getWrappedObject().getScreenCapture(null, x, y, width, height, false)
+        );
     }
 }

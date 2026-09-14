@@ -7,7 +7,7 @@ import php.runtime.env.CompileScope;
 import php.runtime.env.Environment;
 import php.runtime.env.handler.EntityFetchHandler;
 
-import java.awt.*;
+import java.awt.Desktop;
 
 public class GuiDesktopExtension extends JavaFXExtension {
     public static final String NS = "php\\desktop";
@@ -28,7 +28,7 @@ public class GuiDesktopExtension extends JavaFXExtension {
         registerClass(scope, MouseEx.class);
         registerClass(scope, org.develnext.jphp.ext.gui.desktop.classes.Runtime.class);
 
-        registerWrapperClass(scope, java.awt.Robot.class, Robot.class);
+        registerWrapperClass(scope, javafx.scene.robot.Robot.class, Robot.class);
         registerWrapperClass(scope, Desktop.class, UXDesktop.class);
     }
 

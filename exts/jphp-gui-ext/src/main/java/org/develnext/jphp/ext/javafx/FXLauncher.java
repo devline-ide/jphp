@@ -1,7 +1,6 @@
 package org.develnext.jphp.ext.javafx;
 
 import javafx.application.Platform;
-import javafx.embed.swing.JFXPanel;
 import javafx.scene.Scene;
 import javafx.scene.image.Image;
 import javafx.scene.layout.Background;
@@ -12,6 +11,7 @@ import javafx.stage.Stage;
 import javafx.stage.StageStyle;
 import org.develnext.jphp.ext.javafx.classes.UXImage;
 import org.develnext.jphp.ext.javafx.support.ImageViewEx;
+import org.develnext.jphp.ext.javafx.support.JavaFXRuntime;
 import php.runtime.Memory;
 import php.runtime.env.DieException;
 import php.runtime.lang.spl.exception.RuntimeException;
@@ -54,7 +54,7 @@ public class FXLauncher extends Launcher {
                 return;
             }
 
-            new JFXPanel();
+            JavaFXRuntime.ensureStarted();
 
             Platform.runLater(() -> {
                 Image image = new Image(fxSplashStream);
@@ -100,6 +100,7 @@ public class FXLauncher extends Launcher {
 
             e.printStackTrace();
 
+            // TODO: Replace this legacy Swing fallback with a JavaFX error dialog.
             SwingUtilities.invokeLater(() -> {
                 ExceptionDialog ld = new ExceptionDialog("Unexpected System Error!", e.getMessage(), e);
                 ld.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
