@@ -196,6 +196,8 @@ abstract public class MemoryOperation<T> {
                             parameter.setTypeNativeClass(type);
                         }
                     };
+                } else if (GenericInterfaceMemoryOperation.supports(type, genericTypes)) {
+                    return new GenericInterfaceMemoryOperation(type);
                 } else if (IObject.class.isAssignableFrom(type)) {
                     return new MemoryOperation() {
                         @Override

@@ -424,6 +424,12 @@ public class ClassWrapper {
             for (Class _interface : wrapInterfaces) {
                 for (Method method : _interface.getMethods()) {
 
+                    // A declared PHP signature owns this exact overload; do not bind it twice.
+                    boolean overridden = Arrays.stream(nativeClass.getDeclaredMethods()).anyMatch(declared ->
+                            getSignature(declared) != null && declared.getName().equals(method.getName()) &&
+                            Arrays.equals(declared.getParameterTypes(), method.getParameterTypes()));
+                    if (overridden) continue;
+
                     try {
                         if (method.isAnnotationPresent(Reflection.Property.class)) {
                             String name = method.getName();

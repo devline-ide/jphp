@@ -252,6 +252,7 @@ public final class TrayNotification {
     private Stage getTmpStage() {
         if (tmpStage == null) {
             tmpStage = new Stage(StageStyle.UTILITY);
+            tmpStage.setScene(new Scene(new Pane()));
             tmpStage.setWidth(2);
             tmpStage.setHeight(2);
             tmpStage.setX(-999);
