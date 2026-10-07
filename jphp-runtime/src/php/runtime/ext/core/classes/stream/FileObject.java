@@ -20,6 +20,9 @@ import java.net.MalformedURLException;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.PathMatcher;
+import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.zip.CRC32;
@@ -298,8 +301,17 @@ public class FileObject extends BaseObject {
         }
     }
 
-    @Signature(@Arg("newName"))
+    @Signature({@Arg("newName"), @Arg(value = "replace", optional = @Optional(value = "0", type = HintType.BOOLEAN))})
     public Memory renameTo(Environment env, Memory... args){
+        if (args.length > 1 && args[1].toBoolean()) {
+            java.nio.file.Path target = new File(args[0].toString()).toPath();
+            if (!Files.isRegularFile(file.toPath()) || Files.isDirectory(target)) return Memory.FALSE;
+            try {
+                try { Files.move(file.toPath(), target, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING); }
+                catch (AtomicMoveNotSupportedException e) { Files.move(file.toPath(), target, StandardCopyOption.REPLACE_EXISTING); }
+                return Memory.TRUE;
+            } catch (IOException e) { return Memory.FALSE; }
+        }
         return file.renameTo(new File(args[0].toString())) ? Memory.TRUE : Memory.FALSE;
     }
 

@@ -16,6 +16,9 @@ class YamlProcessor extends Processor
     const SERIALIZE_EXPLICIT_START = 4;
     const SERIALIZE_EXPLICIT_END = 8;
     const SERIALIZE_NOT_SPLIT_LINES = 16;
+    const SERIALIZE_FLOW = 32;
+    const SERIALIZE_BLOCK = 64;
+    const STORAGE = 1024;
 
     /**
      * @param int $flags

@@ -18,3 +18,9 @@ file("$rootDir.path/exts").listFiles().each { file ->
         project(":exts:$file.name").projectDir = file
     }
 }
+
+includeBuild('../../jfoenix-modern') {
+    dependencySubstitution {
+        substitute module('com.jfoenix:jfoenix') using project(':')
+    }
+}

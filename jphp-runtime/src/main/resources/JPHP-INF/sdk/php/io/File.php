@@ -181,7 +181,7 @@ class File
      * @param string $newName
      * @return bool
      */
-    public function renameTo($newName) { return false; }
+    public function renameTo($newName, $replace = false) { return false; }
 
     /**
      * @param bool $value

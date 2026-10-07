@@ -2,7 +2,7 @@
 
 dependencies {
     compileOnly project(':jphp-runtime')
-    api group: 'org.yaml', name: 'snakeyaml', version: '1.19'
+    api group: 'org.yaml', name: 'snakeyaml', version: '2.5'
 
     testImplementation 'junit:junit:4.+'
     testImplementation project(':exts:jphp-zend-ext')

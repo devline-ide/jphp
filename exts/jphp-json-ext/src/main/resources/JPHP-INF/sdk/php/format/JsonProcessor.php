@@ -11,6 +11,7 @@ use php\io\Stream;
 class JsonProcessor extends Processor
 {
     const SERIALIZE_PRETTY_PRINT = 1;
+    const SERIALIZE_NULLS = 2;
     const DESERIALIZE_AS_ARRAYS  = 1024;
     const DESERIALIZE_LENIENT    = 2048;
 

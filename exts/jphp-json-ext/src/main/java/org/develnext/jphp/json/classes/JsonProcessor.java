@@ -30,6 +30,7 @@ import static php.runtime.annotation.Reflection.*;
 @Name("php\\format\\JsonProcessor")
 public class JsonProcessor extends WrapProcessor {
     public static final int SERIALIZE_PRETTY_PRINT = 1;
+    public static final int SERIALIZE_NULLS = 2;
     public static final int DESERIALIZE_AS_ARRAYS = 1024;
     public static final int DESERIALIZE_LENIENT = 2048;
 
@@ -94,6 +95,8 @@ public class JsonProcessor extends WrapProcessor {
         if ((flags & SERIALIZE_PRETTY_PRINT) == SERIALIZE_PRETTY_PRINT) {
             builder.setPrettyPrinting();
         }
+
+        if ((flags & SERIALIZE_NULLS) == SERIALIZE_NULLS) builder.serializeNulls();
 
         if ((flags & DESERIALIZE_LENIENT) == DESERIALIZE_LENIENT) {
             builder.setLenient();
