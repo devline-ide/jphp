@@ -22,6 +22,31 @@ public class PropertyEntity extends Entity {
     protected DocumentComment docComment;
 
     protected boolean isStatic;
+    private boolean isFinal;
+    private php.runtime.reflection.support.PhpTypeDeclaration declaredType;
+    public boolean isFinal() {return isFinal;}
+    public void setFinal(boolean value) {isFinal = value;}
+    public php.runtime.reflection.support.PhpTypeDeclaration getDeclaredType() {return declaredType;}
+    public void setDeclaredType(php.runtime.reflection.support.PhpTypeDeclaration type) {declaredType = type;}
+    public boolean hasDefaultValue() {return declaredType == null || isDefault;}
+    public Memory validateDefaultValue(Environment env, Memory value, ClassEntity owner, boolean compileTime) {
+        if (declaredType == null || !isDefault) return value;
+        Memory valid = declaredType.strictValue(env, value, owner);
+        if (valid != null) return valid;
+        String type = declaredType.getErrorSignature();
+        if (compileTime && value.isNull() && (declaredType.getAlternatives().size() > 1 || declaredType.getAlternatives().getFirst().size() == 1)) {
+            String nullable = declaredType.getAlternatives().size() == 1 && !declaredType.has("iterable") ? "?" + type : type + "|null";
+            env.error(trace, ErrorType.E_COMPILE_ERROR,
+                    "Default value for property of type %s may not be null. Use the nullable type %s to allow null default value", type, nullable);
+        }
+        String given = value.getRealType() == Memory.Type.BOOL ? (value.toBoolean() ? "true" : "false")
+                : php.runtime.reflection.support.PhpTypeDeclaration.valueType(value);
+        if (compileTime) env.error(trace, ErrorType.E_COMPILE_ERROR,
+                "Cannot use %s as default value for property %s::$%s of type %s", given, owner.getName(), name, type);
+        else env.exception(trace, php.runtime.lang.exception.BaseTypeError.class,
+                "Cannot assign %s to property %s::$%s of type %s", given, owner.getName(), name, declaredType.bind(owner).getErrorSignature());
+        return Memory.NULL;
+    }
     protected Field field;
 
     protected String specificName;
@@ -82,12 +107,29 @@ public class PropertyEntity extends Entity {
         return defaultValue;
     }
 
+    public String getDynamicDefaultName() {
+        return isStatic && clazz != null && clazz.hasDeferredInitialization() ? "\0property-default:" + specificName
+                : isStatic ? specificName : internalName;
+    }
+
     public Memory getDefaultValue(Environment env) {
+        if (clazz != null) clazz.initializeRuntimeState(env);
+        Memory value;
         if (defaultValue == null) {
-            Memory r = env.getStatic(isStatic ? specificName : internalName);
-            return r == null ? Memory.NULL : r;
-        } else
-            return defaultValue;
+            Memory r = env.getStatic(getDynamicDefaultName());
+            value = r == null ? Memory.NULL : clazz != null && clazz.hasDeferredInitialization() ? r.toValue() : r;
+        } else {
+            value = defaultValue;
+        }
+        // Defaults follow the declaring module's strict rules, regardless of the caller.
+        if (declaredType != null && isDefault && clazz != null && clazz.getModule() != null
+                && clazz.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            if (value instanceof php.runtime.memory.helper.ConstantMemory
+                    || value instanceof php.runtime.memory.helper.ClassConstantMemory)
+                value = value.toImmutable(env, trace);
+            return validateDefaultValue(env, value.toValue(), clazz, false);
+        }
+        return value;
     }
 
     public void setDefaultValue(Memory defaultValue) {
@@ -145,10 +187,10 @@ public class PropertyEntity extends Entity {
         }
 
         if (isStatic && clazz != null)
-            specificName = "\0" + clazz.getLowerName() + "#" + specificName;
+            specificName = "\0" + php.runtime.common.PhpClassNames.canonicalKey(clazz.getName()) + "#" + specificName;
 
         if (clazz != null)
-            internalName = "\0" + clazz.getLowerName() + "\0#" + name;
+            internalName = "\0" + php.runtime.common.PhpClassNames.canonicalKey(clazz.getName()) + "\0#" + name;
     }
 
     @Override
@@ -247,6 +289,8 @@ public class PropertyEntity extends Entity {
     public PropertyEntity duplicate() {
         PropertyEntity propertyEntity = new PropertyEntity(context);
         propertyEntity.setStatic(isStatic);
+        propertyEntity.setFinal(isFinal);
+        propertyEntity.setDeclaredType(declaredType);
         propertyEntity.setDocComment(docComment);
         propertyEntity.setName(name);
         propertyEntity.setDefault(isDefault);
@@ -260,14 +304,22 @@ public class PropertyEntity extends Entity {
     }
 
     public Memory assignValue(Environment env, TraceInfo trace, Object object, String name, Memory value) {
-        return ((IObject) object).getProperties().refOfIndex(name).assign(value);
+        php.runtime.memory.ReferenceMemory reference=(php.runtime.memory.ReferenceMemory)((IObject) object).getProperties().refOfIndex(name);
+        reference.attachPropertySource(env, this);
+        return reference.assign(value);
     }
 
     public Memory getStaticValue(Environment env, TraceInfo trace) {
-        return env.getOrCreateStatic(
-                specificName,
-                getDefaultValue(env).toImmutable()
-        );
+        var value=env.getOrCreateStatic(specificName, getDefaultValue(env).toImmutable());
+        ((php.runtime.memory.ReferenceMemory)value).attachPropertySource(env, this);
+        return value;
+    }
+
+    public Memory readInitialized(Environment env, TraceInfo trace, Memory value) {
+        if (declaredType != null && (value == null || value.isUndefined()))
+            env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                    "Typed %sproperty %s::$%s must not be accessed before initialization", isStatic ? "static " : "", clazz.getName(), name);
+        return value == null ? Memory.NULL : value;
     }
 
     public Memory getValue(Environment env, TraceInfo trace, Object object) throws Throwable {
@@ -278,10 +330,9 @@ public class PropertyEntity extends Entity {
         ArrayMemory props = ((IObject) object).getProperties();
 
         Memory result = props.getByScalar(specificName);
-        if (result == null) {
+        if (result == null && declaredType == null) {
             result = props.getByScalar(name);
         }
-
         return result;
     }
 }

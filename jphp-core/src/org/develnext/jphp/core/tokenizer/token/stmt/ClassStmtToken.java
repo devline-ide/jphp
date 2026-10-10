@@ -5,6 +5,8 @@ import org.develnext.jphp.core.tokenizer.TokenType;
 import org.develnext.jphp.core.tokenizer.token.CommentToken;
 import org.develnext.jphp.core.tokenizer.token.expr.value.NameToken;
 import php.runtime.common.Modifier;
+import php.runtime.common.PhpClassNames;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.reflection.ClassEntity;
 
 import java.util.*;
@@ -30,6 +32,7 @@ public class ClassStmtToken extends StmtToken {
     private Map<String, Replacement> replacements;
 
     private ClassEntity.Type classType = ClassEntity.Type.CLASS;
+    private PhpLanguageProfile classNameProfile = PhpLanguageProfile.JPHP_LEGACY;
 
     protected ClassStmtToken(TokenMeta meta, TokenType type) {
         super(meta, type);
@@ -41,6 +44,10 @@ public class ClassStmtToken extends StmtToken {
 
     public ClassStmtToken(TokenMeta meta) {
         this(meta, TokenType.T_CLASS);
+    }
+
+    public void setClassNameProfile(PhpLanguageProfile profile) {
+        this.classNameProfile = profile;
     }
 
     public boolean isInterface() {
@@ -200,7 +207,7 @@ public class ClassStmtToken extends StmtToken {
 
         Replacement replacement = replacements.get(methodName.toLowerCase());
         if (replacement == null) {
-            replacement = new Replacement(className, classes);
+            replacement = new Replacement(className, classes, classNameProfile);
             replacements.put(methodName.toLowerCase(), replacement);
             return true;
         } else {
@@ -229,10 +236,16 @@ public class ClassStmtToken extends StmtToken {
     protected static class MethodName {
         protected final String className;
         protected final String name;
+        private final PhpLanguageProfile classNameProfile;
 
         public MethodName(String className, String name) {
+            this(className, name, PhpLanguageProfile.JPHP_LEGACY);
+        }
+
+        public MethodName(String className, String name, PhpLanguageProfile profile) {
             this.className = className;
             this.name = name;
+            this.classNameProfile = profile;
         }
 
         public String getClassName() {
@@ -250,12 +263,15 @@ public class ClassStmtToken extends StmtToken {
 
             MethodName that = (MethodName) o;
 
-            return className.equalsIgnoreCase(that.className) && name.equalsIgnoreCase(that.name);
+            return classNameProfile == that.classNameProfile
+                    && (classNameProfile == PhpLanguageProfile.PHP_8_5
+                        ? PhpClassNames.canonicalKey(className).equals(PhpClassNames.canonicalKey(that.className))
+                        : className.equalsIgnoreCase(that.className)) && name.equalsIgnoreCase(that.name);
         }
 
         @Override
         public int hashCode() {
-            int result = className.toLowerCase().hashCode();
+            int result = PhpClassNames.key(className, classNameProfile).hashCode();
             result = 31 * result + name.toLowerCase().hashCode();
             return result;
         }
@@ -265,18 +281,24 @@ public class ClassStmtToken extends StmtToken {
         private final String origin;
         private final Set<String> traitsLower;
         private final Set<String> traits;
+        private final PhpLanguageProfile classNameProfile;
 
         public Replacement(String origin, Set<String> traits) {
+            this(origin, traits, PhpLanguageProfile.JPHP_LEGACY);
+        }
+
+        public Replacement(String origin, Set<String> traits, PhpLanguageProfile profile) {
             this.origin = origin;
             this.traits = traits;
+            this.classNameProfile = profile;
 
             traitsLower = new HashSet<String>();
             for(String e : traits)
-                traitsLower.add(e.toLowerCase());
+                traitsLower.add(PhpClassNames.key(e, classNameProfile));
         }
 
         public boolean hasTrait(String name) {
-            return traitsLower.contains(name.toLowerCase());
+            return traitsLower.contains(PhpClassNames.key(name, classNameProfile));
         }
 
         public String getOrigin() {
@@ -290,7 +312,7 @@ public class ClassStmtToken extends StmtToken {
         public void addTraits(Collection<String> list) {
             traits.addAll(list);
             for(String e : list)
-                traitsLower.add(e.toLowerCase());
+                traitsLower.add(PhpClassNames.key(e, classNameProfile));
         }
     }
 

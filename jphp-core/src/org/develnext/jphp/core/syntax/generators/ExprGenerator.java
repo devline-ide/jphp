@@ -193,13 +193,19 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
                 result.setValue(new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), listExpr));
             } else {
                 ExprStmtToken eValue = analyzer.generator(SimpleExprGenerator.class)
-                        .getToken(next, iterator, null, BraceExprToken.Kind.SIMPLE);
+                        .getToken(next, iterator, null, BraceExprToken.Kind.SIMPLE,
+                                new php.runtime.common.Callback<Boolean,Token>() {
+                                    @Override public Boolean call(Token token) {return token instanceof KeyValueExprToken;}
+                                });
 
                 if (eValue == null) {
                     unexpectedToken(next);
                     return;
                 }
 
+                if (analyzer.getEnvironment()!=null && org.develnext.jphp.core.compiler.common.NullsafeChain.isResult(eValue))
+                    analyzer.getEnvironment().error(eValue.toTraceInfo(analyzer.getContext()),php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,
+                            "Can't use nullsafe operator in write context");
                 Token single = eValue.getLast();
 
                 if (!(single instanceof VariableExprToken
@@ -216,13 +222,19 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
         } else {
             //next = iterator.previous();
             ExprStmtToken eValue = analyzer.generator(SimpleExprGenerator.class)
-                    .getToken(next, iterator, null, BraceExprToken.Kind.SIMPLE);
+                    .getToken(next, iterator, null, BraceExprToken.Kind.SIMPLE,
+                                new php.runtime.common.Callback<Boolean,Token>() {
+                                    @Override public Boolean call(Token token) {return token instanceof KeyValueExprToken;}
+                                });
 
             if (eValue == null) {
                 unexpectedToken(next);
                 return;
             }
 
+            if (analyzer.getEnvironment()!=null && org.develnext.jphp.core.compiler.common.NullsafeChain.isResult(eValue))
+                analyzer.getEnvironment().error(eValue.toTraceInfo(analyzer.getContext()),php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,
+                        "Can't use nullsafe operator in write context");
             Token single = eValue.getLast();
 
             if (!(single instanceof VariableExprToken
@@ -386,6 +398,12 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
     }
 
     protected void processReturn(ReturnStmtToken result, ListIterator<Token> iterator){
+        if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && analyzer.getFunction() != null
+                && analyzer.getFunction().getReturnHintType() == php.runtime.common.HintType.NEVER) {
+            analyzer.getEnvironment().error(result.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                    "A never-returning function must not return");
+        }
         Token next = nextToken(iterator);
 
         if (next instanceof SemicolonToken) {
@@ -395,6 +413,26 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
             result.setEmpty(false);
             ExprStmtToken value = analyzer.generator(SimpleExprGenerator.class)
                     .getToken(next, iterator);
+            if (value != null && analyzer.getFunction() != null && analyzer.getFunction().isReturnReference()
+                    && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                List<Token> path = new ArrayList<>(value.getTokens());
+                int baseEnd = path.size();
+                while (baseEnd > 0 && (path.get(baseEnd - 1) instanceof ArrayGetExprToken
+                        || path.get(baseEnd - 1) instanceof DynamicAccessExprToken)) baseEnd--;
+                if (baseEnd == 1 && path.get(0) instanceof VariableExprToken) {
+                    analyzer.getFunction().variable((VariableExprToken) path.get(0)).setReference(true).setUnstable(true);
+                    for (int i = baseEnd; i < path.size(); i++) {
+                        Token step = path.get(i);
+                        if (step.getClass() == ArrayGetExprToken.class) {
+                            ArrayGetRefExprToken reference = new ArrayGetRefExprToken((ArrayGetExprToken) step);
+                            reference.setShortcut(true);
+                            path.set(i, reference);
+                        }
+                        else if (step.getClass() == DynamicAccessExprToken.class) path.set(i, new DynamicAccessGetRefExprToken((DynamicAccessExprToken) step));
+                    }
+                    value = new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), path);
+                }
+            }
             result.setValue(value);
         }
     }

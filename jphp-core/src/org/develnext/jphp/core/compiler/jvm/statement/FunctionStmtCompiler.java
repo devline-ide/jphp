@@ -32,8 +32,11 @@ public class FunctionStmtCompiler extends StmtCompiler<FunctionEntity> {
         entity.setModule(module);
         entity.setName(statement.getFulledName());
         entity.setReturnReference(statement.isReturnReference());
+        entity.setReturnTypeNullable(statement.isReturnOptional());
 
-        if (statement.getReturnHintTypeClass() != null) {
+        if (statement.getDeclaredReturnType() != null) {
+            entity.setReturnTypeChecker(statement.getDeclaredReturnType());
+        } else if (statement.getReturnHintTypeClass() != null) {
             entity.setReturnTypeChecker(TypeChecker.of(statement.getReturnHintTypeClass().getName()));
         } else if (statement.getReturnHintType() != null) {
             entity.setReturnTypeChecker(TypeChecker.of(statement.getReturnHintType()));

@@ -7,6 +7,7 @@ public class ReturnStmtToken extends StmtToken {
 
     private ExprStmtToken value;
     private boolean empty;
+    private boolean implicit;
 
     public ReturnStmtToken(TokenMeta meta) {
         super(meta, TokenType.T_RETURN);
@@ -26,5 +27,13 @@ public class ReturnStmtToken extends StmtToken {
 
     public void setEmpty(boolean empty) {
         this.empty = empty;
+    }
+
+    public boolean isImplicit() {
+        return implicit;
+    }
+
+    public void setImplicit(boolean implicit) {
+        this.implicit = implicit;
     }
 }

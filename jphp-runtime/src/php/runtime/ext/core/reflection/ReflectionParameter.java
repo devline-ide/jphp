@@ -39,6 +39,7 @@ public class ReflectionParameter extends Reflection implements Reflector {
         if (args[0].isClosure()) {
             ClosureEntity tmp = (ClosureEntity) args[0].toValue(ObjectMemory.class).getReflection();
             parameters = tmp.parameters;
+            functionEntity = tmp.methodMagicInvoke;
         } else if (args[0].isArray()) {
             Invoker invoker = Invoker.valueOf(env, null, args[0]);
             if (invoker == null) {
@@ -46,20 +47,25 @@ public class ReflectionParameter extends Reflection implements Reflector {
                 return Memory.NULL;
             }
             parameters = invoker.getParameters();
+            if (invoker instanceof php.runtime.invoke.DynamicMethodInvoker) functionEntity = ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod();
+            else if (invoker instanceof php.runtime.invoke.StaticMethodInvoker) functionEntity = ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod();
         } else {
             String name = args[0].toString();
-            if (name.contains("::")) {
+            if (name.contains("::") && env.getModuleManager().getPhpLanguageProfile(env.trace()) != php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                 Invoker invoker = Invoker.valueOf(env, null, args[0]);
                 if (invoker == null) {
                     exception(env, "%s does not exists", args[0].toString());
                     return Memory.NULL;
                 }
                 parameters = invoker.getParameters();
+                if (invoker instanceof php.runtime.invoke.DynamicMethodInvoker) functionEntity = ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod();
+                else if (invoker instanceof php.runtime.invoke.StaticMethodInvoker) functionEntity = ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod();
             } else {
                 FunctionEntity tmp = env.fetchFunction(name);
                 functionEntity = tmp;
                 if (tmp == null) {
-                    exception(env, "Function %s does not exist", args[0].toString());
+                    exception(env, env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                            ? "Function %s() does not exist" : "Function %s does not exist", args[0].toString());
                     return Memory.NULL;
                 }
                 if (tmp.isInternal()) {
@@ -111,9 +117,17 @@ public class ReflectionParameter extends Reflection implements Reflector {
         this.position = position;
     }
 
+    private boolean modern(Environment env) {
+        php.runtime.reflection.ModuleEntity module = functionEntity instanceof FunctionEntity ? ((FunctionEntity) functionEntity).getModule()
+                : functionEntity instanceof MethodEntity ? ((MethodEntity) functionEntity).getClazz().getModule() : null;
+        return module != null ? module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                : env.getModuleManager().getPhpLanguageProfile(entity.getTrace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+    }
+
     @Signature
     public Memory allowsNull(Environment env, Memory... args) {
-        return entity.isNullableOrDefaultNull() ? Memory.TRUE : Memory.FALSE;
+        return modern(env) && entity.getTypeChecker() == null || entity.isNullableOrDefaultNull() || entity.getTypeChecker() instanceof php.runtime.reflection.support.PhpTypeDeclaration
+                && ((php.runtime.reflection.support.PhpTypeDeclaration) entity.getTypeChecker()).allowsNull() ? Memory.TRUE : Memory.FALSE;
     }
 
     @Signature
@@ -128,6 +142,12 @@ public class ReflectionParameter extends Reflection implements Reflector {
 
         if (typeChecker == null) {
             return Memory.NULL;
+        }
+
+        if (entity.getTypeChecker() instanceof php.runtime.reflection.support.PhpTypeDeclaration
+                || modern(env)) {
+            return ObjectMemory.valueOf(ReflectionType.fromDeclaration(env,
+                    php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(typeChecker, entity.isNullableOrDefaultNull())));
         }
 
         return ObjectMemory.valueOf(new ReflectionType(
@@ -147,7 +167,7 @@ public class ReflectionParameter extends Reflection implements Reflector {
             return Memory.NULL;
         }
 
-        return entity.getDefaultValue().toImmutable(env, env.trace());
+        return entity.evaluateDefault(env).toImmutable(env, env.trace());
     }
 
     @Signature
@@ -226,7 +246,21 @@ public class ReflectionParameter extends Reflection implements Reflector {
 
     @Signature
     public Memory isOptional(Environment env, Memory... args) {
+        if (modern(env)) {
+            ParameterEntity[] parameters = functionEntity == null ? null : functionEntity.getParameters();
+            if (parameters != null) {
+                int required = 0;
+                for (int i=0; i<parameters.length; i++) if (!parameters[i].isVariadic() && parameters[i].getDefaultValue() == null) required = i + 1;
+                return position >= required ? Memory.TRUE : Memory.FALSE;
+            }
+            if (entity.isVariadic()) return Memory.TRUE;
+        }
         return entity.isOptional() ? Memory.TRUE : Memory.FALSE;
+    }
+
+    @Signature
+    public Memory isVariadic(Environment env, Memory... args) {
+        return entity.isVariadic() ? Memory.TRUE : Memory.FALSE;
     }
 
     @Signature

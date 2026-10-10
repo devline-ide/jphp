@@ -9,6 +9,9 @@ public class MethodStmtToken extends FunctionStmtToken {
     private boolean isAbstract;
     private boolean isFinal;
     private boolean isStatic;
+    private boolean moduleChunk;
+    public boolean isModuleChunk() {return moduleChunk;}
+    public void setModuleChunk(boolean value) {moduleChunk=value;}
 
     private ClassStmtToken clazz;
 
@@ -34,6 +37,7 @@ public class MethodStmtToken extends FunctionStmtToken {
         setTypeInfo(token.getTypeInfo());
         setGeneratorId(token.generatorId);
         setReturnHintType(token.returnHintType);
+        setDeclaredReturnType(token.declaredReturnType);
         setReturnHintTypeClass(token.returnHintTypeClass);
         setReturnOptional(token.returnOptional);
 

@@ -98,4 +98,21 @@ public class ArraysTest extends JvmCompilerCase {
         check("arrays/bug148.php");
         check("arrays/bug_unset_and_ref.php");
     }
+
+    @Test
+    public void testLiteralOffsets() {
+        check("arrays/literal_offsets.php");
+    }
+
+    @Test
+    public void testUnpack() {
+        check("arrays/unpack.php");
+    }
+
+    @Test
+    public void testUnpackInvalidSyntax() {
+        for (String code : new String[]{"$copy = [...1]", "$copy = [...null]", "$copy = [...&$source]", "$copy = [...$source => 1]"}) {
+            Assert.assertThrows(php.runtime.exceptions.support.ErrorException.class, () -> runDynamic(code, false));
+        }
+    }
 }

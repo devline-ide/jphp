@@ -30,6 +30,10 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
     protected IObject getInstance() { return null; }
     abstract protected AbstractFunctionEntity getEntity();
     protected ClosureEntity getClosureEntity() { return null; }
+    private php.runtime.invoke.PhpCallableFactory.CapturedClosure captured() {
+        return getInstance() instanceof php.runtime.invoke.PhpCallableFactory.CapturedClosure
+                ? (php.runtime.invoke.PhpCallableFactory.CapturedClosure) getInstance() : null;
+    }
 
     @Signature
     public Memory getClosureScopeClass(Environment env, Memory... args){
@@ -37,9 +41,23 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
         if (instance == null || !(instance instanceof Closure))
             return Memory.NULL;
         else {
+            Closure closure = (Closure) instance;
+            if (closure.hasPhp8Binding()) {
+                ClassEntity scope = closure.getScope() == null ? null : env.fetchClass(closure.getScope(), false);
+                return scope == null ? Memory.NULL : new ObjectMemory(new ReflectionClass(env).setEntity(scope));
+            }
             // todo: change to ReflectionClass
             return new StringMemory(((Closure) instance).getScope());
         }
+    }
+
+    @Signature
+    public Memory getClosureCalledClass(Environment env, Memory... args) {
+        IObject instance = getInstance();
+        if (!(instance instanceof Closure)) return Memory.NULL;
+        String name = ((Closure) instance).getCalledClass();
+        ClassEntity called = name == null ? null : env.fetchClass(name, false);
+        return called == null ? Memory.NULL : new ObjectMemory(new ReflectionClass(env).setEntity(called));
     }
 
     @Signature
@@ -54,16 +72,18 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory getDocComment(Environment env, Memory... args){
+        if (captured() != null) return getEntity().getDocComment() == null ? Memory.FALSE : new StringMemory(getEntity().getDocComment().toString());
         if (getClosureEntity() != null)
-            return Memory.NULL;
+            return Memory.FALSE;
         if (getEntity().getDocComment() == null)
-            return Memory.NULL;
+            return Memory.FALSE;
 
         return new StringMemory(getEntity().getDocComment().toString());
     }
 
     @Signature
     public Memory getEndLine(Environment env, Memory... args){
+        if (captured() != null) return captured().isInternalCapture() ? Memory.FALSE : LongMemory.valueOf(getEntity().getTrace().getEndLine());
         if (getClosureEntity() != null)
             return LongMemory.valueOf(getClosureEntity().getTrace().getEndLine());
         return LongMemory.valueOf(getEntity().getTrace().getEndLine());
@@ -71,7 +91,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory getExtension(Environment env, Memory... args){
-        if (getClosureEntity() != null)
+        if (getClosureEntity() != null && captured() == null)
             return Memory.NULL;
 
         Extension extension = getEntity().getExtension();
@@ -86,7 +106,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory getExtensionName(Environment env, Memory... args){
-        if (getClosureEntity() != null)
+        if (getClosureEntity() != null && captured() == null)
             return Memory.FALSE;
 
         Extension extension = getEntity().getExtension();
@@ -98,6 +118,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory getFileName(Environment env, Memory... args){
+        if (captured() != null) return captured().isInternalCapture() ? Memory.FALSE : new StringMemory(getEntity().getTrace().getFileName());
         if (getClosureEntity() != null)
             return new StringMemory(getClosureEntity().getTrace().getFileName());
         return new StringMemory(getEntity().getTrace().getFileName());
@@ -105,6 +126,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory getName(Environment env, Memory... args){
+        if (captured() != null) return new StringMemory(captured().getMetadataName());
         if (getClosureEntity() != null)
             return Memory.FALSE;
         return new StringMemory(getEntity().getName());
@@ -112,6 +134,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory getNamespaceName(Environment env, Memory... args){
+        if (captured() != null) return new StringMemory(captured().isMagicCapture() ? "" : getEntity().getNamespaceName());
         if (getClosureEntity() != null)
             return Memory.FALSE;
         return new StringMemory(getEntity().getNamespaceName());
@@ -130,15 +153,19 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
         ParameterEntity[] parameterEntities = getClosureEntity() == null
                 ? getEntity().getParameters() : getClosureEntity().parameters;
 
-        for(ParameterEntity e : parameterEntities){
-            if (e.getDefaultValue() == null)
-                cnt++;
+        boolean modern = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+        for (int i=0; i<parameterEntities.length; i++) {
+            ParameterEntity parameter = parameterEntities[i];
+            if (modern) {
+                if (!parameter.isVariadic() && parameter.getDefaultValue() == null) cnt = i + 1;
+            } else if (parameter.getDefaultValue() == null) cnt++;
         }
         return LongMemory.valueOf(cnt);
     }
 
     @Signature
     public Memory getShortName(Environment env, Memory... args){
+        if (captured() != null) return new StringMemory(captured().isMagicCapture() ? captured().getMetadataName() : getEntity().getShortName());
         if (getClosureEntity() != null)
             return Memory.NULL;
         return new StringMemory(getEntity().getShortName());
@@ -146,6 +173,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory getStartLine(Environment env, Memory... args){
+        if (captured() != null) return captured().isInternalCapture() ? Memory.FALSE : LongMemory.valueOf(getEntity().getTrace().getStartLine() + 1);
         if (getClosureEntity() != null)
             return LongMemory.valueOf(getClosureEntity().getTrace().getStartLine() + 1);
         return LongMemory.valueOf(getEntity().getTrace().getStartLine() + 1);
@@ -165,6 +193,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory inNamespace(Environment env, Memory... args){
+        if (captured() != null) return !captured().isMagicCapture() && !getEntity().getNamespaceName().isEmpty() ? Memory.TRUE : Memory.FALSE;
         if (getClosureEntity() != null)
             return Memory.FALSE;
         return getEntity().getNamespaceName().isEmpty() ? Memory.FALSE : Memory.TRUE;
@@ -177,6 +206,7 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory isDeprecated(Environment env, Memory... args){
+        if (captured() != null) return getEntity().isDeprecated() ? Memory.TRUE : Memory.FALSE;
         if (getClosureEntity() != null)
             return Memory.FALSE;
         return getEntity().isDeprecated() ? Memory.TRUE : Memory.FALSE;
@@ -184,12 +214,12 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory isInternal(Environment env, Memory... args){
-        return getEntity() instanceof CompileFunctionEntity ? Memory.TRUE : Memory.FALSE;
+        return (captured() != null ? captured().isInternalCapture() : getEntity() instanceof CompileFunctionEntity) ? Memory.TRUE : Memory.FALSE;
     }
 
     @Signature
     public Memory isUserDefined(Environment env, Memory... args){
-        return getEntity() instanceof CompileFunctionEntity ? Memory.FALSE : Memory.TRUE;
+        return (captured() != null ? captured().isInternalCapture() : getEntity() instanceof CompileFunctionEntity) ? Memory.FALSE : Memory.TRUE;
     }
 
     @Signature
@@ -201,15 +231,27 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     @Signature
     public Memory hasReturnType(Environment env, Memory... args) {
+        if (captured() != null && captured().isMagicCapture()) return Memory.FALSE;
         return getEntity().getReturnTypeChecker() != null ? Memory.TRUE : Memory.FALSE;
     }
 
     @Signature
     public Memory getReturnType(Environment env, Memory... args) {
+        if (captured() != null && captured().isMagicCapture()) return Memory.NULL;
         TypeChecker typeChecker = getEntity().getReturnTypeChecker();
 
         if (typeChecker == null) {
             return Memory.NULL;
+        }
+
+        if (getEntity() instanceof php.runtime.reflection.FunctionEntity
+                && ((php.runtime.reflection.FunctionEntity) getEntity()).getModule() != null
+                && ((php.runtime.reflection.FunctionEntity) getEntity()).getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                || getEntity() instanceof php.runtime.reflection.MethodEntity
+                && ((php.runtime.reflection.MethodEntity) getEntity()).getClazz().getModule() != null
+                && ((php.runtime.reflection.MethodEntity) getEntity()).getClazz().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            return ObjectMemory.valueOf(ReflectionType.fromDeclaration(env,
+                    php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(typeChecker, getEntity().isReturnTypeNullable())));
         }
 
         String name = typeChecker.getSignature();

@@ -13,7 +13,7 @@ public class IssetCompiler extends BaseExprCompiler<IssetExprToken> {
 
     @Override
     public void write(IssetExprToken token, boolean returnValue) {
-        expr.writePushParameters(token.getParameters());
+        expr.writeQuietly(token.getParameters(), () -> expr.writePushParameters(token.getParameters()));
         expr.writeSysStaticCall(OperatorUtils.class, "isset", Boolean.TYPE, Memory[].class);
 
         if (!returnValue)

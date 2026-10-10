@@ -159,7 +159,8 @@ public enum TokenType {
     T_J_BOOLEAN_XOR(1017),
     T_J_BINARY_CAST(1018),
     T_J_POW(1019),
-    T_J_POW_EQUAL(1020);
+    T_J_POW_EQUAL(1020),
+    T_J_PIPE(1021);
 
     private int value;
     private static Map<Integer, TokenType> map = new HashMap<Integer, TokenType>();

@@ -48,11 +48,7 @@ public class ResourceStream extends Stream {
         super.__construct(env, args[0], StringMemory.valueOf("r"));
         //long t = System.currentTimeMillis();
 
-        String path = this.getPath().replace('\\', '/').replace("//", "/");
-
-        if (path.startsWith("/")) {
-            path = path.substring(1);
-        }
+        String path = normalizeResourcePath(this.getPath());
 
         setPath("res://" + path);
 
@@ -67,6 +63,21 @@ public class ResourceStream extends Stream {
         //System.err.println(path + ", time = " + (System.currentTimeMillis() - t));
 
         return Memory.NULL;
+    }
+
+    public static String normalizeResourcePath(String path) throws IOException {
+        String name = path.replace('\\', '/');
+        java.util.ArrayDeque<String> parts = new java.util.ArrayDeque<>();
+        for (String part : name.split("/")) {
+            if (part.isEmpty() || part.equals(".")) continue;
+            if (part.equals("..")) {
+                if (parts.isEmpty()) throw new IOException("Resource path escapes its root: " + path);
+                parts.removeLast();
+            } else parts.addLast(part);
+        }
+        String result = String.join("/", parts);
+        if (!result.isEmpty() && (name.endsWith("/") || name.endsWith("/.") || name.endsWith("/.."))) result += "/";
+        return result;
     }
 
     @Signature
@@ -154,7 +165,9 @@ public class ResourceStream extends Stream {
             name = name.substring(6);
         }
 
-        return env.getScope().getClassLoader().getResource(name) == null ? Memory.FALSE : Memory.TRUE;
+        try {
+            return env.getScope().getClassLoader().getResource(normalizeResourcePath(name)) == null ? Memory.FALSE : Memory.TRUE;
+        } catch (IOException invalid) { return Memory.FALSE; }
     }
 
     @Signature(@Arg("name"))

@@ -6,7 +6,8 @@ import java.util.HashMap;
 import java.util.Map;
 
 public enum HintType {
-    ANY, STRING, INT, DOUBLE, NUMBER, BOOLEAN, ARRAY, OBJECT, CALLABLE, VARARG, TRAVERSABLE, ITERABLE, VOID, SELF;
+    ANY, STRING, INT, DOUBLE, NUMBER, BOOLEAN, ARRAY, OBJECT, CALLABLE, VARARG, TRAVERSABLE, ITERABLE, VOID, SELF,
+    MIXED, NEVER, STATIC, PARENT;
 
     public String toString(){
         switch (this){
@@ -22,6 +23,10 @@ public enum HintType {
             case ITERABLE: return "iterable";
             case VOID: return "void";
             case SELF: return "self";
+            case MIXED: return "mixed";
+            case NEVER: return "never";
+            case STATIC: return "static";
+            case PARENT: return "parent";
             default:
                 return "";
         }

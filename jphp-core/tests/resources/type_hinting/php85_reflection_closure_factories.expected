@@ -1,0 +1,18 @@
+function-distinct:1|function
+function-binding:[true,true,true,false]
+function-binding:[true,true,true,false]
+method-distinct:1|A|B|C
+method-binding:["A","ReflectedOwner","ReflectedOwner",false]
+method-binding:["C","ReflectedOwner","ReflectedChild",false]
+rebound:B
+warning:Cannot bind method ReflectedOwner::value() to object of class ReflectedForeign, this will be an error in PHP 9
+foreign:1
+warning:Cannot unbind $this of method, this will be an error in PHP 9
+unbound:1
+warning:Cannot rebind scope of closure created from method, this will be an error in PHP 9
+rescope:1
+function-bind:0
+static-binding:["static",true,"ReflectedOwner","ReflectedOwner",true]
+static-binding:["static",true,"ReflectedOwner","ReflectedOwner",true]
+static-binding:["static",true,"ReflectedOwner","ReflectedOwner",true]
+function-ref:7

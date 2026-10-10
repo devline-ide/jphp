@@ -14,6 +14,8 @@ import org.develnext.jphp.core.tokenizer.token.stmt.*;
 import php.runtime.common.LangMode;
 import php.runtime.common.Messages;
 import php.runtime.common.Modifier;
+import php.runtime.common.PhpLanguageProfile;
+import php.runtime.common.PhpClassNames;
 import org.develnext.jphp.core.common.Separator;
 import php.runtime.common.StringUtils;
 import php.runtime.env.Package;
@@ -24,6 +26,10 @@ import php.runtime.reflection.ClassEntity;
 import java.util.*;
 
 public class ClassGenerator extends Generator<ClassStmtToken> {
+
+    private static final Set<String> php8ReservedTypeNames = new HashSet<>(Arrays.asList(
+            "int", "float", "bool", "string", "array", "object", "callable", "iterable", "void", "mixed",
+            "never", "true", "false", "null", "self", "parent", "static"));
 
     @SuppressWarnings("unchecked")
     private final static Class<? extends Token>[] modifiers = new Class[]{
@@ -51,6 +57,11 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
     protected void processName(ClassStmtToken result, ListIterator<Token> iterator){
         Token name = nextTokenSensitive(iterator);
         if (name instanceof NameToken){
+            if (analyzer.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5
+                    && php8ReservedTypeNames.contains(((NameToken) name).getName().toLowerCase(Locale.ROOT))) {
+                analyzer.getEnvironment().error(name.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                        "Cannot use '%s' as class name as it is reserved", name.getWord());
+            }
             result.setName((NameToken)name);
             if (name instanceof ParentExprToken)
                 unexpectedToken(name);
@@ -323,7 +334,7 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                     cls = nextAndExpected(iterator, NameToken.class);
                     cls = analyzer.getRealName(cls);
 
-                    if (!namesLower.add(cls.getName().toLowerCase())) {
+                    if (!namesLower.add(PhpClassNames.key(cls.getName(), analyzer.getPhpLanguageProfile()))) {
                         analyzer.getEnvironment().error(
                                 iterator.previous().toTraceInfo(analyzer.getContext()),
                                 ErrorType.E_ERROR,
@@ -379,11 +390,35 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
 
                 while (iterator.hasNext()){
                     Token current = iterator.next();
+                    php.runtime.reflection.support.PhpTypeDeclaration propertyType = null;
+                    boolean modernProperty = analyzer.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+                    boolean typeStart = current instanceof NameToken || current.getWord().equals("?") || current.getWord().equals("(")
+                            || php.runtime.reflection.support.PhpTypeDeclaration.BUILTINS.contains(current.getWord().toLowerCase(Locale.ROOT))
+                            || current.getWord().equalsIgnoreCase("self") || current.getWord().equalsIgnoreCase("parent");
+                    if (modernProperty && typeStart) {
+                        if (modifiers.isEmpty()) {
+                            analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_PARSE,
+                                    "syntax error, unexpected " + ((current instanceof NameToken && !current.getWord().equalsIgnoreCase("callable")) || current.getWord().equalsIgnoreCase("self") ? "identifier" : "token")
+                                            + " \"" + current.getWord() + "\", expecting \"function\"");
+                        }
+                        if (result.isInterface()) analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                                "Interfaces may only include hooked properties");
+                        for (Token modifier : modifiers) if (modifier instanceof AbstractStmtToken)
+                            analyzer.getEnvironment().error(modifier.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                                    "Only hooked properties may be declared abstract");
+                        List<Token> typeTokens = new ArrayList<>();
+                        while (!(current instanceof VariableExprToken)) {
+                            if (!(current instanceof CommentToken)) typeTokens.add(current); current = nextToken(iterator);
+                        }
+                        propertyType = PhpTypeDeclarationParser.parseProperty(analyzer, typeTokens,
+                                result.getFulledName() + "::$" + ((VariableExprToken) current).getName());
+                    }
                     if (current instanceof ExprStmtToken)
                         unexpectedToken(current, "expression");
 
                     if (current instanceof ConstStmtToken) {
-                        if (result.isTrait()) {
+                        if (result.isTrait() && analyzer.getPhpLanguageProfile()
+                                != php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                             unexpectedToken(current);
                         }
 
@@ -399,6 +434,9 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                                 one.setModifier(Modifier.PROTECTED);
                             } else if (modifier instanceof PublicStmtToken) {
                                 one.setModifier(Modifier.PUBLIC);
+                            } else if (modifier instanceof FinalStmtToken && analyzer.getPhpLanguageProfile()
+                                    == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                                one.setFinal(true);
                             } else {
                                 unexpectedToken(modifier);
                             }
@@ -410,12 +448,20 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                         modifiers.clear();
                     } else if (isTokenClass(current, ClassGenerator.modifiers)){
                         for(Token modifier : modifiers){
+                            if (modernProperty && modifier instanceof VarStmtToken)
+                                analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_PARSE,
+                                        "syntax error, unexpected token \"" + current.getWord() + "\", expecting variable");
+                            if (modernProperty && modifier instanceof StaticExprToken && current instanceof StaticExprToken)
+                                analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                                        "Multiple static modifiers are not allowed");
                             if (modifier.getType() == current.getType())
                                 unexpectedToken(current);
                         }
                         modifiers.add(current);
                     } else if (current instanceof VariableExprToken) {
                         if (result.isInterface()) {
+                            if (modernProperty) analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                                    "Interfaces may only include hooked properties");
                             analyzer.getEnvironment().error(
                                     result.toTraceInfo(analyzer.getContext()),
                                     ErrorType.E_ERROR,
@@ -424,7 +470,10 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                         }
 
                         for(Token modifier : modifiers){
-                            if (isTokenClass(modifier, FinalStmtToken.class, AbstractStmtToken.class)) {
+                            if (modernProperty && modifier instanceof AbstractStmtToken)
+                                analyzer.getEnvironment().error(modifier.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                                        "Only hooked properties may be declared abstract");
+                            if (modifier instanceof AbstractStmtToken || modifier instanceof FinalStmtToken && !modernProperty) {
                                 unexpectedToken(modifier);
                             }
                         }
@@ -433,6 +482,10 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                                 result, (VariableExprToken) current, modifiers, iterator
                         );
 
+                        for (ClassVarStmtToken var : vars) {
+                            var.setDeclaredType(propertyType);
+                            for (Token modifier : modifiers) if (modifier instanceof FinalStmtToken) var.setFinal(true);
+                        }
                         if (lastComment != null) {
                             for (ClassVarStmtToken var : vars) {
                                 var.setDocComment(lastComment);
@@ -581,6 +634,7 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
             if (analyzer.getClazz() != null)
                 unexpectedToken(current);
 
+            result.setClassNameProfile(analyzer.getPhpLanguageProfile());
             analyzer.setClazz(result);
             result.setNamespace(analyzer.getNamespace());
 

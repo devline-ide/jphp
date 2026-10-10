@@ -1,9 +1,12 @@
 package php.runtime.loader;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.Memory;
 import php.runtime.Startup;
 import php.runtime.common.Callback;
 import php.runtime.common.LangMode;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.env.*;
 import php.runtime.env.handler.EntityFetchHandler;
 import php.runtime.exceptions.CriticalException;
@@ -22,6 +25,7 @@ import php.runtime.reflection.helper.GeneratorEntity;
 import php.runtime.reflection.support.ReflectionUtils;
 
 import java.io.File;
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.net.URL;
@@ -46,7 +50,7 @@ public class StandaloneLoader {
         scope.addClassEntityFetchHandler(new EntityFetchHandler() {
             @Override
             public void fetch(CompileScope scope, String originName, String name) {
-                ModuleEntity module = fetchClass(name);
+                ModuleEntity module = fetchClass(originName);
 
                 if (module != null) {
                         loadModule(module);
@@ -175,6 +179,9 @@ public class StandaloneLoader {
                 scope.setLangMode(
                         LangMode.valueOf(getConfigValue("env.langMode", LangMode.MODERN.name()).toString().toUpperCase())
                 );
+                scope.setPhpLanguageProfile(PhpLanguageProfile.valueOf(
+                        getConfigValue("env.phpProfile", PhpLanguageProfile.JPHP_LEGACY.name()).toString().toUpperCase(java.util.Locale.ROOT)
+                ));
             } catch (IOException e) {
                 throw new LaunchException(e.getMessage());
             }
@@ -226,6 +233,10 @@ public class StandaloneLoader {
     }
 
     protected ModuleEntity _fetch(String name, Map<String, StandaloneLibrary.Module> source) {
+        return _fetch(name, source, false);
+    }
+
+    private ModuleEntity _fetch(String name, Map<String, StandaloneLibrary.Module> source, boolean rejectModern) {
         StandaloneLibrary.Module module = source.get(name);
 
         if (module == null) {
@@ -247,8 +258,13 @@ public class StandaloneLoader {
                 new Context(new File(module.getInternalName())), env, true
         );
 
-        try {
-            return moduleDumper.load(input);
+        try (BufferedInputStream buffered = new BufferedInputStream(input)) {
+            if (rejectModern) {
+                buffered.mark(16);
+                if (ModuleDumper.readLanguageProfileHeader(buffered) == PhpLanguageProfile.PHP_8_5) return null;
+                buffered.reset();
+            }
+            return moduleDumper.load(buffered);
         } catch (IOException e) {
             throw new CriticalException(e);
         }
@@ -275,7 +291,18 @@ public class StandaloneLoader {
             throw new CriticalException("Standalone library is not loaded");
         }
 
-        return _fetch(name.toLowerCase(), library.getClassModules());
+        String canonical = PhpClassNames.canonicalKey(name);
+        var frame = php.runtime.PhpPropertyWriteContext.current(null);
+        boolean modern = frame == null ? scope.isModernClassLookup() : PhpClassNames.isModern(frame.environment);
+        ClassEntity loaded = scope.getClassMap().get(canonical);
+        if (loaded != null && (modern || PhpClassNames.isModern(loaded))) return null;
+        ModuleEntity exact = _fetch(canonical, library.getClassModules());
+        if (modern || exact != null && exact.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) return exact;
+        StandaloneLibrary.Module legacy = library.findLegacyClassModule(name);
+        StandaloneLibrary.Module original = library.getClassModules().get(canonical);
+        if (legacy == original) return exact;
+        // The header gate runs before ClassDumper can autoload any dependencies.
+        return legacy == null ? null : _fetch(legacy.getName(), library.getModules(), true);
     }
 
     public ModuleEntity fetchFunction(String name) {

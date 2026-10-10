@@ -146,7 +146,9 @@ abstract public class Generator<T extends Token> {
             return token;
         }
 
-        if (token.isNamedToken()) {
+        if (token.isNamedToken() || token instanceof org.develnext.jphp.core.tokenizer.token.stmt.LambdaStmtToken
+                && analyzer.getPhpLanguageProfile()
+                    == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
             return new NameToken(token.getMeta());
         }
 
@@ -168,11 +170,7 @@ abstract public class Generator<T extends Token> {
             return token;
         }
 
-        if (token.isNamedToken()) {
-            return new NameToken(token.getMeta());
-        }
-
-        return token;
+        return makeSensitive(token);
     }
 
     protected Token nextToken(ListIterator<Token> iterator){

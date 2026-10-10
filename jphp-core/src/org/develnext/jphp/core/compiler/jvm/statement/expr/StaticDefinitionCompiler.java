@@ -73,6 +73,19 @@ public class StaticDefinitionCompiler extends BaseStatementCompiler<StaticStmtTo
                 String.class, Memory.class);
 
         add(end);
-        expr.writeVarStore(local, false, false);
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5 && !method.isExternal()) {
+            // A closure static CV borrows the table slot until PHP actually exports a reference.
+            // Promoting it here makes ordinary statics share a CELL across closure clones.
+            if (!isClosure)
+                expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "exportReference", Memory.class, Memory.class);
+            if (methodStatement.isDynamicLocal()) {
+                expr.writeVarLoad(local);
+                expr.writeSysStaticCall(Memory.class, "assignRefRight", Memory.class, Memory.class, Memory.class);
+                expr.writePopAll(1);
+            } else {
+                expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "valueOf", Memory.class, Memory.class);
+                expr.writeVarStore(local, false, false);
+            }
+        } else expr.writeVarStore(local, false, false);
     }
 }

@@ -7,6 +7,7 @@ import org.develnext.jphp.core.tokenizer.token.expr.value.StringExprToken;
 import org.develnext.jphp.core.tokenizer.token.stmt.EchoRawToken;
 import php.runtime.common.Directive;
 import php.runtime.common.Messages;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.env.Context;
 import php.runtime.env.TraceInfo;
 import php.runtime.exceptions.ParseException;
@@ -18,6 +19,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Tokenizer {
     protected Context context;
@@ -34,6 +36,7 @@ public class Tokenizer {
     protected Token prevToken;
 
     protected boolean rawMode;
+    private PhpLanguageProfile phpLanguageProfile = PhpLanguageProfile.JPHP_LEGACY;
 
     protected Map<String, Directive> directives = new HashMap<String, Directive>();
 
@@ -83,7 +86,11 @@ public class Tokenizer {
         return code;
     }
 
-    protected final static Map<Class<?>, Constructor> tokenConstructors = new HashMap<Class<?>, Constructor>();
+    public void setPhpLanguageProfile(PhpLanguageProfile profile) {
+        phpLanguageProfile = profile;
+    }
+
+    protected final static Map<Class<?>, Constructor> tokenConstructors = new ConcurrentHashMap<Class<?>, Constructor>();
 
     @SuppressWarnings("unchecked")
     protected <T extends Token> T buildToken(Class<T> clazz, TokenMeta meta){
@@ -591,14 +598,15 @@ public class Tokenizer {
     }
 
     protected Token readNumber(int startPosition, int startLine){
+        if (phpLanguageProfile == PhpLanguageProfile.PHP_8_5) return readPhpNumber(startPosition, startLine);
         int i;
         boolean dot = false;
         boolean e_char = false;
 
         i = currentPosition;
         boolean isHex = code.charAt(i) == '0'
-                && (i < codeLength && Character.toLowerCase(code.charAt(i + 1)) == 'x');
-        boolean isBinary = code.charAt(i) == '0' && (i < codeLength && code.charAt(i + 1) == 'b');
+                && (i + 1 < codeLength && Character.toLowerCase(code.charAt(i + 1)) == 'x');
+        boolean isBinary = code.charAt(i) == '0' && (i + 1 < codeLength && code.charAt(i + 1) == 'b');
         if (isHex || isBinary)
             i += 2;
 
@@ -643,8 +651,35 @@ public class Tokenizer {
         return buildToken(tokenClazz, meta);
     }
 
+    private Token readPhpNumber(int startPosition, int startLine) {
+        int start = currentPosition, i = start;
+        char prefix = i + 1 < codeLength && code.charAt(i) == '0' ? Character.toLowerCase(code.charAt(i + 1)) : 0;
+        boolean based = prefix == 'x' || prefix == 'b' || prefix == 'o';
+        if (based) i += 2;
+        boolean dot = false, exponent = false;
+        for (; i < codeLength; i++) {
+            char ch = code.charAt(i);
+            if (ch >= '0' && ch <= '9' || ch == '_' || prefix == 'x' && (ch >= 'a' && ch <= 'f' || ch >= 'A' && ch <= 'F')) continue;
+            if (!based && !dot && !exponent && ch == '.') { dot = true; continue; }
+            if (!based && !exponent && (ch == 'e' || ch == 'E')) {
+                int digit = i + 1;
+                if (digit < codeLength && (code.charAt(digit) == '+' || code.charAt(digit) == '-')) digit++;
+                if (digit < codeLength && code.charAt(digit) >= '0' && code.charAt(digit) <= '9') {
+                    exponent = true; i = digit - 1; continue;
+                }
+            }
+            break;
+        }
+        relativePosition += i - start - 1;
+        currentPosition = i;
+        TokenMeta meta = buildMeta(startPosition, startLine);
+        currentPosition--;
+        return prevToken = PhpNumericLiteral.parse(meta, context);
+    }
+
     public Token nextToken(){
         boolean init = false;
+        boolean splitVariable = false;
         char ch = '\0';
         char prev_ch = '\0';
         int startPosition = currentPosition + 1;
@@ -709,13 +744,18 @@ public class Tokenizer {
             if (first && (!init || prevToken == null)){
                 // numbers: integers, doubles, hex
                 if (Character.isDigit(ch)
-                        || (ch == '.' && prevToken == null
+                        || (ch == '.' && (prevToken == null || phpLanguageProfile == PhpLanguageProfile.PHP_8_5)
                                 && currentPosition + 1 < codeLength
                                 && Character.isDigit(code.charAt(currentPosition + 1)))){
                     return readNumber(startPosition, startLine);
                 }
 
                 // comments
+                if (ch == '#' && currentPosition + 1 < codeLength && code.charAt(currentPosition + 1) == '['
+                        && phpLanguageProfile == PhpLanguageProfile.PHP_8_5) {
+                    throw new ParseException("Attributes are not yet supported by the PHP_8_5 profile",
+                            new TraceInfo(context, currentLine, currentLine, relativePosition, relativePosition + 2));
+                }
                 comment = CommentToken.Kind.isComment(ch, prev_ch);
                 if (comment != null) {
                     return readComment(comment, startPosition, startLine);
@@ -765,6 +805,11 @@ public class Tokenizer {
 
                 break;
             } else if (TokenizeGrammarUtils.isVariableChar(ch)){
+                if (phpLanguageProfile == PhpLanguageProfile.PHP_8_5 && currentPosition > startPosition
+                        && !TokenizeGrammarUtils.isVariableChar(prev_ch)) {
+                    splitVariable = true;
+                    break;
+                }
                 if (TokenizeGrammarUtils.isVariableChar(prev_ch)){
                     currentPosition -= 1;
                     break;
@@ -774,7 +819,7 @@ public class Tokenizer {
 
         TokenMeta meta = buildMeta(startPosition, startLine);
         
-        if (currentPosition != startPosition && TokenizeGrammarUtils.isDelimiter(ch)) {
+        if (currentPosition != startPosition && (TokenizeGrammarUtils.isDelimiter(ch) || splitVariable)) {
             checkNewLine(ch, true);
             currentPosition -= 1;
             relativePosition -= 1;

@@ -1,11 +1,13 @@
 sourceSets {
+    test.java.srcDirs = ["src/main/tests"]
     test.resources.srcDirs = ["src/main/tests"]
 }
 
 dependencies {
     compileOnly project(':jphp-core')
-    compileOnly project(':exts:jphp-json-ext')
+    api project(':exts:jphp-json-ext')
 
     testImplementation 'junit:junit:4.+'
+    testImplementation project(':jphp-core')
     testImplementation project.project(':jphp-core').sourceSets.test.output
 }

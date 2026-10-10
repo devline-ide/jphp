@@ -142,14 +142,22 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
 
     @Signature
     public Memory __destruct(Environment env, Memory... args) {
-        if (isInit) {
-            if (closed == null) {
-                closed = ClosedType.DEFAULT;
+        try {
+            if (isInit) {
+                if (closed == null) {
+                    closed = ClosedType.DEFAULT;
+                }
+                newThrow = new FinallyException();
+                _next(env);
             }
-            newThrow = new FinallyException();
-            _next(env);
+            return Memory.NULL;
+        } finally {
+            try {
+                iterator.close();
+            } catch (java.io.IOException failure) {
+                throw new CriticalException(failure);
+            }
         }
-        return Memory.NULL;
     }
 
     @Override

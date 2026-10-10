@@ -14,6 +14,7 @@ import org.objectweb.asm.tree.TypeInsnNode;
 import php.runtime.Memory;
 import php.runtime.env.Environment;
 import php.runtime.lang.IObject;
+import php.runtime.lang.Closure;
 import php.runtime.memory.ObjectMemory;
 import php.runtime.memory.StringMemory;
 import php.runtime.reflection.ClassEntity;
@@ -54,6 +55,10 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
 
             if (!param.isReference())
                 expr.writePopBoxing(true);
+            else if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                expr.writePopBoxing(false);
+                expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "exportReference", Memory.class, Memory.class);
+            }
 
             add(new InsnNode(AASTORE));
             expr.stackPop();
@@ -64,7 +69,12 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
     }
 
     protected void writeContext() {
-        if (method.clazz.getClassContext() != null && method.clazz.getClassContext().isTrait()) {
+        if (method.isInitializer() && method.clazz.getEntity().isTrait()
+                && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            expr.writePushEnv();
+            expr.writePushTraceInfo(method.clazz.statement);
+            expr.writeSysDynamicCall(Environment.class, "__getSelf", String.class, php.runtime.env.TraceInfo.class);
+        } else if (method.clazz.getClassContext() != null && method.clazz.getClassContext().isTrait()) {
             expr.writePushEnv();
             expr.writeSysDynamicCall(Environment.class, "__getMacroClass", Memory.class);
             expr.writePopString();
@@ -87,8 +97,11 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
             ClosureEntity entity = compiler.getModule().findClosure( closure.getId() );
             boolean thisExists = closure.getFunction().isThisExists();
             boolean staticExists = closure.getFunction().isStaticExists();
+            boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+            if (modern) thisExists = !closure.isStaticClosure() && (thisExists || closure.getOwnerClass() != null);
 
-            if (closure.getFunction().getUses().isEmpty() && !thisExists && !staticExists
+            if (compiler.getModule().getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && closure.getFunction().getUses().isEmpty() && !thisExists && !staticExists
                     && closure.getFunction().getStaticLocal().isEmpty()){
                 expr.writePushEnv();
                 expr.writePushConstString(compiler.getModule().getInternalName());
@@ -139,6 +152,14 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
                 expr.stackPop();
                 expr.stackPop();
 
+                if (modern) {
+                    expr.writePushDup();
+                    expr.writePushConstBoolean(closure.isStaticClosure());
+                    expr.writeSysDynamicCall(Closure.class, "setStaticClosure", void.class, Boolean.TYPE);
+                    expr.writePushDup();
+                    expr.writePushConstBoolean(closure.getFunction().isThisExists());
+                    expr.writeSysDynamicCall(Closure.class, "setUsesThis", void.class, Boolean.TYPE);
+                }
                 expr.writeSysStaticCall(ObjectMemory.class, "valueOf", Memory.class, IObject.class);
             }
             expr.setStackPeekAsImmutable();

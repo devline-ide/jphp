@@ -11,6 +11,8 @@ import php.runtime.reflection.*;
 import php.runtime.reflection.helper.GeneratorEntity;
 
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.lang.reflect.InvocationTargetException;
@@ -126,8 +128,19 @@ public class ClassDumper extends Dumper<ClassEntity> {
             printer.writeRawData(null);
         }
 
-        // addition raw data
-        printer.writeRawData(null);
+        // Preserve deferred compatibility checks for non-foldable trait values.
+        ByteArrayOutputStream metadata = new ByteArrayOutputStream();
+        DumpOutputStream attributes = new DumpOutputStream(metadata);
+        attributes.writeInt(3);
+        attributes.writeBoolean(entity.hasDeferredInitialization());
+        attributes.writeInt(entity.getTraitConstantChecks().size());
+        for (ClassEntity.TraitConstantCheck check : entity.getTraitConstantChecks()) {
+            attributes.writeName(check.name);
+            attributes.writeName(check.trait);
+            attributes.writeMemory(check.value);
+            attributes.writeName(check.owner);
+        }
+        printer.writeRawData(metadata.toByteArray());
     }
 
     @Override
@@ -144,6 +157,7 @@ public class ClassDumper extends Dumper<ClassEntity> {
             throw new RuntimeException(e);
         }
         entity.setId(env.scope.nextClassIndex());
+        entity.setModule(module);
 
         String docComment = data.readUTF();
 
@@ -165,7 +179,7 @@ public class ClassDumper extends Dumper<ClassEntity> {
         if (parent != null){
             ClassEntity parentEntity = module == null ? null : module.findClass(parent);
             if (parentEntity == null) {
-                parentEntity = env.fetchClass(parent, true);
+                parentEntity = env.fetchClass(parent, true, module == null ? env.getScope().getPhpLanguageProfile() : module.getPhpLanguageProfile());
             }
 
             if (parentEntity == null) {
@@ -219,7 +233,7 @@ public class ClassDumper extends Dumper<ClassEntity> {
 
             ClassEntity interfaceEntity = module == null ? null : module.findClass(name);
             if (interfaceEntity == null)
-                interfaceEntity = env.fetchClass(name, true);
+                interfaceEntity = env.fetchClass(name, true, module == null ? env.getScope().getPhpLanguageProfile() : module.getPhpLanguageProfile());
 
             if (interfaceEntity == null)
                 env.error(env.trace(), ErrorType.E_ERROR, Messages.ERR_INTERFACE_NOT_FOUND, name);
@@ -235,7 +249,7 @@ public class ClassDumper extends Dumper<ClassEntity> {
 
             ClassEntity traitEntity = module == null ? null : module.findClass(name);
             if (traitEntity == null)
-                traitEntity = env.fetchClass(name, true);
+                traitEntity = env.fetchClass(name, true, module == null ? env.getScope().getPhpLanguageProfile() : module.getPhpLanguageProfile());
 
             if (traitEntity == null)
                 env.error(env.trace(), ErrorType.E_ERROR, Messages.ERR_TRAIT_NOT_FOUND, name);
@@ -246,7 +260,21 @@ public class ClassDumper extends Dumper<ClassEntity> {
         }
 
         entity.setData(data.readRawData(Integer.MAX_VALUE));
-        data.readRawData();
+        byte[] metadata = data.readRawData();
+        if (metadata != null && metadata.length != 0) {
+            DumpInputStream attributes = new DumpInputStream(new ByteArrayInputStream(metadata));
+            int version = attributes.readInt();
+            if (version < 1 || version > 3) throw new DumpException("Unsupported class metadata version");
+            if (version >= 3) entity.setDeferredInitialization(attributes.readBoolean());
+            int checks = attributes.readInt();
+            if (checks < 0 || checks > 65535) throw new DumpException("Invalid trait constant check count");
+            for (int i = 0; i < checks; i++) {
+                String name = attributes.readName(), trait = attributes.readName();
+                php.runtime.Memory value = attributes.readMemory();
+                entity.addTraitConstantCheck(name, trait, value, version >= 2 ? attributes.readName() : null);
+            }
+            if (attributes.available() != 0) throw new DumpException("Invalid class metadata size");
+        }
 
         entity.doneDeclare();
         return entity;

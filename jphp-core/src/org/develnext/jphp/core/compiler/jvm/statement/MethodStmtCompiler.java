@@ -6,6 +6,7 @@ import org.develnext.jphp.core.compiler.jvm.misc.JumpItem;
 import org.develnext.jphp.core.compiler.jvm.misc.LocalVariable;
 import org.develnext.jphp.core.compiler.jvm.node.MethodNodeImpl;
 import org.develnext.jphp.core.tokenizer.TokenMeta;
+import org.develnext.jphp.core.tokenizer.token.Token;
 import org.develnext.jphp.core.tokenizer.token.expr.value.NameToken;
 import org.develnext.jphp.core.tokenizer.token.expr.value.StaticAccessExprToken;
 import org.develnext.jphp.core.tokenizer.token.stmt.*;
@@ -52,10 +53,15 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
     private int stackMaxSize = 0;
 
     private Map<String, LabelNode> gotoLabels;
+    private Map<Token, JumpScope> lexicalJumpScopes;
+    private final Stack<BodyStmtToken> activeFinallyBodies = new Stack<>();
+    private final Stack<Map<String, LabelNode>> finallyGotoLabels = new Stack<>();
     private Map<String, LocalVariable> localVariables;
+    private int nextLocalIndex;
     protected String realName;
 
     private boolean external = false;
+    private boolean initializer;
 
     private long methodId;
     private LabelNode labelStart;
@@ -114,6 +120,10 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
         this.realName = realName;
     }
 
+    public boolean isInitializer() { return initializer; }
+
+    public void setInitializer(boolean initializer) { this.initializer = initializer; }
+
     public boolean isExternal() {
         return external;
     }
@@ -159,7 +169,9 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
     }
 
     public void pushJump(LabelNode breakLabel, LabelNode continueLabel, int stackSize){
-        jumpStack.add(new JumpItem(breakLabel, continueLabel, stackSize));
+        List<TryStmtToken> scopes = new ArrayList<>();
+        for (TryCatchItem item : tryStack) scopes.add(item.getToken());
+        jumpStack.add(new JumpItem(breakLabel, continueLabel, stackSize, scopes, activeFinallyBodies));
     }
 
     public void pushJump(LabelNode breakLabel, LabelNode continueLabel){
@@ -227,6 +239,10 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
     public LabelNode getOrCreateGotoLabel(String name) {
         name = name.toLowerCase();
+        for (int i = finallyGotoLabels.size() - 1; i >= 0; i--) {
+            LabelNode local = finallyGotoLabels.get(i).get(name);
+            if (local != null) return local;
+        }
         if (gotoLabels == null)
             gotoLabels = new HashMap<String, LabelNode>();
 
@@ -237,13 +253,148 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
         return label;
     }
 
+    private static boolean containsIdentity(Collection<?> scopes, Object scope) {
+        for (Object candidate : scopes) if (candidate == scope) return true;
+        return false;
+    }
+
+    private static boolean sameIdentityScopes(List<?> left, List<?> right) {
+        if (left.size() != right.size()) return false;
+        for (int i = 0; i < left.size(); i++) if (left.get(i) != right.get(i)) return false;
+        return true;
+    }
+
+    public LabelNode routeFinallyExit(LabelNode target, List<TryStmtToken> targetScopes) {
+        // Build outer routes first: the source then enters the innermost exited finally.
+        for (TryCatchItem item : tryStack) {
+            if (!containsIdentity(targetScopes, item.getToken())) target = item.exitLabel(target);
+        }
+        return target;
+    }
+
+    public boolean isLeavingFinally(JumpItem target) {
+        for (BodyStmtToken body : activeFinallyBodies)
+            if (!containsIdentity(target.finallyBodies, body)) return true;
+        return false;
+    }
+
+    public LabelNode routeGoto(GotoStmtToken token, LabelStmtToken label, LabelNode target) {
+        ensureJumpScopes();
+        JumpScope sourceScope = lexicalJumpScopes.get(token);
+        JumpScope targetScope = lexicalJumpScopes.get(label);
+        if (sourceScope == null || targetScope == null) throw new IllegalStateException("Missing goto lexical scope");
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            if (!sameIdentityScopes(sourceScope.finallyBodies, targetScope.finallyBodies)) {
+                boolean leavesFinally = false;
+                for (BodyStmtToken body : sourceScope.finallyBodies)
+                    if (!containsIdentity(targetScope.finallyBodies, body)) leavesFinally = true;
+                compiler.getEnvironment().error(token.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
+                        leavesFinally ? "jump out of a finally block is disallowed"
+                                : "jump into a finally block is disallowed");
+            }
+            for (Token loop : targetScope.loops) if (!containsIdentity(sourceScope.loops, loop)) {
+                compiler.getEnvironment().error(token.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
+                        "'goto' into loop or switch statement is disallowed");
+            }
+        }
+        return routeFinallyExit(target, targetScope.tryScopes);
+    }
+
+    public void beginFinally(BodyStmtToken body) {
+        ensureJumpScopes();
+        Map<String, LabelNode> labels = new HashMap<>();
+        for (Map.Entry<Token, JumpScope> entry : lexicalJumpScopes.entrySet()) {
+            if (entry.getKey() instanceof LabelStmtToken && containsIdentity(entry.getValue().finallyBodies, body))
+                labels.put(((LabelStmtToken) entry.getKey()).getName().toLowerCase(), new LabelNode());
+        }
+        activeFinallyBodies.push(body);
+        finallyGotoLabels.push(labels);
+    }
+
+    public void endFinally() {
+        finallyGotoLabels.pop();
+        activeFinallyBodies.pop();
+    }
+
+    private static class JumpScope {
+        final List<TryStmtToken> tryScopes;
+        final List<BodyStmtToken> finallyBodies;
+        final List<Token> loops;
+        JumpScope(List<TryStmtToken> tryScopes, List<BodyStmtToken> finallyBodies, List<Token> loops) {
+            this.tryScopes = new ArrayList<>(tryScopes);
+            this.finallyBodies = new ArrayList<>(finallyBodies);
+            this.loops = new ArrayList<>(loops);
+        }
+    }
+
+    private void ensureJumpScopes() {
+        if (lexicalJumpScopes != null) return;
+        lexicalJumpScopes = new IdentityHashMap<>();
+        if (statement != null) collectJumpScopes(statement.getBody(), new ArrayList<>(), new ArrayList<>(), new ArrayList<>());
+    }
+
+    private void collectJumpScopes(BodyStmtToken body, List<TryStmtToken> tries,
+                                   List<BodyStmtToken> finallies, List<Token> loops) {
+        if (body == null || body.getInstructions() == null) return;
+        for (ExprStmtToken line : body.getInstructions()) for (Token token : line.getTokens()) {
+            if (token instanceof LabelStmtToken || token instanceof GotoStmtToken) {
+                lexicalJumpScopes.put(token, new JumpScope(tries, finallies, loops));
+            } else if (token instanceof TryStmtToken) {
+                TryStmtToken attempt = (TryStmtToken) token;
+                List<TryStmtToken> inner = new ArrayList<>(tries);
+                if (attempt.getFinally() != null) inner.add(attempt);
+                collectJumpScopes(attempt.getBody(), inner, finallies, loops);
+                for (CatchStmtToken catcher : attempt.getCatches()) collectJumpScopes(catcher.getBody(), inner, finallies, loops);
+                if (attempt.getFinally() != null) {
+                    List<BodyStmtToken> insideFinally = new ArrayList<>(finallies);
+                    insideFinally.add(attempt.getFinally());
+                    collectJumpScopes(attempt.getFinally(), tries, insideFinally, loops);
+                }
+            } else if (token instanceof IfStmtToken) {
+                collectJumpScopes(((IfStmtToken) token).getBody(), tries, finallies, loops);
+                collectJumpScopes(((IfStmtToken) token).getElseBody(), tries, finallies, loops);
+            } else if (token instanceof WhileStmtToken || token instanceof DoStmtToken || token instanceof ForStmtToken
+                    || token instanceof ForeachStmtToken || token instanceof SwitchStmtToken) {
+                List<Token> innerLoops = new ArrayList<>(loops);
+                innerLoops.add(token);
+                if (token instanceof WhileStmtToken) collectJumpScopes(((WhileStmtToken) token).getBody(), tries, finallies, innerLoops);
+                else if (token instanceof DoStmtToken) collectJumpScopes(((DoStmtToken) token).getBody(), tries, finallies, innerLoops);
+                else if (token instanceof ForStmtToken) collectJumpScopes(((ForStmtToken) token).getBody(), tries, finallies, innerLoops);
+                else if (token instanceof ForeachStmtToken) collectJumpScopes(((ForeachStmtToken) token).getBody(), tries, finallies, innerLoops);
+                else {
+                    SwitchStmtToken selection = (SwitchStmtToken) token;
+                    for (CaseStmtToken arm : selection.getCases()) collectJumpScopes(arm.getBody(), tries, finallies, innerLoops);
+                    if (selection.getDefaultCase() != null) collectJumpScopes(selection.getDefaultCase().getBody(), tries, finallies, innerLoops);
+                }
+            } else if (token instanceof BodyStmtToken) {
+                collectJumpScopes((BodyStmtToken) token, tries, finallies, loops);
+            }
+            // Nested functions/closures have their own MethodStmtCompiler and label namespace.
+        }
+    }
+
     public LocalVariable addLocalVariable(String variable, LabelNode label, Class clazz){
-        LocalVariable result;
-        localVariables.put(
-                variable,
-                result = new LocalVariable(variable, localVariables.size(), label, clazz)
-        );
+        // Lexical names may be replaced; their emitted slots remain occupied.
+        LocalVariable result = new LocalVariable(variable, nextLocalIndex, label, clazz);
+        nextLocalIndex += Type.getType(clazz == null ? Object.class : clazz).getSize();
+        localVariables.put(variable, result);
         return result;
+    }
+
+    void reserveEmittedLocals() {
+        // Late instrumentation must also account for slots emitted without named locals.
+        nextLocalIndex = Math.max(nextLocalIndex, node.maxLocals);
+        for (AbstractInsnNode instruction : node.instructions) {
+            if (instruction instanceof VarInsnNode) {
+                VarInsnNode variable = (VarInsnNode) instruction;
+                int opcode = variable.getOpcode();
+                int size = opcode == Opcodes.LLOAD || opcode == Opcodes.LSTORE
+                        || opcode == Opcodes.DLOAD || opcode == Opcodes.DSTORE ? 2 : 1;
+                nextLocalIndex = Math.max(nextLocalIndex, variable.var + size);
+            } else if (instruction instanceof IincInsnNode) {
+                nextLocalIndex = Math.max(nextLocalIndex, ((IincInsnNode) instruction).var + 1);
+            }
+        }
     }
 
     public LocalVariable getOrAddLocalVariable(String variable, LabelNode label, Class clazz){
@@ -357,6 +508,8 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                     if (statement.isDynamicLocal()) {
                         expressionCompiler.writeVarAssign(local, argument.getName(), false, false);
                     } else {
+                        if (argument.isReference() && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                            expressionCompiler.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "valueOf", Memory.class, Memory.class);
                         expressionCompiler.writeVarStore(local, false, false);
                     }
 
@@ -407,6 +560,58 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
         }
     }
 
+    private ParameterEntity.DefaultInitializer writeParameterInitializer(ExprStmtToken value) {
+        MethodNode initializer = new MethodNodeImpl();
+        initializer.access = Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
+        initializer.name = "__$parameterDefault" + clazz.entity.nextMethodIndex();
+        initializer.desc = Type.getMethodDescriptor(Type.getType(Memory.class), Type.getType(Environment.class));
+        MethodStmtCompiler method = new MethodStmtCompiler(clazz, initializer);
+        method.setInitializer(true);
+        ExpressionStmtCompiler expr = new ExpressionStmtCompiler(method, null);
+        method.writeHeader();
+        LabelNode start = expr.makeLabel();
+        method.addLocalVariable("~env", start, Environment.class);
+        expr.writeExpression(value, true, false, true);
+        expr.writePopBoxing(true);
+        initializer.instructions.add(new InsnNode(Opcodes.ARETURN));
+        expr.stackPop();
+        method.writeFooter();
+        clazz.node.methods.add(initializer);
+        return new ParameterEntity.DefaultInitializer(compiler.getModule().getInternalName(), clazz.node.name.replace('/', '.'),
+                initializer.name, clazz.isSystem() ? null : clazz.entity.getName());
+    }
+
+    private void writePropertyWriteContext() {
+        var env=getLocalVariable("~env");
+        if (env == null || !Type.getReturnType(node.desc).equals(Type.getType(Memory.class)) || node.instructions.size() == 0) return;
+        String context=Type.getInternalName(php.runtime.PhpPropertyWriteContext.class);
+        String frame=Type.getInternalName(php.runtime.PhpPropertyWriteContext.Frame.class);
+        LabelNode start=new LabelNode(), end=new LabelNode(), handler=new LabelNode();
+        reserveEmittedLocals();
+        var local=addLocalVariable("~propertyWriteContext", start, php.runtime.PhpPropertyWriteContext.Frame.class);
+        var error=addLocalVariable("~propertyWriteError", handler, Throwable.class);
+        InsnList prefix=new InsnList();
+        prefix.add(new VarInsnNode(Opcodes.ALOAD, env.index));
+        int traceIndex=clazz.addTraceInfo(statement == null ? 0 : statement.getMeta().getStartLine(),0);
+        prefix.add(new FieldInsnNode(Opcodes.GETSTATIC,clazz.node.name,"$TRC",Type.getDescriptor(TraceInfo[].class)));
+        prefix.add(new LdcInsnNode(traceIndex)); prefix.add(new InsnNode(Opcodes.AALOAD));
+        prefix.add(new InsnNode(compiler.getModule().isStrictTypes() ? Opcodes.ICONST_1 : Opcodes.ICONST_0));
+        prefix.add(new MethodInsnNode(Opcodes.INVOKESTATIC, context, "enter",
+                "(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)L"+frame+";", false));
+        prefix.add(new VarInsnNode(Opcodes.ASTORE, local.index)); prefix.add(start);
+        for (AbstractInsnNode instruction : node.instructions.toArray()) if (instruction.getOpcode() == Opcodes.ARETURN) {
+            InsnList cleanup=new InsnList(); cleanup.add(new VarInsnNode(Opcodes.ALOAD, local.index));
+            cleanup.add(new MethodInsnNode(Opcodes.INVOKESTATIC, context, "leave", "(L"+frame+";)V", false));
+            node.instructions.insertBefore(instruction, cleanup);
+        }
+        node.instructions.insert(prefix); node.instructions.add(end); node.instructions.add(handler);
+        node.instructions.add(new VarInsnNode(Opcodes.ASTORE, error.index));
+        node.instructions.add(new VarInsnNode(Opcodes.ALOAD, local.index));
+        node.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, context, "leave", "(L"+frame+";)V", false));
+        node.instructions.add(new VarInsnNode(Opcodes.ALOAD, error.index)); node.instructions.add(new InsnNode(Opcodes.ATHROW));
+        node.tryCatchBlocks.add(new TryCatchBlockNode(start, end, handler, null));
+    }
+
     @SuppressWarnings("unchecked")
     void writeFooter(){
         LabelNode endL = new LabelNode();
@@ -450,10 +655,13 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
             entity.setModifier(statement.getModifier());
             entity.setReturnReference(statement.isReturnReference());
             entity.setTrace(statement.toTraceInfo(compiler.getContext()));
-            entity.setImmutable(statement.getArguments().isEmpty());
+            entity.setImmutable(statement.getArguments().isEmpty() && !(statement.isReturnReference()
+                    && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5));
             entity.setGeneratorEntity(generatorEntity);
 
-            if (statement.getReturnHintTypeClass() != null) {
+            if (statement.getDeclaredReturnType() != null) {
+                entity.setReturnTypeChecker(statement.getDeclaredReturnType());
+            } else if (statement.getReturnHintTypeClass() != null) {
                 entity.setReturnTypeChecker(TypeChecker.of(statement.getReturnHintTypeClass().getName()));
             } else if (statement.getReturnHintType() != null) {
                 entity.setReturnTypeChecker(TypeChecker.of(statement.getReturnHintType()));
@@ -488,6 +696,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 parameter.setVariadic(argument.isVariadic());
 
                 parameter.setType(argument.getHintType());
+                if (argument.getDeclaredType() != null) parameter.setTypeChecker(argument.getDeclaredType());
 
                 if (argument.getHintTypeClass() != null) {
                     parameter.setTypeClass(argument.getHintTypeClass().getName());
@@ -526,12 +735,30 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                         }
                     }
 
+                    if (defaultValue == null && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                        defaultValue = PhpConstantExpression.check(value, expressionStmtCompiler);
+                        if (defaultValue == null) {
+                            parameter.setDefaultInitializer(writeParameterInitializer(value));
+                            defaultValue = Memory.NULL;
+                        }
+                    }
                     if (defaultValue == null)
                         compiler.getEnvironment().error(
                                 argument.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
                                 Messages.ERR_EXPECTED_CONST_VALUE, "$" + argument.getName().getName()
                         );
 
+                    if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                            && parameter.getDefaultInitializer() == null
+                            && parameter.getTypeChecker() != null && !defaultValue.isNull()
+                            && !(defaultValue instanceof ConstantMemory) && !(defaultValue instanceof ClassConstantMemory)) {
+                        var type = php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(parameter.getTypeChecker(), parameter.isNullable());
+                        Memory checked = type.strictValue(compiler.getEnvironment(), defaultValue, clazz.entity);
+                        if (checked == null) compiler.getEnvironment().error(argument.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
+                                "Cannot use %s as default value for parameter $%s of type %s",
+                                php.runtime.reflection.support.PhpTypeDeclaration.valueType(defaultValue), parameter.getName(), type.getErrorSignature());
+                        defaultValue = checked;
+                    }
                     parameter.setDefaultValue(defaultValue);
                 }
                 i++;
@@ -555,6 +782,19 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
             writeHeader();
 
             if (statement.isGenerator()) {
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    php.runtime.common.HintType hint = statement.getReturnHintType();
+                    String name = statement.getReturnHintTypeClass() == null ? null : statement.getReturnHintTypeClass().getName();
+                    boolean valid = name == null
+                            ? hint == null || hint == php.runtime.common.HintType.MIXED
+                            || hint == php.runtime.common.HintType.OBJECT || hint == php.runtime.common.HintType.ITERABLE
+                            : name.equalsIgnoreCase("Generator") || name.equalsIgnoreCase("Iterator") || name.equalsIgnoreCase("Traversable");
+                    if (statement.getDeclaredReturnType() != null) valid = statement.getDeclaredReturnType().getAlternatives().stream()
+                            .anyMatch(arm -> arm.size() == 1 && java.util.Set.of("generator", "iterator", "traversable", "iterable", "object", "mixed")
+                                    .contains(arm.getFirst().toLowerCase(java.util.Locale.ROOT)));
+                    if (!valid) compiler.getEnvironment().error(entity.getTrace(), ErrorType.E_COMPILE_ERROR,
+                            "Generator return type must be a supertype of Generator, %s given", name == null ? hint : name);
+                }
                 entity.setEmpty(false);
                 entity.setImmutable(false);
                 entity.setResult(null);
@@ -601,7 +841,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
                 if (statement != null && statement.getBody() != null) {
                     expr.writeDefineVariables(statement.getLocal());
-                    expr.write(statement.getBody());
+                    if (!ModuleBodyCompiler.write(expr, statement)) expr.write(statement.getBody());
 
                     if (!statement.getBody().getInstructions().isEmpty()) {
                         entity.setEmpty(false);
@@ -618,12 +858,16 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                     expr.writeSysDynamicCall(null, "_setValid", void.class, Boolean.TYPE);
                 }
 
+                if (entity.isReturnReference() && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                    entity.setEmpty(false);
                 ReturnStmtToken token = new ReturnStmtToken(new TokenMeta("", 0, 0, 0, 0));
                 token.setValue(null);
                 token.setEmpty(true);
+                token.setImplicit(true);
                 expr.getCompiler(ReturnStmtToken.class).write(token);
             }
 
+            writePropertyWriteContext();
             writeFooter();
         }
         return entity;
@@ -633,6 +877,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
     public static class TryCatchItem {
         private final TryStmtToken token;
         private final LabelNode returnLabel;
+        private final Map<LabelNode, LabelNode> exitLabels = new LinkedHashMap<>();
 
         public TryCatchItem(TryStmtToken token, LabelNode returnLabel) {
             this.token = token;
@@ -641,6 +886,16 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
         public TryStmtToken getToken() {
             return token;
+        }
+
+        public LabelNode exitLabel(LabelNode target) {
+            LabelNode route = exitLabels.get(target);
+            if (route == null) exitLabels.put(target, route = new LabelNode());
+            return route;
+        }
+
+        public Map<LabelNode, LabelNode> getExitLabels() {
+            return exitLabels;
         }
 
         public LabelNode getReturnLabel() {

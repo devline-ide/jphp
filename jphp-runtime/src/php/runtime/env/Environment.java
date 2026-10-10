@@ -1,5 +1,7 @@
 package php.runtime.env;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.Information;
 import php.runtime.Memory;
 import php.runtime.common.*;
@@ -19,6 +21,7 @@ import php.runtime.ext.support.compile.CompileFunctionSpec;
 import php.runtime.invoke.Invoker;
 import php.runtime.invoke.ObjectInvokeHelper;
 import php.runtime.invoke.cache.ClassCallCache;
+import php.runtime.invoke.cache.CallCache;
 import php.runtime.lang.*;
 import php.runtime.lang.exception.BaseBaseException;
 import php.runtime.lang.exception.BaseError;
@@ -96,7 +99,19 @@ public class Environment {
     protected final Map<String, Object> userValues = new HashMap<String, Object>();
 
     // classes, funcs, consts
+    /** Canonical ASCII class keys. Legacy lookup state is not exposed by getLoadedClasses(). */
     public final Map<String, ClassEntity> classMap = new LinkedHashMap<String, ClassEntity>();
+    private final Map<String, ClassEntity> legacyClassMap = new LinkedHashMap<>();
+    private final Map<String, String> legacyClassKeys = new LinkedHashMap<>();
+    private static final class ClassLookupContext {
+        final boolean modern;
+        final php.runtime.PhpPropertyWriteContext.Frame caller;
+        final String originalName;
+        ClassLookupContext(boolean modern, php.runtime.PhpPropertyWriteContext.Frame caller, String originalName) {
+            this.modern = modern; this.caller = caller; this.originalName = originalName;
+        }
+    }
+    private final ThreadLocal<ClassLookupContext> classLookupModern = new ThreadLocal<>();
     protected final Map<String, FunctionEntity> functionMap = new LinkedHashMap<String, FunctionEntity>();
     protected final Map<String, ConstantEntity> constantMap = new LinkedHashMap<String, ConstantEntity>();
 
@@ -104,63 +119,226 @@ public class Environment {
     protected final PackageManager packageManager;
 
     protected static final ThreadLocal<Environment> environment = new ThreadLocal<Environment>();
+    private static final ThreadLocal<ThreadBinding> executionBindings = new ThreadLocal<>();
+    private final Set<ThreadBinding> threadBindings = new HashSet<>();
+    private ThreadBinding constructionBinding;
+    private boolean finalizationStarted;
+    private volatile boolean finalizationComplete;
+    private IdentityHashMap<CallCache<?>, CallCache.Row> callCacheRows;
+
+    /** Runtime cache storage is owned by this Environment, never by a compiled class's static cache. */
+    public CallCache.Row getCallCacheRow(CallCache<?> cache, boolean create) {
+        synchronized (threadBindings) {
+            if (finalizationStarted || finalizationComplete) return null;
+            CallCache.Row row = callCacheRows == null ? null : callCacheRows.get(cache);
+            if (row == null && create) {
+                if (callCacheRows == null) callCacheRows = new IdentityHashMap<>();
+                row = new CallCache.Row();
+                callCacheRows.put(cache, row);
+            }
+            return row;
+        }
+    }
+
+    /** Owns only this thread's PHP execution context and handler installation. */
+    public static final class ThreadBinding implements AutoCloseable {
+        private final Thread thread;
+        private volatile Environment boundEnvironment;
+        private volatile WeakReference<Environment> implicitEnvironment;
+        private final ThreadBinding previousBinding;
+        private final Thread.UncaughtExceptionHandler previousHandler;
+        private final BindingHandler handler = new BindingHandler(this);
+        private volatile boolean closed;
+        private ThreadBinding(Thread thread, Environment env, boolean implicit) {
+            this.thread = thread;
+            if (implicit) implicitEnvironment = new WeakReference<>(env); else boundEnvironment = env;
+            this.previousHandler = liveHandler(thread.getUncaughtExceptionHandler());
+            this.previousBinding = thread == Thread.currentThread() ? normalizeBinding()
+                    : previousHandler instanceof BindingHandler ? ((BindingHandler) previousHandler).binding : null;
+        }
+        private Environment getEnvironment() {
+            WeakReference<Environment> weak = implicitEnvironment;
+            return weak == null ? boundEnvironment : weak.get();
+        }
+        private boolean isRetired() { return closed || getEnvironment() == null; }
+        @Override public void close() {
+            if (thread != Thread.currentThread()) throw new IllegalStateException("Thread binding must be closed by its owning thread");
+            retire();
+        }
+        private void retire() {
+            Environment env;
+            synchronized (thread) {
+                if (closed) return;
+                closed = true; env = getEnvironment();
+                try {
+                    if (thread.getUncaughtExceptionHandler() == handler)
+                        thread.setUncaughtExceptionHandler(liveHandler(previousHandler));
+                } finally {
+                    // A foreign-thread retirement cannot edit ThreadLocal state, but must release the Environment.
+                    boundEnvironment = null;
+                    implicitEnvironment = null;
+                    if (thread == Thread.currentThread()) normalizeBinding();
+                    if (env != null) synchronized (env.threadBindings) { env.threadBindings.remove(this); }
+                }
+            }
+        }
+    }
+
+    private static final class BindingHandler implements Thread.UncaughtExceptionHandler {
+        private final ThreadBinding binding;
+        private BindingHandler(ThreadBinding binding) { this.binding = binding; }
+        @Override public void uncaughtException(Thread thread, Throwable failure) {
+            Environment env = binding.getEnvironment();
+            boolean reported = false;
+            try {
+                if (env != null) reported = env.reportThreadThrowable(failure);
+            } catch (Throwable reportingFailure) {
+                if (reportingFailure != failure) failure.addSuppressed(reportingFailure);
+            } finally {
+                try { binding.retire(); }
+                catch (Throwable cleanupFailure) { if (cleanupFailure != failure) failure.addSuppressed(cleanupFailure); }
+            }
+            if (!reported) hostHandler(binding.previousHandler).uncaughtException(thread, failure);
+        }
+    }
+
+    private static Thread.UncaughtExceptionHandler liveHandler(Thread.UncaughtExceptionHandler handler) {
+        while (handler instanceof BindingHandler && ((BindingHandler) handler).binding.isRetired())
+            handler = ((BindingHandler) handler).binding.previousHandler;
+        return handler;
+    }
+    private static Thread.UncaughtExceptionHandler hostHandler(Thread.UncaughtExceptionHandler handler) {
+        while (handler instanceof BindingHandler) handler = ((BindingHandler) handler).binding.previousHandler;
+        return handler == null ? (thread, failure) -> failure.printStackTrace() : handler;
+    }
+    private static ThreadBinding normalizeBinding() {
+        ThreadBinding binding = executionBindings.get();
+        while (binding != null && binding.isRetired()) binding = binding.previousBinding;
+        if (binding == null) executionBindings.remove(); else executionBindings.set(binding);
+        return binding;
+    }
+
+    public ThreadBinding bindCurrentThread() { return bindThread(Thread.currentThread(), false); }
+    private ThreadBinding bindThread(Thread thread, boolean implicit) {
+        synchronized (thread) {
+            synchronized (threadBindings) {
+                if (finalizationComplete) throw new IllegalStateException("Environment has been finalized");
+                ThreadBinding binding = new ThreadBinding(thread, this, implicit);
+                try {
+                    thread.setUncaughtExceptionHandler(binding.handler);
+                    threadBindings.add(binding);
+                    if (thread == Thread.currentThread()) executionBindings.set(binding);
+                    return binding;
+                } catch (RuntimeException | Error failure) {
+                    try { binding.retire(); }
+                    catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+                    throw failure;
+                }
+            }
+        }
+    }
+    /** Releases the compatibility registration created by the constructor, without finalizing its data. */
+    public void releaseThreadSupport() {
+        ThreadBinding binding = constructionBinding;
+        if (binding != null) binding.close();
+    }
+    private void retireThreadBindings() {
+        ThreadBinding[] bindings;
+        synchronized (threadBindings) { bindings = threadBindings.toArray(new ThreadBinding[0]); }
+        Throwable first = null;
+        for (ThreadBinding binding : bindings) {
+            try { binding.retire(); }
+            catch (RuntimeException | Error failure) { if (first == null) first = failure; else if (first != failure) first.addSuppressed(failure); }
+        }
+        if (first instanceof RuntimeException) throw (RuntimeException) first;
+        if (first instanceof Error) throw (Error) first;
+    }
+
+    /** Reports PHP failures and flushes their owning output; Java failures remain host failures. */
+    public boolean reportThreadThrowable(Throwable failure) throws Throwable {
+        Throwable phpFailure = failure instanceof UncaughtException ? ((UncaughtException) failure).getException() : failure;
+        // Internal finally control has no owning Environment and is never a user-visible failure.
+        if (phpFailure instanceof FinallyException) return true;
+        Environment target = phpFailure instanceof BaseBaseException ? ((BaseBaseException) phpFailure).getEnvironment() : this;
+        if (target == null || target.finalizationComplete) return false;
+        if (!(failure instanceof UncaughtException || failure instanceof BaseBaseException || failure instanceof ErrorException
+                || failure instanceof DieException)) return false;
+        Throwable reportingFailure = null;
+        try {
+            target.catchUncaught((Exception) failure);
+            return true;
+        } catch (Throwable thrown) {
+            reportingFailure = thrown;
+            throw thrown;
+        } finally {
+            try { target.flushAll(); }
+            catch (Throwable flushFailure) {
+                if (reportingFailure == null) throw flushFailure;
+                if (flushFailure != reportingFailure) reportingFailure.addSuppressed(flushFailure);
+            }
+        }
+    }
+
+    /** Runnable failures are reported inside the PHP boundary; Java failures leave through the host boundary. */
+    public void runInThread(Runnable runnable) {
+        try (ThreadBinding binding = bindCurrentThread()) {
+            try { runnable.run(); }
+            catch (Throwable failure) {
+                try { if (reportThreadThrowable(failure)) return; }
+                catch (Throwable reportingFailure) { if (reportingFailure != failure) failure.addSuppressed(reportingFailure); }
+                Environment.<RuntimeException>throwThreadFailure(failure);
+            }
+        }
+    }
+
+    /** Invokers can throw checked host failures; preserve their identity across Runnable execution. */
+    public void runInThread(Invoker invoker) {
+        runInThread(() -> {
+            try { invoker.call(); }
+            catch (Throwable failure) { Environment.<RuntimeException>throwThreadFailure(failure); }
+        });
+    }
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> void throwThreadFailure(Throwable failure) throws T { throw (T) failure; }
+
 
     /**
      * Gets Environment for current thread context
      */
     @Deprecated
     public static Environment current() {
-        return environment.get();
+        ThreadBinding binding = normalizeBinding();
+        if (binding != null) return binding.getEnvironment();
+        Environment fallback = environment.get();
+        if (fallback != null && fallback.finalizationComplete) { environment.remove(); return null; }
+        return fallback;
     }
 
     private final ReferenceQueue<IObject> gcObjectRefQueue = new ReferenceQueue<IObject>();
     private final Set<WeakReference<IObject>> gcObjects = new HashSet<WeakReference<IObject>>();
     private static final AtomicInteger ids = new AtomicInteger();
-    private static final Stack<Integer> freeIds = new Stack<Integer>();
-
-    public static void catchThrowable(Throwable e, Environment environment) {
-        if (e instanceof BaseBaseException) {
-            BaseBaseException baseException = (BaseBaseException) e;
-
-            baseException.getEnvironment().catchUncaught(baseException);
-            return;
-        } else if (e instanceof Exception) {
-            Environment env = environment == null ? null : environment;
-
-            if (env != null) {
-                try {
-                    env.catchUncaught((Exception) e);
-                } catch (RuntimeException e2) {
-                    if (env.getDefaultBuffer() == null || env.getDefaultBuffer().getOutput() == null) {
-                        e2.printStackTrace();
-                    } else {
-                        e2.getCause().printStackTrace(new PrintStream(env.getDefaultBuffer().getOutput()));
-                    }
-                }
-                return;
-            }
-        }
-
-        Environment env = environment == null ? null : environment;
-
-        if (env != null) {
-            e.printStackTrace(new PrintStream(env.getDefaultBuffer().getOutput()));
-        } else {
-            e.printStackTrace();
+    private static int nextEnvironmentId() {
+        for (;;) {
+            int next = ids.get();
+            if (next == Integer.MAX_VALUE) throw new IllegalStateException("Environment ID space exhausted");
+            if (ids.compareAndSet(next, next + 1)) return next;
         }
     }
 
-    public static void addThreadSupport(Environment env) {
-        addThreadSupport(Thread.currentThread(), env);
+    public static void catchThrowable(Throwable failure, Environment env) {
+        try { if (env != null && env.reportThreadThrowable(failure)) return; }
+        catch (Throwable reportingFailure) { if (reportingFailure != failure) failure.addSuppressed(reportingFailure); }
+        hostHandler(Thread.currentThread().getUncaughtExceptionHandler()).uncaughtException(Thread.currentThread(), failure);
     }
 
-    public static void addThreadSupport(Thread thread, final Environment env) {
-        thread.setUncaughtExceptionHandler(new Thread.UncaughtExceptionHandler() {
-            @Override
-            public void uncaughtException(Thread t, Throwable e) {
-                Environment.catchThrowable(e, env);
-            }
-        });
+    public static void addThreadSupport(Environment env) { addThreadSupport(Thread.currentThread(), env); }
+
+    public static void addThreadSupport(Thread thread, Environment env) {
+        synchronized (thread) {
+            Thread.UncaughtExceptionHandler installed = thread.getUncaughtExceptionHandler();
+            if (installed instanceof BindingHandler && ((BindingHandler) installed).binding.getEnvironment() == env) return;
+            env.bindThread(thread, true);
+        }
     }
 
     public Environment(Environment parent) {
@@ -168,39 +346,41 @@ public class Environment {
     }
 
     public Environment(Environment parent, OutputStream output) {
-        this(parent.scope, parent.defaultBuffer.getOutput());
+        this(parent.scope, output);
 
-        configuration.putAll(parent.configuration);
-        //constants.putAll(parent.constants);
+        try {
+            configuration.putAll(parent.configuration);
+            //constants.putAll(parent.constants);
 
-        classMap.putAll(parent.classMap);
-        for (ClassEntity e : classMap.values()) {
-            try {
-                e.initEnvironment(this);
-            } catch (Throwable throwable) {
-                throw new RuntimeException(throwable);
+            synchronized (parent.classMap) {
+                classMap.putAll(parent.classMap);
+                legacyClassMap.putAll(parent.legacyClassMap);
+                legacyClassKeys.putAll(parent.legacyClassKeys);
             }
+            functionMap.putAll(parent.functionMap);
+            constantMap.putAll(parent.constantMap);
+            moduleManager.apply(parent.moduleManager);
+            packageManager.apply(parent.packageManager);
+            for (ClassEntity e : classMap.values()) {
+                try {
+                    e.initEnvironment(this);
+                } catch (RuntimeException | Error failure) {
+                    throw failure;
+                } catch (Throwable throwable) {
+                    throw new RuntimeException(throwable);
+                }
+            }
+        } catch (RuntimeException | Error failure) {
+            try { retireThreadBindings(); } catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            throw failure;
         }
 
-        functionMap.putAll(parent.functionMap);
-        constantMap.putAll(parent.constantMap);
-
-        moduleManager.apply(parent.moduleManager);
-        packageManager.apply(parent.packageManager);
     }
 
     public Environment(CompileScope scope, OutputStream output) {
-        Environment.addThreadSupport(this);
-
         this.scope = scope;
 
-        synchronized (freeIds) {
-            if (freeIds.empty()) {
-                this.id = ids.getAndIncrement();
-            } else {
-                this.id = freeIds.peek();
-            }
-        }
+        this.id = nextEnvironmentId();
 
         this.moduleManager = new ModuleManager(this);
         this.packageManager = new PackageManager(this);
@@ -256,6 +436,7 @@ public class Environment {
         if (invoker != null)
             this.defaultAutoLoader = new SplClassLoader(invoker, splAutoloader);
 
+        try {
         for (Extension e : scope.extensions.values()) {
             e.onLoad(this);
 
@@ -292,35 +473,55 @@ public class Environment {
             }
         }
 
-        environment.set(this);
+        constructionBinding = bindThread(Thread.currentThread(), true);
+        } catch (RuntimeException | Error failure) {
+            try { retireThreadBindings(); }
+            catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+            throw failure;
+        }
     }
 
     public void doFinal() throws Throwable {
-        for (ShutdownHandler handler : shutdownFunctions) {
-            try {
-                handler.call();
-            } catch (DieException e) {
-                finalizeObjects();
-                catchUncaught(e);
-                break;
-            } catch (BaseBaseException | ErrorException e) {
-                catchUncaught(e);
-                break;
-            } catch (Exception e) {
-                catchUncaught(e);
-                break;
-            }
+        synchronized (threadBindings) {
+            if (finalizationStarted) return;
+            finalizationStarted = true;
         }
+        Throwable failure = null;
+        try (ThreadBinding binding = bindCurrentThread()) {
+            for (ShutdownHandler handler : shutdownFunctions) {
+                try {
+                    handler.call();
+                } catch (DieException e) {
+                    finalizeObjects();
+                    catchUncaught(e);
+                    break;
+                } catch (BaseBaseException | ErrorException e) {
+                    try { reportThreadThrowable(e); }
+                    catch (Throwable reportingFailure) { if (reportingFailure != e) e.addSuppressed(reportingFailure); throw e; }
+                    break;
+                } catch (Exception e) {
+                    boolean reported;
+                    try { reported = reportThreadThrowable(e); }
+                    catch (Throwable reportingFailure) { if (reportingFailure != e) e.addSuppressed(reportingFailure); throw e; }
+                    if (!reported) throw e;
+                    break;
+                }
+            }
 
-        finalizeObjects();
-        flushAll();
-        lastMessage = null;
-    }
-
-    @Override
-    protected void finalize() throws Throwable {
-        super.finalize();
-        freeIds.push(id);
+            finalizeObjects();
+            flushAll();
+            lastMessage = null;
+        } catch (Throwable thrown) {
+            failure = thrown;
+            throw thrown;
+        } finally {
+            synchronized (threadBindings) {
+                finalizationComplete = true;
+                callCacheRows = null;
+            }
+            try { retireThreadBindings(); }
+            catch (RuntimeException | Error cleanup) { if (failure == null) throw cleanup; else if (cleanup != failure) failure.addSuppressed(cleanup); }
+        }
     }
 
     /**
@@ -335,18 +536,8 @@ public class Environment {
             if (o == null)
                 continue;
 
-            ClassEntity entity = o.getReflection();
-            if (entity.methodDestruct != null) {
-                if (!o.isFinalized()) {
-                    o.doFinalize();
-                    pushCall(o, entity.methodDestruct.getName());
-                    try {
-                        entity.methodDestruct.invokeDynamic(o, this, TraceInfo.UNKNOWN);
-                    } finally {
-                        popCall();
-                    }
-                }
-            }
+            php.runtime.invoke.PhpObjectLifecycle.destruct(o, this,
+                    php.runtime.invoke.PhpObjectLifecycle.Reason.ENVIRONMENT_FINALIZE);
         }
         gcObjects.clear();
     }
@@ -486,7 +677,19 @@ public class Environment {
     }
 
     public boolean isLoadedClass(String lowerName) {
-        return classMap.containsKey(lowerName);
+        ClassLookupContext active = classLookupModern.get();
+        String original = active != null && active.caller == php.runtime.PhpPropertyWriteContext.current(this)
+                && active.originalName != null && lowerName.equals(PhpClassNames.key(active.originalName,
+                active.modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY)) ? active.originalName : lowerName;
+        return lookupClass(original, PhpClassNames.isModern(this)) != null;
+    }
+
+    public boolean isLoadedClass(String originalName, PhpLanguageProfile profile) {
+        ClassLookupContext previous = classLookupModern.get();
+        classLookupModern.set(new ClassLookupContext(profile == PhpLanguageProfile.PHP_8_5,
+                php.runtime.PhpPropertyWriteContext.current(this), originalName));
+        try { return isLoadedClass(PhpClassNames.key(originalName, profile)); }
+        finally { if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous); }
     }
 
     public boolean isLoadedFunction(String lowerName) {
@@ -500,6 +703,10 @@ public class Environment {
     private final Set<String> autoloadLocks = new HashSet<String>();
 
     public ClassEntity autoloadCall(String name, String lowerName) {
+        return autoloadCall(name, lowerName, PhpClassNames.isModern(this));
+    }
+
+    private ClassEntity autoloadCall(String name, String lowerName, boolean modern) {
         synchronized (autoloadLocks) {
             // detect recursion in autoload
             if (StringUtils.isValidClassName(name) && autoloadLocks.add(lowerName)) {
@@ -508,7 +715,7 @@ public class Environment {
                 for (SplClassLoader loader : classLoaders) {
                     loader.load(tmp);
 
-                    ClassEntity classEntity = fetchClass(name, false);
+                    ClassEntity classEntity = fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
 
                     if (classEntity != null) {
                         autoloadLocks.remove(lowerName);
@@ -521,7 +728,7 @@ public class Environment {
                 }
 
                 autoloadLocks.remove(lowerName);
-                return fetchClass(name, false);
+                return fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
             } else {
                 return null;
             }
@@ -566,30 +773,85 @@ public class Environment {
             return null;
     }
 
+    /** Explicit compiler lookups survive virtual autoload hooks; executing PHP modules take precedence. */
+    public boolean isModernClassLookup() {
+        var frame = php.runtime.PhpPropertyWriteContext.current(this);
+        ClassLookupContext active = classLookupModern.get();
+        if (active != null && active.caller == frame) return active.modern;
+        if (frame != null) return getModuleManager().getPhpLanguageProfile(frame.trace) == PhpLanguageProfile.PHP_8_5;
+        return scope.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+    }
+
+    private ClassEntity dispatchAutoload(String name, String lowerName, boolean modern) {
+        ClassLookupContext previous = classLookupModern.get();
+        classLookupModern.set(new ClassLookupContext(modern, php.runtime.PhpPropertyWriteContext.current(this), null));
+        try { return autoloadCall(name, lowerName); }
+        finally { if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous); }
+    }
+
+    private ClassEntity lookupClass(String name, boolean modern) {
+        ClassEntity entity = classMap.get(PhpClassNames.canonicalKey(name));
+        return modern || PhpClassNames.isModern(entity) ? entity : legacyClassMap.get(name.toLowerCase());
+    }
+
+    private boolean hasClassCollision(String name, ClassEntity entity) {
+        String key = PhpClassNames.canonicalKey(name);
+        return classMap.containsKey(key)
+                || !PhpClassNames.isModern(entity) && legacyClassMap.containsKey(name.toLowerCase());
+    }
+
+    private void publishClass(String name, ClassEntity entity) {
+        String key = PhpClassNames.canonicalKey(name);
+        ClassEntity previous = classMap.put(key, entity);
+        String previousLegacyKey = legacyClassKeys.remove(key);
+        if (previousLegacyKey != null) legacyClassMap.remove(previousLegacyKey, previous);
+        if (!PhpClassNames.isModern(entity)) {
+            String legacyKey = name.toLowerCase();
+            legacyClassMap.put(legacyKey, entity); legacyClassKeys.put(key, legacyKey);
+        }
+    }
+
+    public ClassEntity fetchClass(String name, boolean autoLoad, PhpLanguageProfile profile) {
+        ClassLookupContext previous = classLookupModern.get();
+        classLookupModern.set(new ClassLookupContext(profile == PhpLanguageProfile.PHP_8_5,
+                php.runtime.PhpPropertyWriteContext.current(this), null));
+        try { return fetchClass(name, PhpClassNames.key(name, profile), autoLoad); }
+        finally { if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous); }
+    }
+
     public ClassEntity fetchClass(String name, String nameL, boolean autoLoad) {
-        ClassEntity entity = classMap.get(nameL);
+        return fetchClass(name, nameL, autoLoad, PhpClassNames.isModern(this));
+    }
+
+    private ClassEntity fetchClass(String name, String nameL, boolean autoLoad, boolean modern) {
+        nameL = modern ? PhpClassNames.canonicalKey(name) : name.toLowerCase();
+        ClassEntity entity = lookupClass(name, modern);
 
         if (entity != null) {
             return entity;
         }
 
         synchronized (classMap) {
-            entity = classMap.get(nameL); // try retry!
+            entity = lookupClass(name, modern); // try retry!
 
             if (entity == null) {
-                entity = scope.fetchUserClass(name, nameL);
+                entity = scope.fetchUserClass(name, nameL, modern);
 
                 if (entity != null) {
+                    // A folded legacy query is not a new alias. Scope aliases retain their live Java registration binding.
+                    boolean canonicalAlias = scope.getClassMap().get(PhpClassNames.canonicalKey(name)) == entity;
+                    ClassEntity shadow = classMap.get(PhpClassNames.canonicalKey(entity.getName()));
+                    if (!canonicalAlias && shadow != null && shadow != entity && PhpClassNames.isModern(shadow)) return null;
                     try {
                         entity.initEnvironment(this);
                     } catch (Throwable throwable) {
                         throw new CriticalException(throwable);
                     }
-                    classMap.put(entity.getLowerName(), entity);
+                    if (shadow == null || shadow == entity) publishClass(entity.getName(), entity);
                     return entity;
                 }
 
-                ClassEntity classEntity = autoLoad ? autoloadCall(name, nameL) : null;
+                ClassEntity classEntity = autoLoad ? dispatchAutoload(name, nameL, modern) : null;
 
                 return classEntity;
             } else {
@@ -622,10 +884,10 @@ public class Environment {
 
     public void registerClass(ClassEntity entity) {
         synchronized (classMap) {
-            if (classMap.containsKey(entity.getLowerName()))
+            if (hasClassCollision(entity.getName(), entity))
                 exception("Class '%s' already registered", entity.getName());
 
-            classMap.put(entity.getLowerName(), entity);
+            publishClass(entity.getName(), entity);
             entity.initEnvironment(this);
         }
     }
@@ -735,6 +997,8 @@ public class Environment {
         }
         return result; // globals.getByScalarOrCreate(name, initValue);
     }
+
+    public Object getClassInitializationLock() { return classMap; }
 
     public Memory getStatic(String name) {
         return statics.get(name);
@@ -1136,29 +1400,34 @@ public class Environment {
 
     public ModuleEntity importCompiledModule(Context context, boolean debugInformation) throws Throwable {
         String moduleName = context.getModuleName();
-        ModuleEntity module = moduleName == null ? null : scope.findUserModule(moduleName);
-        if (module == null) {
-            ModuleDumper moduleDumper = new ModuleDumper(context, this, debugInformation);
-            module = moduleDumper.load(context.getInputStream(getDefaultCharset()));
-            synchronized (scope) {
-                scope.loadModule(module);
+        ModuleEntity module;
+        synchronized (scope) {
+            module = moduleName == null ? null : scope.findCachedModule(moduleName, true, context.getPhpLanguageProfile(scope));
+            if (module == null) {
+                ModuleDumper moduleDumper = new ModuleDumper(context, this, debugInformation);
+                module = moduleDumper.load(context.getInputStream(getDefaultCharset()));
             }
+            scope.loadModule(module);
+            scope.addUserModule(module);
         }
 
         registerModule(module);
-        scope.addUserModule(module);
         return module;
     }
 
     public ModuleEntity importModule(Context context) throws Throwable {
+        context.freezeImplicitClassImports();
         String moduleName = context.getModuleName();
-        ModuleEntity module = moduleName == null ? null : scope.findUserModule(moduleName);
-        if (module == null) {
-            AbstractCompiler compiler = scope.createCompiler(this, context);
-            module = compiler.compile(true);
-            synchronized (scope) {
-                scope.loadModule(module);
+        ModuleEntity module;
+        synchronized (scope) {
+            module = moduleName == null ? null : scope.findCachedModule(moduleName, false,
+                    context.getPhpLanguageProfile(scope), context.getImplicitClassImportsFingerprint());
+            if (module == null) {
+                AbstractCompiler compiler = scope.createCompiler(this, context);
+                module = compiler.compile(false);
             }
+            scope.loadModule(module);
+            scope.addUserModule(module);
         }
 
         registerModule(module);
@@ -1170,7 +1439,12 @@ public class Environment {
     }
 
     public Memory eval(String code, ArrayMemory locals) throws Throwable {
+        return eval(code, locals, scope.getPhpLanguageProfile());
+    }
+
+    public Memory eval(String code, ArrayMemory locals, php.runtime.common.PhpLanguageProfile profile) throws Throwable {
         Context context = new Context(code);
+        context.setPhpLanguageProfile(profile);
         AbstractCompiler compiler = scope.createCompiler(this, context);
         
         ModuleEntity module = compiler.compile();
@@ -1193,15 +1467,19 @@ public class Environment {
     }
 
     public void registerModule(ModuleEntity module, boolean ignoreErrors) {
-        for (ClassEntity entity : module.getClasses()) {
-            if (entity.isStatic()) {
-                entity.setModule(module);
-
-                if (classMap.put(entity.getLowerName(), entity) != null && !ignoreErrors) {
+        synchronized (classMap) {
+            // Validate the complete class batch before publishing either index.
+            if (!ignoreErrors) for (ClassEntity entity : module.getClasses()) {
+                if (entity.isStatic() && hasClassCollision(entity.getName(), entity)) {
                     error(entity.getTrace(), Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(entity.getName()));
                 }
-
-                entity.register(this);
+            }
+            for (ClassEntity entity : module.getClasses()) {
+                if (entity.isStatic()) {
+                    entity.setModule(module);
+                    publishClass(entity.getName(), entity);
+                    entity.register(this);
+                }
             }
         }
 
@@ -1266,6 +1544,10 @@ public class Environment {
         }
 
         if (constant == null) {
+            if (moduleManager.getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                exception(trace, php.runtime.lang.exception.BaseError.class, "Undefined constant \"%s\"", name);
+                return Memory.NULL;
+            }
             error(trace, E_NOTICE, Messages.ERR_USE_UNDEFINED_CONSTANT, name, name);
             return StringMemory.valueOf(name);
         }
@@ -1292,16 +1574,18 @@ public class Environment {
     private Memory __import(String path, ArrayMemory locals, TraceInfo trace, String funcName, boolean once, Callback<Void, Void> callback)
             throws Throwable {
         synchronized (moduleManager) {
-            if (once && moduleManager.hasModule(path)) {
+            if (once && moduleManager.isIncluded(path)) {
                 return Memory.TRUE;
             }
 
-            ModuleEntity module = moduleManager.fetchModule(path, path.endsWith(".phb"));
+            ModuleEntity module = moduleManager.fetchModule(path, path.endsWith(".phb"), moduleManager.getPhpLanguageProfile(trace));
 
             if (module == null) {
                 callback.call(null);
                 return Memory.FALSE;
             }
+
+            moduleManager.markIncluded(path);
 
             CallStackItem stackItem = pushCall(
                     trace, null, new Memory[]{StringMemory.valueOf(path)}, funcName, null, null
@@ -1384,6 +1668,10 @@ public class Environment {
 
     public Memory __newObject(String originName, String lowerName, TraceInfo trace, Memory[] args,
                               ClassCallCache cache, int cacheIndex) throws Throwable {
+        if (getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5) {
+            return php.runtime.invoke.PhpCallFrame.construct(new StringMemory(originName), this, trace, cache, cacheIndex,
+                    args == null ? 0 : args.length).invokePrepared(args);
+        }
         ClassEntity entity = null;
 
         boolean cached = false;
@@ -1537,9 +1825,9 @@ public class Environment {
         ClassEntity origin = e.getReflection();
         ClassEntity cause = fetchClass(className, lowerClassName, false);
 
-        if (cause != null && origin.isInstanceOf(cause))
+        if (cause != null && (PhpClassNames.isModern(this) ? origin.isInstanceOfAsciiName(cause.getName()) : origin.isInstanceOf(cause)))
             return new ObjectMemory(e);
-        if (origin.isInstanceOfLower(lowerClassName))
+        if (PhpClassNames.isModern(this) ? origin.isInstanceOfAsciiName(className) : origin.isInstanceOfLower(lowerClassName))
             return new ObjectMemory(e);
         else
             return Memory.NULL;
@@ -1568,6 +1856,10 @@ public class Environment {
 
     public Memory __getMacroClass() {
         CallStackItem item = peekCall(0);
+        if (item != null && item.object instanceof Closure && ((Closure) item.object).hasPhp8Binding()) {
+            String scope = ((Closure) item.object).getDeclarationScope();
+            return scope == null ? Memory.CONST_EMPTY_STRING : StringMemory.valueOf(scope);
+        }
         if (item != null && item.clazz != null) {
             if (item.classEntity == null)
                 item.classEntity = fetchClass(item.clazz, false);
@@ -1669,6 +1961,11 @@ public class Environment {
                 return item.staticClassEntity;
 
             if (item.object instanceof Closure) {
+                Closure closure = (Closure) item.object;
+                if (closure.hasPhp8Binding()) {
+                    String calledClass = closure.getCalledClass();
+                    return calledClass == null ? null : fetchClass(calledClass, false);
+                }
                 Memory self = ((Closure) item.object).getSelf();
                 if (self.isObject())
                     return self.toValue(ObjectMemory.class).getReflection();
@@ -1708,6 +2005,11 @@ public class Environment {
         int N = getCallStackTop();
         for (int i = 0; i < N; i++) {
             CallStackItem item = peekCall(i);
+            if (item != null && item.object instanceof Closure
+                    && (((Closure) item.object).hasPhp8Binding() || !((Closure) item.object).getSelf().isObject())) {
+                String scope = ((Closure) item.object).getScope();
+                return scope == null ? null : fetchClass(scope, false);
+            }
             if (item != null && item.clazz != null) {
                 if (item.classEntity != null) {
                     if (item.object instanceof Closure) {
@@ -1731,6 +2033,8 @@ public class Environment {
     }
 
     public ClassEntity __getParentClass(TraceInfo trace) {
+        if (getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5)
+            return php.runtime.invoke.PhpMethodResolver.parentClass(this, trace);
         ClassEntity context = getLastClassOnStack();
 
         if (context == null) {
@@ -1744,6 +2048,16 @@ public class Environment {
         }
 
         return parent;
+    }
+
+    public String __getSelf(TraceInfo trace) {
+        ClassEntity context = getLastClassOnStack();
+        if (context == null) {
+            exception(trace, BaseError.class, getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                    ? "Cannot access \"self\" when no class scope is active" : "Cannot access self:: when no class scope is active");
+            return null;
+        }
+        return context.getName();
     }
 
     public String __getParent(TraceInfo trace) {

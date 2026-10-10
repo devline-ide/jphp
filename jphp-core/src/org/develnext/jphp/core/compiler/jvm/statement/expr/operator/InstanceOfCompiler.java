@@ -7,10 +7,26 @@ import org.develnext.jphp.core.tokenizer.token.expr.operator.InstanceofExprToken
 import org.develnext.jphp.core.tokenizer.token.expr.value.NameToken;
 import php.runtime.Memory;
 import php.runtime.OperatorUtils;
+import php.runtime.common.PhpClassNames;
+import php.runtime.common.PhpLanguageProfile;
 
 public class InstanceOfCompiler extends BaseExprCompiler<InstanceofExprToken> {
     public InstanceOfCompiler(ExpressionStmtCompiler exprCompiler) {
         super(exprCompiler);
+    }
+
+    private boolean modernClassNames() {
+        return compiler.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+    }
+
+    private void duplicateClassKey() {
+        if (!modernClassNames()) {
+            expr.writePushDupLowerCase();
+            return;
+        }
+        expr.writePushDup();
+        expr.writePopString();
+        expr.writeSysStaticCall(PhpClassNames.class, "canonicalKey", String.class, String.class);
     }
 
     protected void pushName(StackItem R) {
@@ -21,10 +37,10 @@ public class InstanceOfCompiler extends BaseExprCompiler<InstanceofExprToken> {
         if (name == null) {
             expr.writePush(R);
             expr.writePopString();
-            expr.writePushDupLowerCase();
+            duplicateClassKey();
         } else {
             expr.writePushConstString(name.getName());
-            expr.writePushConstString(name.getName().toLowerCase());
+            expr.writePushConstString(PhpClassNames.key(name.getName(), compiler.getModule().getPhpLanguageProfile()));
         }
     }
 
@@ -49,8 +65,10 @@ public class InstanceOfCompiler extends BaseExprCompiler<InstanceofExprToken> {
         if (isInvert) {
             pushName(R);
 
-            expr.writePopString();
-            expr.writePushDupLowerCase();
+            if (!modernClassNames()) {
+                expr.writePopString();
+                expr.writePushDupLowerCase();
+            }
 
             expr.writePush(L);
             if (expr.stackPeek().isConstant())
@@ -62,7 +80,7 @@ public class InstanceOfCompiler extends BaseExprCompiler<InstanceofExprToken> {
                     OperatorUtils.class, "instanceOfRight", Boolean.TYPE, String.class, String.class, Memory.class
             );
 
-            expr.writePopAll(1);
+            if (!modernClassNames()) expr.writePopAll(1);
         } else {
             expr.writePush(L);
 

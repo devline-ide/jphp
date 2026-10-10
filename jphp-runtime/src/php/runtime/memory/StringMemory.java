@@ -101,6 +101,10 @@ public class StringMemory extends Memory {
         return toNumeric(value, false, CONST_INT_0);
     }
 
+    public static Memory toNumericStrict(String value) {
+        return php.runtime.PhpNumericString.parseStrict(value);
+    }
+
     public Memory toLongNumeric(){
         return toNumeric(toString(), true, CONST_INT_0);
     }

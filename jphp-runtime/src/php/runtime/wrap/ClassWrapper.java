@@ -81,7 +81,7 @@ public class ClassWrapper {
         entity.setStatic(false);
 
         if (arg.optional().exists()){
-            entity.setDefaultValue(MemoryUtils.valueOf(arg.optional().value(), arg.optional().type()));
+            entity.setDefaultValue(arg.optional().undefined() ? Memory.UNDEFINED : MemoryUtils.valueOf(arg.optional().value(), arg.optional().type()));
         } else {
             entity.setDefaultValue(null);
         }
@@ -165,7 +165,7 @@ public class ClassWrapper {
         if (arg.optional().exists()
                 || !arg.optional().value().isEmpty()
                 || (arg.type() != HintType.STRING && !arg.optional().value().isEmpty())){
-            param.setDefaultValue(MemoryUtils.valueOf(arg.optional().value(), arg.optional().type()));
+            param.setDefaultValue(arg.optional().undefined() ? Memory.UNDEFINED : MemoryUtils.valueOf(arg.optional().value(), arg.optional().type()));
         }
 
         if (!arg.typeClass().isEmpty())
@@ -526,6 +526,7 @@ public class ClassWrapper {
         }
 
         for (Method method : nativeClass.getDeclaredMethods()) {
+            if (method.isAnnotationPresent(Reflection.Ignore.class)) continue;
             Reflection.Signature signature = getSignature(method);
 
             if (signature != null
@@ -624,6 +625,11 @@ public class ClassWrapper {
 
         this.onWrapImplement(classEntity);
 
+        // An explicitly ignored override also hides the inherited PHP method.
+        for (Method method : nativeClass.getDeclaredMethods()) if (method.isAnnotationPresent(Reflection.Ignore.class)) {
+            Reflection.Name name = method.getAnnotation(Reflection.Name.class);
+            classEntity.getMethods().remove((name == null ? method.getName() : name.value()).toLowerCase(java.util.Locale.ROOT));
+        }
         classEntity.doneDeclare();
     }
 }

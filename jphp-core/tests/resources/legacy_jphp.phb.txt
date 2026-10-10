@@ -1,0 +1,20 @@
+Fixture provenance
+==================
+Generated from unmodified JPHP commit 8461e2f7c0944a83e9dabc571ae44f364583c940.
+Compiler: original ASM 5.2 backend, classfile major 50 (Java 6).
+Runtime used to compile/run: Java 25.0.4.1; dump version 20141011.
+SHA-256: a83c5d4489c557f582ddb570f969189c063744e7cf628d4e2268073d1b1ae54a.
+The filename in debug metadata is empty (Context from a string).
+Expected return: 42. Includes a function, class, closure capture and array COW.
+
+Source passed to JvmCompiler.compile(false), then ModuleDumper.save(debug=true):
+
+function legacy_add($x) { echo ''; return $x + 1; }
+class LegacyCounter { public function value($x) { return legacy_add($x); } }
+$offset = 1; $closure = function($x) use ($offset) { return $x + $offset; };
+$original = [1,2]; $copy = $original; $copy[0] = 9;
+return (new LegacyCounter)->value($closure(39)) + $original[0];
+
+This proves compatibility with that commit's actual dump layout. The reused
+20141011 version number does not guarantee compatibility with every historical
+JPHP dump bearing the same version.

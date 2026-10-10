@@ -126,6 +126,7 @@ public @interface Reflection {
 
     @Retention(RetentionPolicy.RUNTIME)
     public @interface Optional {
+        boolean undefined() default false;
         String value() default "";
         HintType type() default HintType.ANY;
         boolean exists() default true;

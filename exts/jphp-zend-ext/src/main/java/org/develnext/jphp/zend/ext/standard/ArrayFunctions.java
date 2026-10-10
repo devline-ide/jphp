@@ -2,9 +2,11 @@ package org.develnext.jphp.zend.ext.standard;
 
 import org.develnext.jphp.zend.ext.support.NaturalOrderComparator;
 import php.runtime.Memory;
+import php.runtime.PhpComparison;
 import php.runtime.annotation.Runtime;
 import php.runtime.annotation.Runtime.Reference;
 import php.runtime.common.Callback;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.env.Environment;
 import php.runtime.env.TraceInfo;
 import php.runtime.exceptions.RecursiveException;
@@ -28,13 +30,14 @@ public class ArrayFunctions extends FunctionsContainer {
     public static boolean in_array(Environment env, TraceInfo trace, Memory needle, @Reference Memory array,
                                    boolean strict) {
         if (expecting(env, trace, 2, array, ARRAY)) {
+            boolean php8 = !strict && env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
             ForeachIterator iterator = array.getNewIterator(env, false, false);
             while (iterator.next()) {
                 if (strict) {
                     if (needle.identical(iterator.getValue()))
                         return true;
                 } else {
-                    if (needle.equal(iterator.getValue()))
+                    if (php8 ? PhpComparison.equal(needle, iterator.getValue(), env, trace) : needle.equal(iterator.getValue()))
                         return true;
                 }
             }
@@ -171,6 +174,15 @@ public class ArrayFunctions extends FunctionsContainer {
         if (arrays == null || arrays.length == 0)
             return array;
 
+        if (!recursive && arrays.length == 1 && array.toValue(ArrayMemory.class).size() == 0 && arrays[0].isArray()
+                && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            ArrayMemory candidate = arrays[0].toValue(ArrayMemory.class);
+            boolean stringKeys = true;
+            ForeachIterator keys = candidate.foreachIterator(false, false);
+            while (keys.next()) if (!keys.getMemoryKey().isString()) { stringKeys = false; break; }
+            // Native's two-array fast path keeps physical duplicate string buckets intact.
+            if (stringKeys) return candidate.toImmutable();
+        }
         ArrayMemory result = (ArrayMemory) array.toImmutable();
 
         int i = 2;
@@ -193,6 +205,20 @@ public class ArrayFunctions extends FunctionsContainer {
         }
 
         return result;
+    }
+
+    public static Memory array_merge(Environment env, TraceInfo trace) {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return new ArrayMemory();
+        env.warning(trace, "array_merge() expects at least 1 parameter(s), 0 given");
+        return Memory.NULL;
+    }
+
+    public static Memory array_merge_recursive(Environment env, TraceInfo trace) {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return new ArrayMemory();
+        env.warning(trace, "array_merge_recursive() expects at least 1 parameter(s), 0 given");
+        return Memory.NULL;
     }
 
     public static Memory array_merge(Environment env, TraceInfo trace, Memory array, Memory... arrays) {
@@ -501,6 +527,15 @@ public class ArrayFunctions extends FunctionsContainer {
         return value == null ? Memory.NULL : value.toImmutable();
     }
 
+    public static Memory array_push(Environment env, TraceInfo trace, @Reference Memory input) {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) != PhpLanguageProfile.PHP_8_5) {
+            env.warning(trace, "array_push() expects at least 2 parameters, 1 given");
+            return Memory.NULL;
+        }
+        if (!expectingReference(env, trace, input, "array_push") || !expecting(env, trace, 1, input, ARRAY)) return Memory.NULL;
+        return LongMemory.valueOf(input.toValue(ArrayMemory.class).size());
+    }
+
     public static Memory array_push(Environment env, TraceInfo trace, @Reference Memory input, Memory var,
                                     Memory... args) {
         if (!expectingReference(env, trace, input, "array_push"))
@@ -509,10 +544,15 @@ public class ArrayFunctions extends FunctionsContainer {
             return Memory.NULL;
 
         ArrayMemory array = input.toValue(ArrayMemory.class);
-        array.add(var);
+        boolean php8 = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
+        array.checkCopied();
+        if (php8) array.addPhp8(var.toImmutable(), env, trace);
+        else array.add(var.toImmutable());
         if (args != null)
-            for (Memory arg : args)
-                array.add(arg);
+            for (Memory arg : args) {
+                if (php8) array.addPhp8(arg.toImmutable(), env, trace);
+                else array.add(arg.toImmutable());
+            }
 
         return LongMemory.valueOf(array.size());
     }
@@ -525,6 +565,17 @@ public class ArrayFunctions extends FunctionsContainer {
 
         Memory value = input.toValue(ArrayMemory.class).shift();
         return value == null ? Memory.NULL : value.toImmutable();
+    }
+
+    public static Memory array_unshift(Environment env, TraceInfo trace, @Reference Memory input) {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) != PhpLanguageProfile.PHP_8_5) {
+            env.warning(trace, "array_unshift() expects at least 2 parameters, 1 given");
+            return Memory.NULL;
+        }
+        if (!expectingReference(env, trace, input, "array_unshift") || !expecting(env, trace, 1, input, ARRAY)) return Memory.NULL;
+        ArrayMemory array = input.toValue(ArrayMemory.class);
+        array.unshift(new Memory[0]);
+        return LongMemory.valueOf(array.size());
     }
 
     public static Memory array_unshift(Environment env, TraceInfo trace, @Reference Memory input, Memory var,
@@ -541,6 +592,7 @@ public class ArrayFunctions extends FunctionsContainer {
             System.arraycopy(args, 0, tmp, 1, args.length);
         }
 
+        for (int i = 0; i < tmp.length; i++) tmp[i] = tmp[i].toImmutable();
         array.unshift(tmp);
         return LongMemory.valueOf(array.size());
     }
@@ -567,14 +619,14 @@ public class ArrayFunctions extends FunctionsContainer {
 
         ArrayMemory result = new ArrayMemory();
         ForeachIterator iterator = input.getNewIterator(env, false, false);
+        boolean php8 = !strict && env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
 
         while (iterator.next()) {
             if (search == null) {
                 result.add(iterator.getMemoryKey());
             } else {
-                if (strict && iterator.getValue().identical(search)) {
-                    result.add(iterator.getMemoryKey());
-                } else if (iterator.getValue().equal(search)) {
+                Memory value = iterator.getValue();
+                if (strict ? value.identical(search) : php8 ? PhpComparison.equal(value, search, env, trace) : value.equal(search)) {
                     result.add(iterator.getMemoryKey());
                 }
             }
@@ -778,13 +830,12 @@ public class ArrayFunctions extends FunctionsContainer {
     public static Memory array_search(Environment env, TraceInfo trace, Memory needle, Memory input, boolean strict) {
         if (expecting(env, trace, 1, input, ARRAY)) {
             ForeachIterator iterator = input.getNewIterator(env, false, false);
+            boolean php8 = !strict && env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
 
             while (iterator.next()) {
                 Memory value = iterator.getValue();
 
-                if (strict && needle.identical(value)) {
-                    return iterator.getMemoryKey();
-                } else if (needle.equal(value)) {
+                if (strict ? needle.identical(value) : php8 ? PhpComparison.equal(needle, value, env, trace) : needle.equal(value)) {
                     return iterator.getMemoryKey();
                 }
             }
@@ -1132,6 +1183,11 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static Comparator makeComparatorForSort(int flags, final boolean revert) {
+        return makeComparatorForSort(null, null, flags, revert);
+    }
+
+    protected static Comparator makeComparatorForSort(final Environment env, final TraceInfo trace, int flags, final boolean revert) {
+        final boolean php8 = env != null && env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
         switch (flags) {
             case ArrayConstants.SORT_NUMERIC:
                 return new Comparator<Memory>() {
@@ -1181,31 +1237,39 @@ public class ArrayFunctions extends FunctionsContainer {
                 return new Comparator<Memory>() {
                     @Override
                     public int compare(Memory o1, Memory o2) {
-                        return o1.compareTo(o2)  * (revert ? -1 : 1);
+                        return (php8 ? (int) PhpComparison.spaceshipCompare(o1, o2, env, trace) : o1.compareTo(o2))
+                                * (revert ? -1 : 1);
                     }
                 };
         }
     }
 
     protected static boolean _sort_impl(Environment env, TraceInfo trace, @Reference Memory array, int flags, boolean revert) {
-        return _sort_impl(env, trace, array, makeComparatorForSort(flags, revert));
+        return _sort_impl(env, trace, array, makeComparatorForSort(env, trace, flags, revert));
     }
 
     protected static boolean _sort_impl(Environment env, TraceInfo trace, @Reference Memory array, Comparator comparator) {
         if (expecting(env, trace, 1, array, ARRAY)) {
             ArrayMemory arrayMemory = array.toValue(ArrayMemory.class);
 
-            Memory[] values = arrayMemory.values();
-            arrayMemory.clear();
+            Memory[] values = new Memory[arrayMemory.size()];
+            ForeachIterator iterator = arrayMemory.getNewIterator(env, false, false);
+            int i = 0;
+            while (iterator.next()) {
+                Memory value = iterator.getValue();
+                values[i++] = value.isReference() ? value : value.toImmutable();
+            }
 
             try {
                 Arrays.sort(values, comparator);
             } catch (IllegalArgumentException e) {
                 return false;
-            }
-
-            for (Memory value : values) {
-                arrayMemory.add(value);
+            } finally {
+                arrayMemory.checkCopied();
+                arrayMemory.clear();
+                for (Memory value : values) {
+                    arrayMemory.add(value);
+                }
             }
 
             return true;
@@ -1231,7 +1295,7 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _asort_impl(Environment env, TraceInfo trace, @Reference Memory array, int flags, boolean revert) {
-        return _asort_impl(env, trace, array, makeComparatorForSort(flags, revert));
+        return _asort_impl(env, trace, array, makeComparatorForSort(env, trace, flags, revert));
     }
 
     protected static boolean _asort_impl(Environment env, TraceInfo trace, @Reference Memory array, Comparator comparator) {
@@ -1243,19 +1307,21 @@ public class ArrayFunctions extends FunctionsContainer {
 
             int i = 0;
             while (iterator.next()) {
-                values[i++] = new KeyValueMemory(iterator.getMemoryKey(), iterator.getValue());
+                Memory value = iterator.getValue();
+                values[i++] = new KeyValueMemory(iterator.getMemoryKey(), value.isReference() ? value : value.toImmutable());
             }
-
-            arrayMemory.clear();
 
             try {
                 Arrays.sort(values, comparator);
             } catch (IllegalArgumentException e) {
                 return false;
-            }
-
-            for (Memory value : values) {
-                arrayMemory.add(value);
+            } finally {
+                arrayMemory.checkCopied();
+                arrayMemory.clear();
+                for (Memory value : values) {
+                    KeyValueMemory entry = (KeyValueMemory) value;
+                    arrayMemory.put(entry.getArrayKey(), entry.getValue());
+                }
             }
 
             return true;
@@ -1289,7 +1355,7 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _ksort_impl(Environment env, TraceInfo trace, @Reference Memory array, int flags, boolean revert) {
-        return _ksort_impl(env, trace, array, makeComparatorForSort(flags, revert));
+        return _ksort_impl(env, trace, array, makeComparatorForSort(env, trace, flags, revert));
     }
 
     protected static boolean _ksort_impl(Environment env, TraceInfo trace, @Reference Memory array, Comparator comparator) {
@@ -1315,8 +1381,8 @@ public class ArrayFunctions extends FunctionsContainer {
             ArrayMemory newArray = new ArrayMemory();
 
             for (Memory value : values) {
-                newArray.refOfIndex(value).assign(arrayMemory.valueOfIndex(value).toImmutable());
-                arrayMemory.remove(value);
+                Memory entry = arrayMemory.getByScalar(ArrayMemory.toKey(value)).getValue();
+                newArray.put(ArrayMemory.toKey(value), entry.isReference() ? entry : entry.toImmutable());
             }
 
             array.assign(newArray);

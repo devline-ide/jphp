@@ -19,11 +19,13 @@ public class DoCompiler extends BaseStatementCompiler<DoStmtToken> {
 
         LabelNode start = expr.writeLabel(node, token.getMeta().getStartLine());
         LabelNode end = new LabelNode();
+        LabelNode condition = new LabelNode();
 
-        method.pushJump(end, start);
+        method.pushJump(end, condition);
         expr.write(token.getBody());
         method.popJump();
 
+        add(condition);
         expr.writeConditional(token.getCondition(), end);
 
         add(new JumpInsnNode(GOTO, start));

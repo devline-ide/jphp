@@ -12,6 +12,11 @@ public class IntegerExprToken extends ValueExprToken {
     private long value;
     private BigInteger bigValue;
 
+    public IntegerExprToken(TokenMeta meta, long value) {
+        super(meta, TokenType.T_LNUMBER);
+        this.value = value;
+    }
+
     public IntegerExprToken(TokenMeta meta) {
         super(meta, TokenType.T_LNUMBER);
         String word = meta.getWord();

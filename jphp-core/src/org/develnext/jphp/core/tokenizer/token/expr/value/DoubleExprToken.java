@@ -8,6 +8,11 @@ public class DoubleExprToken extends ValueExprToken {
 
     private double value;
 
+    public DoubleExprToken(TokenMeta meta, double value) {
+        super(meta, TokenType.T_DNUMBER);
+        this.value = value;
+    }
+
     public DoubleExprToken(TokenMeta meta) {
         super(meta, TokenType.T_DNUMBER);
         this.value = Double.parseDouble(meta.getWord());

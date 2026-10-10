@@ -46,6 +46,7 @@ public class CompileFunctionEntity extends FunctionEntity {
 
     @Override
     public Memory invoke(Environment env, TraceInfo trace, Memory[] arguments) throws Throwable {
+        if (arguments == null) arguments = new Memory[0];
         CompileFunction.Method method = getCompileFunction().find(arguments.length);
         if (method == null){
             env.warning(trace, Messages.ERR_EXPECT_LEAST_PARAMS.fetch(
@@ -85,11 +86,11 @@ public class CompileFunctionEntity extends FunctionEntity {
             } else if (clazz == TraceInfo.class) {
                 passed[i] = trace;
             } else if (i == types.length - 1 && types[i] == Memory[].class){
-                Memory[] arg = new Memory[arguments.length - i + 1];
+                Memory[] arg = new Memory[arguments.length - j];
 
                 if (!isRef){
                     for(int k = 0; k < arg.length; k++)
-                        arg[i] = arguments[i].toImmutable();
+                        arg[k] = arguments[j + k].toImmutable();
                 } else {
                     System.arraycopy(arguments, j, arg, 0, arg.length);
                 }

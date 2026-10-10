@@ -14,6 +14,11 @@ import php.runtime.Memory;
 public class SimpleExpressionTest extends JvmCompilerCase {
 
     @Test
+    public void testIntegerOverflow() {
+        check("expressions/integer_overflow.php");
+    }
+
+    @Test
     public void testReturn(){
         Memory memory = run("return;", false);
         Assert.assertTrue(memory instanceof NullMemory);

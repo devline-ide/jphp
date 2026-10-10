@@ -22,6 +22,7 @@ public class KeyboardManager {
     };
 
     private final Window window;
+    private boolean freed = false;
     protected boolean altDown = false;
     protected boolean controlDown = false;
     protected boolean shiftDown = false;
@@ -72,6 +73,15 @@ public class KeyboardManager {
     }
 
     public void free() {
+        if (freed) return;
+        freed = true;
+        timer.stop();
+        keys.clear();
+        keyHits.clear();
+        pressHandlers.clear();
+        downHandlers.clear();
+        upHandlers.clear();
+        altDown = controlDown = shiftDown = keyGlobalHit = false;
         window.removeEventFilter(KeyEvent.KEY_PRESSED, downEventFilter);
         window.removeEventFilter(KeyEvent.KEY_RELEASED, upEventFilter);
     }
@@ -160,7 +170,8 @@ public class KeyboardManager {
 
         KeyCombination.Modifier[] modifiersArray = modifiers.toArray(new KeyCombination.Modifier[modifiers.size()]);
 
-        for (Map.Entry<KeyCode, KeyEvent> entry : keys.entrySet()) {
+        for (Map.Entry<KeyCode, KeyEvent> entry : new ArrayList<>(keys.entrySet())) {
+            if (freed) return;
             KeyCode code;
 
             try {
@@ -213,6 +224,7 @@ public class KeyboardManager {
     }
 
     protected void trigger(KeyCombination keyCombination, KeyCode code, Map<KeyCombination, EventHandler<KeyEvent>> handlers) {
+        if (freed) return;
         EventHandler<KeyEvent> eventHandler = handlers.get(keyCombination);
 
         if (eventHandler != null) {

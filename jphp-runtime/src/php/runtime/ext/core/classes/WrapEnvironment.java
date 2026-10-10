@@ -73,6 +73,7 @@ public class WrapEnvironment extends BaseObject {
                 setEnvironment(new Environment(args[0].toObject(WrapEnvironment.class).getWrapEnvironment()));
         }
 
+        environment.releaseThreadSupport();
         return Memory.NULL;
     }
 
@@ -85,7 +86,9 @@ public class WrapEnvironment extends BaseObject {
         }
 
         invoker.setTrace(env.trace());
-        return invoker.call();
+        try (Environment.ThreadBinding binding = environment.bindCurrentThread()) {
+            return invoker.call();
+        }
     }
 
     @Signature(@Arg(value = "sourceMap", nativeType = WrapSourceMap.class))
@@ -209,7 +212,9 @@ public class WrapEnvironment extends BaseObject {
             return Memory.NULL;
         }
 
-        return onMessage.call(args);
+        try (Environment.ThreadBinding binding = environment.bindCurrentThread()) {
+            return onMessage.call(args);
+        }
     }
 
     @Signature(@Arg("path"))

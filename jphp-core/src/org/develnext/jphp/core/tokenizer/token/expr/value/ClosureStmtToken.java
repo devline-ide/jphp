@@ -11,6 +11,7 @@ public class ClosureStmtToken extends ValueExprToken {
     protected FunctionStmtToken parentFunction;
     protected ClassStmtToken ownerClass;
     protected int id;
+    protected boolean staticClosure;
 
     public ClosureStmtToken(TokenMeta meta) {
         super(meta, TokenType.T_J_CUSTOM);
@@ -18,6 +19,14 @@ public class ClosureStmtToken extends ValueExprToken {
 
     public FunctionStmtToken getFunction() {
         return function;
+    }
+
+    public boolean isStaticClosure() {
+        return staticClosure;
+    }
+
+    public void setStaticClosure(boolean staticClosure) {
+        this.staticClosure = staticClosure;
     }
 
     public void setFunction(FunctionStmtToken function) {

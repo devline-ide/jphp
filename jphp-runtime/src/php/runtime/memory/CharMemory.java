@@ -58,6 +58,12 @@ public class CharMemory extends StringMemory {
     }
 
     @Override
+    public Memory assignRef(Memory memory) {
+        ReferenceMemory.rejectStringOffsetReference(this);
+        return super.assignRef(memory);
+    }
+
+    @Override
     public Memory assign(Memory memory) {
         makeString(memory.toString());
         return memory;

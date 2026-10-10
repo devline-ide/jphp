@@ -198,6 +198,7 @@ public class PrintR extends Printer {
                 int size = classEntity.properties.size();
 
                 while (iterator.next()){
+                    if (iterator.getValue().isUndefined() && props instanceof PhpObjectProperties) continue;
                     printer.write(StringUtils.repeat(' ', level * PRINT_INDENT));
 
                     Object key = iterator.getKey();

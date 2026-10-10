@@ -57,7 +57,15 @@ public class SwitchCompiler extends BaseStatementCompiler<SwitchStmtToken> {
             if (one.getConditional() != null){
                 expr.writeVarLoad(switchValue);
                 expr.writeExpression(one.getConditional(), true, false);
-                expr.writeSysDynamicCall(Memory.class, "equal", Boolean.TYPE, expr.stackPeek().type.toClass());
+                if (expr.getCompiler().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    expr.writePopBoxing();
+                    expr.writePushEnv();
+                    expr.writePushTraceInfo(one);
+                    expr.writeSysStaticCall(php.runtime.PhpComparison.class, "equal", Boolean.TYPE,
+                            Memory.class, Memory.class, php.runtime.env.Environment.class, php.runtime.env.TraceInfo.class);
+                } else {
+                    expr.writeSysDynamicCall(Memory.class, "equal", Boolean.TYPE, expr.stackPeek().type.toClass());
+                }
                 add(new JumpInsnNode(IFEQ, jumps[i + 1][0]));
                 expr.stackPop();
             }

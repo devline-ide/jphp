@@ -33,18 +33,32 @@ public class DynamicAccessCompiler extends BaseExprCompiler<DynamicAccessExprTok
             OperatorExprToken operator = (OperatorExprToken) ((DynamicAccessAssignExprToken) dynamic).getAssignOperator();
             String code = operator.getCode();
             if (operator instanceof IncExprToken || operator instanceof DecExprToken) {
-                if (operator.getAssociation() == Association.RIGHT)
-                    code = code + "AndGet";
-                else
-                    code = "GetAnd" + code.substring(0, 1).toUpperCase() + code.substring(1);
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    expr.writePushConstBoolean(operator instanceof DecExprToken);
+                    expr.writePushConstBoolean(operator.getAssociation() == Association.LEFT);
+                    expr.writeSysStaticCall(php.runtime.PhpArithmetic.class, "incrementProperty", Memory.class,
+                            Memory.class, String.class, Environment.class, TraceInfo.class,
+                            PropertyCallCache.class, int.class, boolean.class, boolean.class);
+                } else {
+                    if (operator.getAssociation() == Association.RIGHT)
+                        code = code + "AndGet";
+                    else
+                        code = "GetAnd" + code.substring(0, 1).toUpperCase() + code.substring(1);
 
-                expr.writeSysStaticCall(ObjectInvokeHelper.class,
-                        code + "Property", Memory.class,
-                        Memory.class, String.class, Environment.class, TraceInfo.class,
-                        PropertyCallCache.class, int.class
-                );
+                    expr.writeSysStaticCall(ObjectInvokeHelper.class,
+                            code + "Property", Memory.class,
+                            Memory.class, String.class, Environment.class, TraceInfo.class,
+                            PropertyCallCache.class, int.class
+                    );
+                }
             } else {
-                expr.writeSysStaticCall(ObjectInvokeHelper.class,
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                        && org.develnext.jphp.core.compiler.common.util.CompilerUtils.isPhpArithmetic(operator)) {
+                    expr.writePushConstString(((AssignOperatorExprToken) operator).getOperatorCode());
+                    expr.writeSysStaticCall(php.runtime.PhpArithmetic.class, "assignProperty", Memory.class,
+                            Memory.class, Memory.class, String.class, Environment.class, TraceInfo.class,
+                            PropertyCallCache.class, int.class, String.class);
+                } else expr.writeSysStaticCall(ObjectInvokeHelper.class,
                         code + "Property", Memory.class,
                         Memory.class, Memory.class, String.class, Environment.class, TraceInfo.class,
                         PropertyCallCache.class, int.class
@@ -72,9 +86,15 @@ public class DynamicAccessCompiler extends BaseExprCompiler<DynamicAccessExprTok
                     PropertyCallCache.class, int.class
             );
         } else {
-
+            if (expr.writeArgumentReferenceMode(dynamic)) {
+                expr.writeSysStaticCall(php.runtime.invoke.PhpCallFrame.class,
+                        expr.isArgumentArrayProperty(dynamic) ? "argumentArrayProperty" : "argumentProperty",Memory.class,
+                        Memory.class,String.class,Environment.class,TraceInfo.class,
+                        PropertyCallCache.class,int.class,boolean.class);
+                return;
+            }
             expr.writeSysStaticCall(ObjectInvokeHelper.class,
-                    dynamic instanceof  DynamicAccessGetRefExprToken ? "getRefProperty" : "getProperty",
+                    dynamic.isCoalescingRead() ? "getQuietProperty" : dynamic instanceof DynamicAccessGetRefExprToken ? "getRefProperty" : "getProperty",
                     Memory.class,
                     Memory.class, String.class, Environment.class, TraceInfo.class,
                     PropertyCallCache.class, int.class

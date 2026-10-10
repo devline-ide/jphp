@@ -323,6 +323,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
         }
 
         EmptyExprToken result = (EmptyExprToken)current;
+        if (analyzer.getPhpLanguageProfile()
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5) markCoalescingPropertyReads(value.getTokens());
         value.updateAsmExpr(analyzer.getEnvironment(), analyzer.getContext());
         result.setValue(value);
         return result;
@@ -358,6 +360,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
 
             if (newToken != null) {
                 tokens.set(tokens.size() - 1, newToken);
+                if (analyzer.getPhpLanguageProfile()
+                        == php.runtime.common.PhpLanguageProfile.PHP_8_5) markCoalescingPropertyReads(tokens);
                 param.updateAsmExpr(analyzer.getEnvironment(), analyzer.getContext());
             }
         }
@@ -375,6 +379,9 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
         CallExprToken call = processCall(current, nextToken(iterator), iterator);
 
         for(ExprStmtToken param : call.getParameters()){
+            if (analyzer.getEnvironment()!=null && org.develnext.jphp.core.compiler.common.NullsafeChain.isResult(param))
+                analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                        "Can't use nullsafe operator in write context");
             List<Token> tokens = param.getTokens();
             Token last = tokens.get(tokens.size() - 1);
             Token newToken = null;
@@ -399,6 +406,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 unexpectedToken(last);
 
             tokens.set(tokens.size() - 1, newToken);
+            if (last instanceof ArrayGetExprToken && analyzer.getPhpLanguageProfile()
+                    == php.runtime.common.PhpLanguageProfile.PHP_8_5) markCoalescingPropertyReads(tokens);
 
             param.updateAsmExpr(analyzer.getEnvironment(), analyzer.getContext());
         }
@@ -408,16 +417,56 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
         return result;
     }
 
+    private void markArgumentArrayRoot(ExprStmtToken argument) {
+        if (argument.getAsmExpr() == null || analyzer.getFunction() == null || analyzer.getPhpLanguageProfile()
+                != php.runtime.common.PhpLanguageProfile.PHP_8_5) return;
+        List<Token> tokens = argument.getAsmExpr().getTokens();
+        if (tokens.size() < 2 || !(tokens.getFirst() instanceof VariableExprToken)
+                || !(tokens.get(1).getClass() == ArrayGetExprToken.class || tokens.get(1).getClass() == ArrayPushExprToken.class)) return;
+        for (int i = 1; i < tokens.size(); i++) {
+            Token token = tokens.get(i);
+            if (token.getClass() != ArrayGetExprToken.class && token.getClass() != ArrayPushExprToken.class
+                    && token.getClass() != DynamicAccessExprToken.class) return;
+        }
+        // The runtime callee chooses FETCH_DIM_R/W. Reserve a writable root before
+        // JVM local declarations, including when the call lives in a skipped branch.
+        analyzer.getFunction().variable((VariableExprToken) tokens.getFirst()).setReference(true).setUnstable(true).setMutable(true);
+    }
+
     protected CallExprToken processCall(Token previous, Token current, ListIterator<Token> iterator){
         ExprStmtToken param;
 
         List<ExprStmtToken> parameters = new ArrayList<>();
-        do {
+        boolean acquisition=false;
+        if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && nextTokenAndPrev(iterator) instanceof ArgumentUnpackExprToken) {
+            nextToken(iterator);
+            if (isClosedBrace(nextTokenAndPrev(iterator), SIMPLE)) {
+                nextToken(iterator);acquisition=true;
+            } else {
+                Token after = nextTokenAndPrev(iterator);
+                if (after instanceof CommaToken && analyzer.getEnvironment() != null)
+                    analyzer.getEnvironment().error(after.toTraceInfo(analyzer.getContext()), php.runtime.exceptions.support.ErrorType.E_PARSE,
+                            "syntax error, unexpected token \",\"");
+                iterator.previous();
+            }
+        }
+        if (!acquisition) do {
+            if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && nextTokenAndPrev(iterator) instanceof ArgumentUnpackExprToken) {
+                nextToken(iterator);
+                Token after = nextTokenAndPrev(iterator);
+                if ((isClosedBrace(after, SIMPLE) || after instanceof CommaToken) && analyzer.getEnvironment() != null)
+                    analyzer.getEnvironment().error(after.toTraceInfo(analyzer.getContext()), php.runtime.exceptions.support.ErrorType.E_PARSE,
+                            "syntax error, unexpected token \"%s\"", after.getWord());
+                iterator.previous();
+            }
             param = analyzer.generator(SimpleExprGenerator.class)
                     .getNextExpression(nextToken(iterator), iterator, Separator.COMMA, SIMPLE);
 
             if (param != null) {
                 parameters.add(param);
+                markArgumentArrayRoot(param);
                 if (param.isSingle()){
                     if (param.getTokens().get(0) instanceof VariableExprToken) {
                         if (analyzer.getFunction() != null)
@@ -426,7 +475,15 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 }
             }
 
-            if (isClosedBrace(nextToken(iterator), SIMPLE)) {
+            Token separator = nextToken(iterator);
+            if (isClosedBrace(separator, SIMPLE)) {
+                break;
+            }
+
+            if (param != null && separator instanceof CommaToken
+                    && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && isClosedBrace(nextTokenAndPrev(iterator), SIMPLE)) {
+                nextToken(iterator);
                 break;
             }
 
@@ -434,7 +491,10 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
         //nextToken(iterator);
 
         CallExprToken result = new CallExprToken(TokenMeta.of(previous, current));
-        if (previous instanceof ValueExprToken) {
+        if (previous instanceof CallExprToken && analyzer.getPhpLanguageProfile()
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            result.setName(null); // Consume the evaluated result, including an object-method receiver spine.
+        } else if (previous instanceof ValueExprToken) {
             result.setName(analyzer.getRealName((ValueExprToken)previous, NamespaceUseStmtToken.UseType.FUNCTION));
 
             if (analyzer.getFunction() != null){
@@ -454,13 +514,17 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 }
             }
         } else {
-            if (previous instanceof DynamicAccessExprToken) {
+            if (previous instanceof StaticAccessOperatorExprToken
+                    && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                result.setName((ExprToken) previous);
+            } else if (previous instanceof DynamicAccessExprToken) {
                 result.setName((ExprToken)previous);
             } else
                 result.setName(null);
         }
 
         result.setParameters(parameters);
+        result.setFirstClassCallable(acquisition);
 
         if (analyzer.getFunction() != null){
             analyzer.getFunction().setCallsExist(true);
@@ -532,8 +596,25 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
         return callExprToken;
     }
 
+    private void validateRelativeClass(Token token) {
+        if (analyzer.getPhpLanguageProfile()
+                != php.runtime.common.PhpLanguageProfile.PHP_8_5) return;
+        String keyword = token instanceof ParentExprToken ? "parent" : token instanceof SelfExprToken ? "self"
+                : token instanceof StaticExprToken ? "static" : null;
+        FunctionStmtToken function = analyzer.getFunction();
+        // Anonymous functions acquire their scope when bound; top-level expressions are runtime checks.
+        if (keyword == null || function == null || function.getName() == null) return;
+        ClassStmtToken scope = analyzer.getClazz();
+        if (scope == null) analyzer.getEnvironment().error(token.toTraceInfo(analyzer.getContext()),
+                ErrorType.E_COMPILE_ERROR, "Cannot use \"%s\" when no class scope is active", keyword);
+        else if (token instanceof ParentExprToken && !scope.isTrait() && scope.getExtend() == null)
+            analyzer.getEnvironment().error(token.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                    "Cannot use \"parent\" when current class scope has no parent");
+    }
+
     protected Token processStaticAccess(Token current, Token previous, ListIterator<Token> iterator) {
         Token name = previous;
+        validateRelativeClass(name);
 
         if (name != null && !isTokenClass(name, SelfExprToken.class, StaticExprToken.class, ParentExprToken.class)) {
             name = makeSensitive(previous);
@@ -555,7 +636,7 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 if (analyzer.getClazz() == null) {
                     ;
                 } else {
-                    if (!analyzer.getClazz().isTrait()) {
+                    if (!analyzer.getClazz().isTrait() && analyzer.getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                         clazz = new FulledNameToken(clazz.getMeta(), new ArrayList<Token>() {{
                             if (analyzer.getClazz().getNamespace().getName() != null)
                                 addAll(analyzer.getClazz().getNamespace().getName().getNames());
@@ -580,6 +661,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
             if (isOpenedBrace(current, BLOCK)){
                 ExprStmtToken expr = getToken(nextToken(iterator), iterator, false, BLOCK);
                 result.setFieldExpr(expr);
+                result.setDynamicConstant(analyzer.getPhpLanguageProfile()
+                        == php.runtime.common.PhpLanguageProfile.PHP_8_5);
                 nextAndExpected(iterator, BraceExprToken.class);
             } else if (current instanceof NameToken || current instanceof VariableExprToken){
                 result.setField((ValueExprToken)current);
@@ -597,7 +680,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 } else
                     unexpectedToken(current);
             } else if (current instanceof ClassStmtToken) { // PHP 5.5 ::class
-                if (clazz instanceof ParentExprToken || clazz instanceof StaticExprToken) {
+                if (clazz instanceof ParentExprToken || clazz instanceof StaticExprToken
+                        || clazz instanceof SelfExprToken && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                     if (clazz instanceof StaticExprToken) {
                         analyzer.getScope().setStaticExists(true);
                     }
@@ -608,6 +692,9 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                             TokenMeta.of(((NameToken) clazz).getName(), clazz),
                             StringExprToken.Quote.SINGLE
                     );
+                } else if (analyzer.getPhpLanguageProfile()
+                        == php.runtime.common.PhpLanguageProfile.PHP_8_5 && (clazz == null || clazz instanceof VariableExprToken)) {
+                    result.setField(new ClassExprToken(current.getMeta()));
                 } else
                     unexpectedToken(current);
             } else
@@ -626,14 +713,21 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
 
     protected DynamicAccessExprToken processDynamicAccess(Token current, Token next, ListIterator<Token> iterator,
             BraceExprToken.Kind closedBraceKind, int braceOpened){
-        if (next != null && next.isNamedToken() && !(next instanceof NameToken))
-            next = new NameToken(next.getMeta());
+        if (next != null) next = makeSensitive(next);
 
         DynamicAccessExprToken result = (DynamicAccessExprToken)current;
+        if (result.isNullsafe() && analyzer.getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            unexpectedToken(current);
         if (next instanceof NameToken || next instanceof VariableExprToken){
             result.setField((ValueExprToken) next);
+            if (next instanceof VariableExprToken && analyzer.getPhpLanguageProfile()
+                    == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                if (analyzer.getScope() != null) analyzer.getScope().addVariable((VariableExprToken) next);
+                if (analyzer.getFunction() != null) analyzer.getFunction().variable((VariableExprToken) next).setUsed(true);
+            }
             next = iterator.next();
-            if (result.getField() instanceof VariableExprToken) {
+            if (result.getField() instanceof VariableExprToken && analyzer.getPhpLanguageProfile()
+                    == php.runtime.common.PhpLanguageProfile.JPHP_LEGACY) {
                 if (isOpenedBrace(nextTokenAndPrev(iterator), ARRAY)){
                     Token arr = processArrayToken(next, nextToken(iterator), iterator);
                     result.setFieldExpr(new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), result.getField(), arr));
@@ -649,7 +743,7 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
 
         if (iterator.hasNext()){
             next = iterator.next();
-            if (next instanceof AssignableOperatorToken){
+            if (next instanceof AssignableOperatorToken && !(next instanceof AssignNullCoalesceExprToken)){
                 DynamicAccessAssignExprToken dResult = new DynamicAccessAssignExprToken(result);
                 dResult.setAssignOperator(next);
 
@@ -658,6 +752,11 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                         .getNextExpression(nextToken(iterator), iterator, BraceExprToken.Kind.ANY);
 
                 dResult.setValue(value);
+                if (analyzer.getPhpLanguageProfile()
+                        == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                        && next instanceof AssignExprToken && value != null && !value.getTokens().isEmpty()
+                        && value.getTokens().getFirst() instanceof AmpersandRefToken)
+                    ((AssignExprToken) next).setAsReference(true);
                 return dResult;
             }
             iterator.previous();
@@ -698,6 +797,169 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
         return result;
     }
 
+    private Token processNullCoalesceAssign(Token operator, List<Token> tokens, ListIterator<Token> iterator,
+                                           Separator separator) {
+        if (analyzer.getPhpLanguageProfile()
+                != php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            throw new ParseException("Null coalescing assignment requires PHP_8_5", operator.toTraceInfo(analyzer.getContext()));
+        int start = 0, depth = 0;
+        for (int i = tokens.size() - 1; i >= 0; i--) {
+            Token token = tokens.get(i);
+            if (isClosedBrace(token, SIMPLE)) depth++;
+            else if (isOpenedBrace(token, SIMPLE)) {
+                if (depth == 0) { start = i + 1; break; }
+                depth--;
+            } else if (depth == 0 && token instanceof OperatorExprToken
+                    && !(token instanceof ArrayGetExprToken) && !(token instanceof DynamicAccessExprToken)
+                    && !(token instanceof IncExprToken) && !(token instanceof DecExprToken)) {
+                start = i + 1; break;
+            }
+        }
+        if (start == tokens.size()) unexpectedToken(operator);
+        List<Token> targetTokens = new ArrayList<>(tokens.subList(start, tokens.size()));
+        validateConstantWrite(targetTokens, operator);
+        ExprStmtToken target = new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), targetTokens);
+        if (targetTokens.get(0) instanceof VariableExprToken && analyzer.getFunction() != null) {
+            analyzer.getFunction().variable((VariableExprToken) targetTokens.get(0)).setReference(true).setUnstable(true);
+        }
+        // Bound the token stream as well as this parser: recursive logical/ternary
+        // parsers must not consume the lower-precedence expression after the RHS.
+        List<Token> rightTokens = new ArrayList<>();
+        int nesting = 0, ternary = 0;
+        while (iterator.hasNext()) {
+            Token token = iterator.next();
+            boolean boundary = nesting == 0 && (isBreak(token) || token instanceof SemicolonToken
+                    || separator != null && separator.is(token) && !(token instanceof ColonToken && ternary > 0)
+                    || token instanceof BraceExprToken && ((BraceExprToken) token).isClosed()
+                    || token instanceof OperatorExprToken && ((OperatorExprToken) token).getPriority() > 150);
+            if (boundary) { iterator.previous(); break; }
+            if (token instanceof BraceExprToken) nesting += ((BraceExprToken) token).isOpened() ? 1 : -1;
+            if (nesting == 0 && token.getClass() == ValueIfElseToken.class) ternary++;
+            if (nesting == 0 && token instanceof ColonToken && ternary > 0) ternary--;
+            rightTokens.add(token);
+        }
+        if (rightTokens.isEmpty()) unexpectedToken(operator);
+        rightTokens.add(new SemicolonToken(TokenMeta.of(";", operator)));
+        ListIterator<Token> rightIterator = rightTokens.listIterator();
+        ExprStmtToken value = getToken(rightIterator.next(), rightIterator, Separator.SEMICOLON, null);
+        if (value == null) unexpectedToken(operator);
+        tokens.subList(start, tokens.size()).clear();
+        return new NullCoalesceAssignExprToken(TokenMeta.of(operator, value), target, value);
+    }
+
+    private void validateConstantWrite(List<Token> tokens, Token at) {
+        ExprStmtToken target=new ExprStmtToken(analyzer.getEnvironment(),analyzer.getContext(),tokens);
+        if (analyzer.getEnvironment()!=null && org.develnext.jphp.core.compiler.common.NullsafeChain.isResult(target))
+            analyzer.getEnvironment().error(at.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                    "Can't use nullsafe operator in write context");
+        if (analyzer.getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5) return;
+        for (Token token : tokens) if (token instanceof DynamicAccessExprToken) return;
+        for (Token token : tokens) {
+            StaticAccessExprToken access = token instanceof StaticAccessExprToken ? (StaticAccessExprToken) token
+                    : token instanceof StaticAccessOperatorExprToken ? ((StaticAccessOperatorExprToken) token).getOrigin() : null;
+            if (access != null && (access.isDynamicConstant() || access.getField() instanceof NameToken || access.getField() instanceof ClassExprToken))
+                analyzer.getEnvironment().error(at.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                        "Cannot use temporary expression in write context");
+        }
+    }
+
+    private static StaticAccessExprToken staticAccess(Token token) {
+        return token instanceof StaticAccessExprToken ? (StaticAccessExprToken)token
+                : token instanceof StaticAccessOperatorExprToken ? ((StaticAccessOperatorExprToken)token).getOrigin() : null;
+    }
+
+    private void markReferencePropertyReads(List<Token> tokens) {
+        for (int i=0;i<tokens.size()-1;i++) {
+            StaticAccessExprToken access=staticAccess(tokens.get(i));
+            Token next=tokens.get(i+1);
+            if (access != null && (next instanceof AssignExprToken || next instanceof ArrayGetRefExprToken
+                    || next instanceof ArrayPushExprToken)) access.setWriteAccess(true);
+            if (next instanceof DynamicAccessAssignExprToken && tokens.get(i).getClass() == DynamicAccessExprToken.class)
+                tokens.set(i,new DynamicAccessGetRefExprToken((DynamicAccessExprToken)tokens.get(i)));
+        }
+        for (int i=0; i<tokens.size(); i++) {
+            if (!(tokens.get(i) instanceof AmpersandRefToken)) continue;
+            int lastAccess=-1;
+            for (int j=i+1; j<tokens.size(); j++) {
+                Token token=tokens.get(j);
+                if (token instanceof DynamicAccessExprToken || token instanceof ArrayGetExprToken
+                        || staticAccess(token) != null || token instanceof CallOperatorToken) lastAccess=j;
+                else if (token instanceof OperatorExprToken) break;
+            }
+            if (lastAccess >= 0 && tokens.get(lastAccess).getClass() == DynamicAccessExprToken.class)
+                tokens.set(lastAccess,new DynamicAccessGetRefExprToken((DynamicAccessExprToken)tokens.get(lastAccess)));
+            if (lastAccess >= 0 && staticAccess(tokens.get(lastAccess)) != null)
+                staticAccess(tokens.get(lastAccess)).setWriteAccess(true);
+        }
+    }
+
+    private void markCoalescingPropertyReads(List<Token> tokens) {
+        int start = 0, depth = 0;
+        for (int i = tokens.size()-1; i >= 0; i--) {
+            Token token = tokens.get(i);
+            if (isClosedBrace(token, SIMPLE)) depth++;
+            else if (isOpenedBrace(token, SIMPLE)) {
+                if (depth == 0) {start = i+1; break;}
+                depth--;
+            } else if (token instanceof OperatorExprToken && !(token instanceof DynamicAccessExprToken)
+                    && !(token instanceof ArrayGetExprToken) && !(token instanceof StaticAccessOperatorExprToken)
+                    && !(token instanceof CallOperatorToken)) {
+                // Arithmetic/call arguments still perform ordinary reads. Only a direct access spine is quiet.
+                if (depth != 0 || ((OperatorExprToken) token).getPriority() < 140) return;
+                start = i+1; break;
+            }
+        }
+        for (int i=start; i<tokens.size(); i++) {
+            Token token=tokens.get(i);
+            if (token instanceof DynamicAccessExprToken) ((DynamicAccessExprToken)token).setCoalescingRead(true);
+            if (staticAccess(token) != null) staticAccess(token).setQuietRead(true);
+        }
+    }
+
+    private void deferArrayAssignment(List<Token> tokens) {
+        if (tokens.isEmpty() || !(tokens.get(tokens.size() - 1) instanceof ArrayGetExprToken
+                || tokens.get(tokens.size() - 1) instanceof ArrayPushExprToken)) return;
+        int start = 0, depth = 0;
+        for (int i = tokens.size() - 1; i >= 0; i--) {
+            Token token = tokens.get(i);
+            if (isClosedBrace(token, SIMPLE)) depth++;
+            else if (isOpenedBrace(token, SIMPLE)) {
+                if (depth == 0) { start = i + 1; break; }
+                depth--;
+            } else if (depth == 0 && token instanceof OperatorExprToken
+                    && !(token instanceof ArrayGetExprToken) && !(token instanceof ArrayPushExprToken)
+                    && !(token instanceof DynamicAccessExprToken) && !(token instanceof CallOperatorToken)) {
+                start = i + 1; break;
+            }
+        }
+        List<Token> targetTokens = new ArrayList<>(tokens.subList(start, tokens.size()));
+        validateConstantWrite(targetTokens, tokens.get(tokens.size() - 1));
+        if (analyzer.getFunction() != null) {
+            int baseStart = 0, baseEnd = targetTokens.size();
+            while (baseEnd > 0 && (targetTokens.get(baseEnd - 1) instanceof ArrayGetExprToken
+                    || targetTokens.get(baseEnd - 1) instanceof ArrayPushExprToken
+                    || targetTokens.get(baseEnd - 1) instanceof DynamicAccessExprToken)) baseEnd--;
+            while (baseEnd - baseStart > 2 && isOpenedBrace(targetTokens.get(baseStart), SIMPLE)
+                    && isClosedBrace(targetTokens.get(baseEnd - 1), SIMPLE)) { baseStart++; baseEnd--; }
+            if (baseEnd - baseStart == 1 && targetTokens.get(baseStart) instanceof VariableExprToken)
+                analyzer.getFunction().variable((VariableExprToken) targetTokens.get(baseStart)).setReference(true).setUnstable(true);
+            for (Token step : targetTokens) if (step instanceof ArrayGetExprToken) {
+                for (ExprStmtToken key : ((ArrayGetExprToken) step).getParameters())
+                    if (key.isSingle() && key.getSingle() instanceof VariableExprToken)
+                        analyzer.getFunction().variable((VariableExprToken) key.getSingle()).setReference(true).setUnstable(true);
+            } else if (step instanceof DynamicAccessExprToken) {
+                DynamicAccessExprToken property = (DynamicAccessExprToken) step;
+                VariableExprToken field = property.getField() instanceof VariableExprToken ? (VariableExprToken) property.getField()
+                        : property.getFieldExpr() != null && property.getFieldExpr().isSingle() && property.getFieldExpr().getSingle() instanceof VariableExprToken
+                        ? (VariableExprToken) property.getFieldExpr().getSingle() : null;
+                if (field != null) analyzer.getFunction().variable(field).setReference(true).setUnstable(true);
+            }
+        }
+        ExprStmtToken target = new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), targetTokens);
+        tokens.subList(start, tokens.size()).clear();
+        tokens.add(new ArrayAssignTargetExprToken(target.getMeta(), target));
+    }
+
     protected Token processValueIfElse(ValueIfElseToken current, Token next, ListIterator<Token> iterator,
                                        BraceExprToken.Kind closedBrace, int braceOpened, Separator separator){
         ExprStmtToken value = null;
@@ -728,6 +990,21 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 unexpectedToken(iterator.next());
 
             current.setAlternative(alternative);
+            if (analyzer.getEnvironment() != null && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                int depth = 0;
+                for (Token token : alternative.getTokens()) {
+                    if (token instanceof BraceExprToken) {
+                        depth += ((BraceExprToken) token).isOpened() ? 1 : -1;
+                    } else if (depth == 0 && token instanceof ValueIfElseToken
+                            && !(token instanceof ValueNullCoalesceIfElseToken)) {
+                        if (current.getValue() != null || ((ValueIfElseToken) token).getValue() != null) {
+                            analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()),
+                                    php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,
+                                    "Unparenthesized nested ternary is not supported; use explicit parentheses");
+                        }
+                    }
+                }
+            }
         }
 
         return current;
@@ -791,6 +1068,7 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
             next = makeSensitive(next);
         }
 
+        validateRelativeClass(next);
         if (next instanceof NameToken){
             FulledNameToken nameToken = analyzer.getRealName((NameToken)next);
             result.setName(nameToken);
@@ -825,7 +1103,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
             scope.setStaticExists(true);
             result.setName((StaticExprToken)next);
         } else if (next instanceof SelfExprToken){
-            if (analyzer.getClazz() == null) {
+            if (analyzer.getClazz() == null || analyzer.getPhpLanguageProfile()
+                    == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                 result.setName((SelfExprToken) next);
             } else {
                 if (analyzer.getClazz().isTrait()) {
@@ -844,6 +1123,17 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
 
         next = nextToken(iterator);
         if (isOpenedBrace(next, SIMPLE)){
+            if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && nextTokenAndPrev(iterator) instanceof ArgumentUnpackExprToken) {
+                nextToken(iterator);
+                if (isClosedBrace(nextTokenAndPrev(iterator), SIMPLE)) {
+                    if (analyzer.getEnvironment() != null) analyzer.getEnvironment().error(
+                            current.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                            "Cannot create Closure for new expression");
+                    unexpectedToken(current);
+                }
+                iterator.previous();
+            }
             ExprStmtToken param;
             List<ExprStmtToken> parameters = new ArrayList<ExprStmtToken>();
             do {
@@ -1034,6 +1324,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                     || (canStartByReference && previous == null)) {
                 if (previous instanceof AssignExprToken)
                     ((AssignExprToken) previous).setAsReference(true);
+                if (previous instanceof KeyValueExprToken)
+                    ((KeyValueExprToken) previous).setValueReference(true);
 
                 iterator.previous();
                 Token token = iterator.previous(); // =
@@ -1050,7 +1342,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 }
                 iterator.next();
                 iterator.next();
-                if (!(next instanceof ValueExprToken))
+                if (!(next instanceof ValueExprToken) && !(next instanceof DollarExprToken
+                        && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5))
                     unexpectedToken(token);
 
             } else {
@@ -1066,6 +1359,14 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                     analyzer.getFunction().variable((VariableExprToken)current).setReference(true);
         }
 
+        if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            if (current instanceof PowExprToken) return new PhpPowExprToken(current.getMeta());
+            if ((current instanceof MinusExprToken || current instanceof PlusExprToken)
+                    && !(previous instanceof ValueExprToken || previous instanceof ArrayGetExprToken
+                    || previous instanceof DynamicAccessExprToken || isClosedBrace(previous)))
+                return new UnaryNumericExprToken(current.getMeta(), current instanceof MinusExprToken);
+        }
+
         if ((current instanceof MinusExprToken || current instanceof PlusExprToken)
                 && (next instanceof IntegerExprToken || next instanceof DoubleExprToken)){
 
@@ -1075,6 +1376,12 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 iterator.next();
                 // if it minus
                 if (current instanceof MinusExprToken){
+                    if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                        TokenMeta meta = TokenMeta.of(current, next);
+                        if (next instanceof IntegerExprToken)
+                            return new IntegerExprToken(meta, -((IntegerExprToken) next).getValue());
+                        return new DoubleExprToken(meta, -((DoubleExprToken) next).getValue());
+                    }
                     if (next instanceof IntegerExprToken){
                         return new IntegerExprToken(TokenMeta.of(current, next));
                     } else if (next instanceof DoubleExprToken){
@@ -1096,17 +1403,50 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
             }
         }
 
+        if (current instanceof PipeExprToken
+                && (analyzer.getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    || next instanceof LambdaStmtToken)) unexpectedToken(current);
+
         if (current instanceof LogicOperatorExprToken){
             if (next == null)
                 unexpectedToken(current);
 
             final LogicOperatorExprToken logic = (LogicOperatorExprToken)current;
-            ExprStmtToken result = analyzer.generator(SimpleExprGenerator.class).getNextExpression(
-                nextToken(iterator),
-                iterator,
-                separator,
-                braceOpened > 0 ? SIMPLE : closedBraceKind
-            );
+            ExprStmtToken result;
+            if (analyzer.getPhpLanguageProfile()
+                    == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                // Bound recursive parsing so a weaker logical or ternary operator stays outside this RHS.
+                List<Token> right = new ArrayList<>();
+                int nesting = 0;
+                while (iterator.hasNext()) {
+                    Token token = iterator.next();
+                    if (nesting == 0 && (isBreak(token) || token instanceof SemicolonToken
+                            || separator != null && separator.is(token)
+                            || token instanceof BraceExprToken && ((BraceExprToken) token).isClosed()
+                            || logic instanceof PipeExprToken && token instanceof AmpersandRefToken
+                                && !right.isEmpty() && !(right.get(right.size()-1) instanceof FunctionStmtToken)
+                            || (token instanceof LogicOperatorExprToken || token instanceof ValueIfElseToken
+                                || logic instanceof PipeExprToken && token instanceof OperatorExprToken
+                                    && ((OperatorExprToken) token).isBinary())
+                                && ((OperatorExprToken) token).getPriority() >= logic.getPriority())) {
+                        iterator.previous();
+                        break;
+                    }
+                    if (token instanceof BraceExprToken) nesting += ((BraceExprToken) token).isOpened() ? 1 : -1;
+                    right.add(token);
+                }
+                if (right.isEmpty()) unexpectedToken(current);
+                if (logic instanceof PipeExprToken && right.size() > 1
+                        && right.get(0) instanceof StaticExprToken && right.get(1) instanceof LambdaStmtToken)
+                    unexpectedToken(right.get(1));
+                right.add(new SemicolonToken(TokenMeta.of(";", current)));
+                ListIterator<Token> bounded = right.listIterator();
+                result = analyzer.generator(SimpleExprGenerator.class).getToken(
+                        bounded.next(), bounded, Separator.SEMICOLON, null);
+            } else {
+                result = analyzer.generator(SimpleExprGenerator.class).getNextExpression(
+                        nextToken(iterator), iterator, separator, braceOpened > 0 ? SIMPLE : closedBraceKind);
+            }
 
             logic.setRightValue(result);
             return logic;
@@ -1180,10 +1520,28 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                 continue;
             }
 
-            ExprStmtToken argument = generator.getToken(nextToken, iterator, Separator.COMMA, braceKind);
-            if (argument == null)
-                break;
+            boolean unpack = nextToken instanceof ArgumentUnpackExprToken;
+            if (unpack) {
+                generator.setCanStartByReference(false);
+                nextToken = nextToken(iterator);
+            }
 
+            ExprStmtToken argument = generator.getToken(nextToken, iterator, Separator.COMMA, braceKind);
+            if (argument == null) {
+                if (unpack) unexpectedToken(nextToken);
+                break;
+            }
+
+            if (unpack) {
+                for (Token token : argument.getTokens()) {
+                    if (token instanceof KeyValueExprToken) unexpectedToken(token);
+                }
+                result.setUnpacked(parameters.size());
+            }
+
+            for (Token token : argument.getTokens()) {
+                if (token instanceof KeyValueExprToken) ((KeyValueExprToken) token).setArrayEntry(true);
+            }
             parameters.add(argument);
         } while (true);
         nextToken(iterator); // skip )
@@ -1281,6 +1639,12 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
 
             if (next instanceof AssignableOperatorToken || lastPush){
                 result = new ArrayGetRefExprToken(result);
+                if (next instanceof OperatorExprToken && org.develnext.jphp.core.compiler.common.util.CompilerUtils.isPhpArithmetic((OperatorExprToken) next)
+                        && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    ((ArrayGetRefExprToken) result).setArithmeticTarget(true);
+                    if (var != null && analyzer.getFunction() != null)
+                        analyzer.getFunction().variable(var).setReference(true).setUnstable(true);
+                }
 
                 if (var != null && analyzer.getFunction() != null) {
                     analyzer.getFunction().variable(var).setMutable(true);
@@ -1360,7 +1724,13 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                         isFunc = true;
                     else if (previous instanceof StaticAccessExprToken){
                         isFunc = true; // !((StaticAccessExprToken)previous).isGetStaticField(); TODO check it!
-                    } else if (previous instanceof DynamicAccessExprToken){
+                    } else if (previous instanceof DynamicAccessExprToken
+                            || previous instanceof StaticAccessOperatorExprToken && analyzer.getPhpLanguageProfile()
+                                == php.runtime.common.PhpLanguageProfile.PHP_8_5){
+                        isFunc = true;
+                    } else if (isClosedBrace(previous, SIMPLE)
+                            && analyzer.getPhpLanguageProfile()
+                                == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                         isFunc = true;
                     }
 
@@ -1393,12 +1763,16 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                         GetVarExprToken.class,
                         CallExprToken.class,
                         ArrayGetExprToken.class,
+                        ArrayExprToken.class,
                         DynamicAccessExprToken.class,
                         StringExprToken.class,
                         StringBuilderExprToken.class,
                         CallOperatorToken.class,
                         ArrayPushExprToken.class) ||
-                        (previous instanceof StaticAccessExprToken && ((StaticAccessExprToken)previous).isGetStaticField())){
+                        isClosedBrace(previous, SIMPLE) ||
+                        (previous instanceof StaticAccessExprToken && (((StaticAccessExprToken)previous).isGetStaticField()
+                                || analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5))
+                        || previous instanceof StaticAccessOperatorExprToken && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5){
                     // array
                     current = processArrayToken(previous, current, iterator);
                     if (previous instanceof DynamicAccessExprToken && current instanceof ArrayGetRefExprToken){
@@ -1447,11 +1821,21 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
             } else if (separator == Separator.ARRAY_BLOCK
                     && braceOpened == 0 && isClosedBrace(current, BLOCK)){
                 break;
+            } else if (current instanceof StaticExprToken
+                    && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && (next instanceof FunctionStmtToken || next instanceof LambdaStmtToken)) {
+                Token function = nextToken(iterator);
+                current = function instanceof FunctionStmtToken
+                        ? processClosure(function, null, iterator)
+                        : processLambda(function, iterator, separator, braceOpened > 0 ? SIMPLE : closedBraceKind);
+                if (!(current instanceof ClosureStmtToken)) unexpectedToken(function);
+                ((ClosureStmtToken) current).setStaticClosure(true);
+                tokens.add(current);
             } else if (current instanceof FunctionStmtToken) {
                 current = processClosure(current, next, iterator);
                 tokens.add(current);
             } else if (current instanceof LambdaStmtToken) {
-                current = processLambda(current, iterator, separator, closedBraceKind);
+                current = processLambda(current, iterator, separator, braceOpened > 0 ? SIMPLE : closedBraceKind);
                 tokens.add(current);
             } else if (current instanceof ListExprToken && isOpenedBrace(next, SIMPLE)){
                 current = processList(current, iterator, null, closedBraceKind, braceOpened);
@@ -1525,10 +1909,17 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                     unexpectedToken(current);
 
                 tokens.add(current = processNewArray(current, iterator));
+            } else if (current instanceof AssignNullCoalesceExprToken) {
+                tokens.add(current = processNullCoalesceAssign(current, tokens, iterator, separator));
             } else if (current instanceof ExprToken) {
                 if (needBreak)
                     unexpectedToken(current);
 
+                if (current instanceof AssignExprToken && analyzer.getPhpLanguageProfile()
+                        == php.runtime.common.PhpLanguageProfile.PHP_8_5) deferArrayAssignment(tokens);
+
+                if (current instanceof ValueNullCoalesceIfElseToken && analyzer.getPhpLanguageProfile()
+                        == php.runtime.common.PhpLanguageProfile.PHP_8_5) markCoalescingPropertyReads(tokens);
                 CastExprToken cast = null;
                 if (current instanceof NameToken && isOpenedBrace(previous, SIMPLE)
                         && isClosedBrace(next, SIMPLE)){
@@ -1573,6 +1964,8 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
         if (braceOpened != 0)
             unexpectedToken(iterator.previous());
 
+        if (analyzer.getPhpLanguageProfile()
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5) markReferencePropertyReads(tokens);
         ExprStmtToken exprStmtToken = new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), tokens);
 
         return exprStmtToken;

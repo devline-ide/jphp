@@ -27,6 +27,8 @@ public class LambdaGenerator extends Generator<LambdaStmtToken> {
             ExprStmtToken expression = analyzer.generator(SimpleExprGenerator.class).getNextExpression(token, iterator, separator, braceKind);
             ReturnStmtToken returnStmtToken = new ReturnStmtToken(expression.getMeta());
             returnStmtToken.setValue(expression);
+            if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                returnStmtToken.setImplicit(true);
 
             BodyStmtToken body = new BodyStmtToken(returnStmtToken.getMeta());
             body.setInstructions(Arrays.asList(new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), returnStmtToken)));

@@ -11,6 +11,7 @@ import java.util.List;
 
 public class CallOperatorToken extends OperatorExprToken implements CallableExprToken {
     private List<ExprStmtToken> parameters;
+    private boolean firstClassCallable;
 
     protected CallOperatorToken(TokenMeta meta, TokenType type) {
         super(meta, type);
@@ -23,7 +24,10 @@ public class CallOperatorToken extends OperatorExprToken implements CallableExpr
     public CallOperatorToken(CallExprToken call) {
         this(call.getMeta());
         parameters = call.getParameters();
+        firstClassCallable = call.isFirstClassCallable();
     }
+
+    public boolean isFirstClassCallable() {return firstClassCallable;}
 
     public List<ExprStmtToken> getParameters() {
         return parameters;

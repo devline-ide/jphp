@@ -8,19 +8,20 @@
 package php.runtime.util.generator;
 
 import java.util.NoSuchElementException;
-import java.util.concurrent.SynchronousQueue;
+import java.util.concurrent.LinkedTransferQueue;
 
 /**
  * A class to convert methods that implement the Collector<> class into a standard Iterable<>, using
- * a new thread created for the collection process, and a SynchronousQueue<> object.
+ * a new thread created for the collection process, and a transfer queue.
  */
 public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
+    private static final Object RESUME = new Object();
 
     /**
      * Message structure to pass values between threads.
      */
     class Message {
-
+        Throwable failure() { return null; }
     }
 
     abstract private class StopMessage extends Message {
@@ -35,8 +36,19 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
 
     }
 
+    private class FailedMessage extends StopMessage {
+        private final Throwable failure;
+
+        private FailedMessage(Throwable failure) { this.failure = failure; }
+
+        @Override
+        Throwable failure() { return failure; }
+    }
+
     private static class VarContainer<T> {
         T var;
+        volatile boolean closed;
+        Object packet;
 
         public T getVar() {
             return var;
@@ -56,7 +68,7 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
             this.value = value;
         }
 
-        final T value;
+        T value;
     }
 
 
@@ -76,60 +88,65 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
         return new YieldAdapterIterable<T>() {
             public YieldAdapterIterator<T> iterator() {
 
-                final SynchronousQueue<Message> synchronousQueue = new SynchronousQueue<Message>();
+                final LinkedTransferQueue<Message> synchronousQueue = new LinkedTransferQueue<Message>();
 
                 // Mechanism to ensure both threads don't run at the same time
-                final SynchronousQueue<Object> returnQueue = new SynchronousQueue<Object>();
+                final LinkedTransferQueue<Object> returnQueue = new LinkedTransferQueue<Object>();
 
                 final VarContainer<Thread> collectThread = new VarContainer<Thread>();
 
                 final YieldAdapterIterator<T> iterator = new YieldAdapterIterator<T>() {
-                    private Message messageWaiting = null;
+                    private volatile Message messageWaiting = null;
 
                     public boolean hasNext() {
 
                         readNextMessage();
-                        return !StopMessage.class.isAssignableFrom(messageWaiting.getClass());
+                        return !collectThread.closed && !StopMessage.class.isAssignableFrom(messageWaiting.getClass());
                         // instanceof cannot be used because of generics restriction
                     }
 
                     public T next() {
                         readNextMessage();
 
-                        if (StopMessage.class.isAssignableFrom(messageWaiting.getClass())) {
-                            // instanceof cannot be used because of generics restriction
-                            throw new NoSuchElementException();
-                        }
+                        synchronized (this) {
+                            if (collectThread.closed || StopMessage.class.isAssignableFrom(messageWaiting.getClass())) {
+                                // instanceof cannot be used because of generics restriction
+                                throw new NoSuchElementException();
+                            }
 
-                        final T value = currentValue = ((ValueMessage) messageWaiting).value;
-                        messageWaiting = null; // for next time
-                        return value;
+                            ValueMessage packet = (ValueMessage) messageWaiting;
+                            final T value = currentValue = packet.value;
+                            packet.value = null;
+                            messageWaiting = null; // for next time
+                            return value;
+                        }
                     }
 
                     private void readNextMessage() {
+                        if (collectThread.closed) {
+                            messageWaiting = new EndMessage();
+                            return;
+                        }
                         if (messageWaiting == null) { // do not run if value waiting to be put
                             try {
-                              returnQueue.put(new Object()); // allow other thread to gather result
-                              messageWaiting = synchronousQueue.take();
-
+                                returnQueue.offer(RESUME); // allow other thread to gather result
+                                messageWaiting = synchronousQueue.take();
                             } catch (final InterruptedException e) {
-                                messageWaiting = new EndMessage();
+                                Thread.currentThread().interrupt();
+                                close();
                             }
+                        }
+                        Throwable failure = messageWaiting.failure();
+                        if (failure != null && !collectThread.closed) {
+                            messageWaiting = new EndMessage();
+                            if (failure instanceof RuntimeException) throw (RuntimeException) failure;
+                            if (failure instanceof Error) throw (Error) failure;
+                            throw new IllegalStateException(failure);
                         }
                     }
 
                     public void remove() {
                         throw new UnsupportedOperationException("Generators don't support remove()");
-                    }
-
-                    @Override
-                    /**
-                     * Iterator's finalize() can be used to tell when it is out of scope, and the
-                     * collecting thread can be terminated.
-                     */
-                    protected void finalize() throws Throwable {
-                        close();
-                        super.finalize();
                     }
 
                     /**
@@ -138,7 +155,30 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                      */
                     @Override
                     public void close() {
-                        collectThread.getVar().interrupt();
+                        Thread worker = collectThread.getVar();
+                        synchronized (this) {
+                            if (!collectThread.closed) {
+                                collectThread.closed = true;
+                                // Keep a terminal marker available even when a reader has not taken yet.
+                                synchronousQueue.offer(new EndMessage());
+                                if (worker != Thread.currentThread()) worker.interrupt();
+                            }
+                        }
+                        if (worker != Thread.currentThread()) {
+                            boolean interrupted = false;
+                            while (worker.isAlive()) {
+                                try {
+                                    worker.join();
+                                } catch (InterruptedException e) {
+                                    interrupted = true;
+                                }
+                            }
+                            if (interrupted) Thread.currentThread().interrupt();
+                        }
+                        messageWaiting = new EndMessage();
+                        currentValue = null;
+                        throwable = null;
+                        if (collectThread.packet != null) ((ValueMessage) collectThread.packet).value = null;
                     }
                 };
 
@@ -166,8 +206,14 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                                     public T handleResult(final T value)
                                             throws CollectionAbortedException {
                                         try {
+                                            if (collectThread.closed) throw new CollectionAbortedException(new InterruptedException());
                                             T oldValue = iterator.getCurrentValue();
-                                            synchronousQueue.put(new ValueMessage(value));
+                                            ValueMessage packet = (ValueMessage) collectThread.packet;
+                                            if (packet == null) {
+                                                packet = new ValueMessage(value);
+                                                collectThread.packet = packet;
+                                            } else packet.value = value;
+                                            synchronousQueue.transfer(packet);
                                             returnQueue.take();  // wait for permission to continue
                                             return oldValue;
                                         } catch (final InterruptedException e) {
@@ -177,7 +223,7 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                                     }
                                 });
 
-                                synchronousQueue.put(new EndMessage());
+                                if (!collectThread.closed) synchronousQueue.transfer(new EndMessage());
                                 // Signal no more results to come
 
                             } catch (final CollectionAbortedException collectionAborted) {
@@ -186,8 +232,10 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                                     // Collect was aborted by client
                                     // This is not sent on thread abort as there is nothing waiting
                                     // to receive it, and the thread will block.
-                                    synchronousQueue.put(new AbortedMessage());
+                                    if (!collectThread.closed) synchronousQueue.transfer(new AbortedMessage());
                                 }
+                            } catch (RuntimeException | Error failure) {
+                                if (!collectThread.closed) synchronousQueue.transfer(new FailedMessage(failure));
                             }
 
                         } catch (final InterruptedException e) {

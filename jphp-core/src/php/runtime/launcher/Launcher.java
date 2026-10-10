@@ -6,6 +6,7 @@ import php.runtime.Memory;
 import php.runtime.Startup;
 import php.runtime.common.Callback;
 import php.runtime.common.LangMode;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.common.StringUtils;
 import php.runtime.env.*;
 import php.runtime.exceptions.support.ErrorType;
@@ -156,6 +157,9 @@ public class Launcher {
                 compileScope.setLangMode(
                         LangMode.valueOf(getConfigValue("env.langMode", LangMode.MODERN.name()).toString().toUpperCase())
                 );
+                compileScope.setPhpLanguageProfile(PhpLanguageProfile.valueOf(
+                        getConfigValue("env.phpProfile", PhpLanguageProfile.JPHP_LEGACY.name()).toString().toUpperCase(Locale.ROOT)
+                ));
             } catch (IOException e) {
                 throw new LaunchException(e.getMessage());
             }

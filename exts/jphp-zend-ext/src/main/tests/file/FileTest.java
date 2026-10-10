@@ -15,4 +15,12 @@ public class FileTest extends ZendJvmTestCase {
     public void testDirname() {
         check("ext/file/dirname_001.php");
     }
+
+    @Test
+    public void testResourceDirname() {
+        org.junit.Assert.assertEquals("res://package/php", org.develnext.jphp.zend.ext.standard.FileFunctions.dirname("res://package/php/Reader.php"));
+        org.junit.Assert.assertEquals("res://", org.develnext.jphp.zend.ext.standard.FileFunctions.dirname("res://Reader.php"));
+        org.junit.Assert.assertEquals("res://", org.develnext.jphp.zend.ext.standard.FileFunctions.dirname("res://"));
+        org.junit.Assert.assertEquals("res://package", org.develnext.jphp.zend.ext.standard.FileFunctions.dirname("res://package/php/"));
+    }
 }

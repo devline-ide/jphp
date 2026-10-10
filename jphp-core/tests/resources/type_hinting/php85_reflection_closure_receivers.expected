@@ -1,0 +1,4 @@
+omitted:ValueError:ReflectionMethod::getClosure(): Argument #1 ($object) cannot be null for non-static methods
+null:ValueError:ReflectionMethod::getClosure(): Argument #1 ($object) cannot be null for non-static methods
+foreign:ReflectionException:Given object is not an instance of the class this method was declared in
+scalar:TypeError:ReflectionMethod::getClosure(): Argument #1 ($object) must be of type ?object, int given

@@ -39,7 +39,8 @@ public class WrapModule extends BaseObject {
     @Signature({
             @Arg("source"),
             @Arg(value = "compiled", optional = @Optional("false")),
-            @Arg(value = "debugInformation", optional = @Optional("true"))
+            @Arg(value = "debugInformation", optional = @Optional("true")),
+            @Arg(value = "sourceName", optional = @Optional("NULL"))
     })
     public Memory __construct(Environment env, Memory... args) throws Throwable {
         InputStream is = Stream.getInputStream(env, args[0]);
@@ -48,7 +49,8 @@ public class WrapModule extends BaseObject {
                 is = new BufferedInputStream(is);
             }
 
-            Context context = new Context(is, Stream.getPath(args[0]), env.getDefaultCharset());
+            String sourceName = args[3].isNull() ? Stream.getPath(args[0]) : args[3].toString();
+            Context context = new Context(is, sourceName, env.getDefaultCharset());
             if (args[1].toBoolean()) {
                 ModuleDumper moduleDumper = new ModuleDumper(context, env, args[2].toBoolean());
                 module = moduleDumper.load(context.getInputStream(env.getDefaultCharset()));

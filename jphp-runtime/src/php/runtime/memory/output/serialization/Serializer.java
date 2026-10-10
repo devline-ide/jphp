@@ -99,10 +99,22 @@ public class Serializer {
             if (appendType)
                 printer.append("a:");
 
-            printer.append(String.valueOf(memory.size())).append(":{");
+            int count = memory.size();
+            if (memory instanceof php.runtime.memory.PhpObjectProperties) {
+                count = 0;
+                ForeachIterator values = memory.foreachIterator(false, false);
+                while (values.next()) {
+                    if (values.getValue().isUndefined() && ((php.runtime.memory.PhpObjectProperties) memory)
+                            .omitUndefined(values.getKey().toString())) continue;
+                    count++;
+                }
+            }
+            printer.append(String.valueOf(count)).append(":{");
 
             ForeachIterator iterator = memory.foreachIterator(false, false);
             while (iterator.next()){
+                if (memory instanceof php.runtime.memory.PhpObjectProperties && iterator.getValue().isUndefined()
+                        && ((php.runtime.memory.PhpObjectProperties) memory).omitUndefined(iterator.getKey().toString())) continue;
                 Memory key = iterator.getMemoryKey();
                 write(key);
                 if (iterator.getValue().isReference())

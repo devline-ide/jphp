@@ -1,0 +1,60 @@
+pow-right-assoc	integer	512		a:0:{}
+pow-parentheses	integer	64		a:0:{}
+unary-minus-pow	integer	-4		a:0:{}
+unary-plus-pow	integer	8		a:0:{}
+negative-base	integer	-8		a:0:{}
+negative-exponent	double	0.125		a:0:{}
+multiple-unary	integer	4		a:0:{}
+cast-before-power	integer	1		a:0:{}
+cast-exponent	integer	1		a:0:{}
+bitnot-before-power	integer	-9		a:0:{}
+boolean-not-before-power	boolean	b:0;		a:0:{}
+boolean-not-before-multiply	integer	0		a:0:{}
+power-before-multiply	integer	18		a:0:{}
+multiply-after-power	integer	16		a:0:{}
+int-power-boundary	integer	-9223372036854775808		a:0:{}
+float-power-overflow	double	1.2157665459056929e+19		a:0:{}
+float-float-power	double	3.9528470752104741		a:0:{}
+div-overflow	double	9.2233720368547758e+18		a:0:{}
+div-integral	integer	4		a:0:{}
+div-real	double	4		a:0:{}
+dead-code-warnings	array	a:0:{}		a:0:{}
+compound:+:result	integer	8		a:1:{i:0;i:2;}
+compound:+:alias	integer	8		a:0:{}
+compound:-:result	integer	6		a:1:{i:0;i:2;}
+compound:-:alias	integer	6		a:0:{}
+compound:*:result	integer	7		a:1:{i:0;i:2;}
+compound:*:alias	integer	7		a:0:{}
+compound:/:result	integer	7		a:1:{i:0;i:2;}
+compound:/:alias	integer	7		a:0:{}
+compound:%:result	integer	0		a:1:{i:0;i:2;}
+compound:%:alias	integer	0		a:0:{}
+compound:**:result	integer	7		a:1:{i:0;i:2;}
+compound:**:alias	integer	7		a:0:{}
+rhs-changes-local	array	a:2:{i:0;i:20;i:1;i:20;}		a:0:{}
+rhs-changes-index	array	a:1:{i:0;i:20;}		a:0:{}
+rhs-replaces-array	array	a:1:{i:0;i:18;}		a:0:{}
+array-compound-cow	array	a:3:{i:0;a:1:{s:1:"x";i:14;}i:1;a:1:{s:1:"x";i:7;}i:2;i:14;}		a:0:{}
+division-error-preserves-target	integer	7		a:0:{}
+type-error-preserves-target	integer	7		a:0:{}
+property-compound	array	a:2:{i:0;i:14;i:1;i:9;}		a:0:{}
+magic-compound	array	a:2:{i:0;i:14;i:1;a:3:{i:0;s:3:"rhs";i:1;s:9:"get:value";i:2;s:12:"set:value:14";}}		a:0:{}
+union-cow-and-reference	array	a:3:{i:0;a:1:{s:1:"a";a:1:{i:0;i:1;}}i:1;a:1:{s:1:"b";i:3;}i:2;a:2:{s:1:"a";a:1:{i:0;i:2;}s:1:"b";R:6;}}		a:0:{}
+offset-root:0	array	a:2:{i:0;a:1:{i:0;i:2;}i:1;i:2;}		a:1:{i:0;i:2;}
+offset-root:1	array	a:2:{i:0;a:1:{i:0;i:2;}i:1;i:2;}		a:2:{i:0;i:8192;i:1;i:2;}
+offset-root:2	array	a:2:{i:0;b:1;i:1;N;}	Error:Cannot use a scalar value as an array	a:0:{}
+offset-root:3	array	a:2:{i:0;i:1;i:1;N;}	Error:Cannot use a scalar value as an array	a:0:{}
+offset-root:4	array	a:2:{i:0;a:1:{i:0;i:2;}i:1;i:2;}		a:1:{i:0;i:2;}
+offset-root:5	array	a:2:{i:0;s:3:"abc";i:1;N;}	Error:Cannot use assign-op operators with string offsets	a:0:{}
+offset-root:6	array	a:2:{i:0;O:8:"stdClass":0:{}i:1;N;}	Error:Cannot use object of type stdClass as array	a:0:{}
+offset-key:0	array	a:2:{i:0;a:1:{i:0;i:7;}i:1;N;}	TypeError:Cannot access offset of type array on array	a:0:{}
+offset-key:1	array	a:2:{i:0;a:1:{i:0;i:7;}i:1;N;}	TypeError:Cannot access offset of type stdClass on array	a:0:{}
+offset-key:2	array	a:2:{i:0;a:2:{i:0;i:7;i:1;i:2;}i:1;i:2;}		a:2:{i:0;i:8192;i:1;i:2;}
+offset-key:3	array	a:2:{i:0;a:1:{i:0;i:9;}i:1;i:9;}		a:1:{i:0;i:2;}
+offset-key:4	array	a:2:{i:0;a:1:{i:0;i:9;}i:1;i:9;}		a:2:{i:0;i:2;i:1;i:8192;}
+offset-nested-missing	array	a:2:{i:0;a:1:{i:0;a:1:{i:1;i:2;}}i:1;i:2;}		a:2:{i:0;i:2;i:1;i:2;}
+arrayaccess-evaluation-order	array	a:3:{i:0;a:4:{i:0;s:3:"key";i:1;s:3:"rhs";i:2;s:3:"get";i:3;s:6:"set:12";}i:1;i:12;i:2;i:12;}		a:0:{}
+optimized-locals-and-category2	array	a:8:{i:0;i:20;i:1;i:20;i:2;d:17.5;i:3;d:17.5;i:4;d:22.5;i:5;d:22.5;i:6;d:-17.5;i:7;d:17.5;}		a:0:{}
+optimized-locals-preserve-on-error	array	a:2:{i:0;i:7;i:1;i:7;}		a:0:{}
+primitive-stack-order	array	a:20:{i:0;i:131;i:1;i:-1;i:2;i:4290;i:3;d:5;i:4;d:-1;i:5;d:6;i:6;d:67;i:7;d:67;i:8;d:63;i:9;d:-63;i:10;d:130;i:11;d:130;i:12;d:4;i:13;d:4;i:14;d:0;i:15;d:0;i:16;d:4;i:17;d:4;i:18;i:67;i:19;i:63;}		a:0:{}
+cast-primitive-stack-order	array	a:20:{i:0;i:9;i:1;i:5;i:2;i:14;i:3;d:9.5;i:4;d:4.5;i:5;d:17.5;i:6;d:9.5;i:7;d:9.5;i:8;d:4.5;i:9;d:-4.5;i:10;d:17.5;i:11;d:17.5;i:12;d:4.5;i:13;d:4.5;i:14;d:-0.5;i:15;d:0.5;i:16;d:5;i:17;d:5;i:18;i:9;i:19;i:5;}		a:0:{}

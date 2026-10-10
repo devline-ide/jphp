@@ -78,6 +78,50 @@ public class TypeHintingTest extends JvmCompilerCase {
     }
 
     @Test
+    public void testNullableFunctionReturn() {
+        check("type_hinting/nullable_function_return.php");
+    }
+
+    @Test
+    public void testWeakScalarCoercion() {
+        check("type_hinting/weak_scalar_coercion.php");
+    }
+
+    @Test
+    public void testStrictEval() throws Throwable {
+        php.runtime.env.Environment env = new php.runtime.env.Environment(newScope());
+        try {
+            Assert.assertEquals("caught", env.eval("declare(strict_types=1); "
+                    + "function f(int $value) { return $value; } "
+                    + "try { f('2'); } catch (TypeError $error) { return 'caught'; } return 'missed';").toString());
+            Assert.assertEquals(2L, env.eval("return f('2');").toLong());
+            Assert.assertEquals("caught", env.eval("declare(strict_types=1); "
+                    + "try { f('2'); } catch (TypeError $error) { return 'caught'; } return 'missed';").toString());
+        } finally {
+            env.doFinal();
+        }
+    }
+
+    @Test
+    public void testReturnStrictnessUsesDeclarationModule() throws Throwable {
+        php.runtime.env.Environment env = new php.runtime.env.Environment(newScope());
+        try {
+            env.eval("declare(strict_types=1); function strictReturn(): int { return '2'; } "
+                    + "class StrictReturn { function value(): int { echo ''; return '2'; } } "
+                    + "$strictClosure = function(): int { return '2'; };");
+            env.eval("function weakReturn(): int { return '2'; } "
+                    + "class WeakReturn { function value(): int { echo ''; return '2'; } } "
+                    + "$weakClosure = function(): int { return '2'; };");
+            Assert.assertEquals("caught", env.eval("try { strictReturn(); } catch (TypeError $error) { return 'caught'; } return 'missed';").toString());
+            Assert.assertEquals("caught", env.eval("try { (new StrictReturn)->value(); } catch (TypeError $error) { return 'caught'; } return 'missed';").toString());
+            Assert.assertEquals("caught", env.eval("try { $strictClosure(); } catch (TypeError $error) { return 'caught'; } return 'missed';").toString());
+            Assert.assertEquals(6L, env.eval("declare(strict_types=1); return weakReturn() + (new WeakReturn)->value() + $weakClosure();").toLong());
+        } finally {
+            env.doFinal();
+        }
+    }
+
+    @Test
     public void testSelf() {
         check("type_hinting/self.php");
     }

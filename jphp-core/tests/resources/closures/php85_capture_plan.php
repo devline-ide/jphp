@@ -1,0 +1,1 @@
+<?php $a=2;$b=7;$obj=new stdClass;$obj->value=9;$arr=["x"=>1];$c=function()use($b,&$a,$obj,$arr){$a+=3;$arr["x"]=2;return[$b,$a,$obj->value,$arr["x"]];};echo json_encode([$c(),$a,$arr["x"]]);

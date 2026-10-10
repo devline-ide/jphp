@@ -10,6 +10,7 @@ public class ArgumentStmtToken extends StmtToken {
     private boolean reference;
     private boolean variadic;
     private HintType hintType;
+    private php.runtime.reflection.support.PhpTypeDeclaration declaredType;
     private NameToken hintTypeClass;
     private VariableExprToken name;
     private ExprStmtToken value;
@@ -18,6 +19,9 @@ public class ArgumentStmtToken extends StmtToken {
     public ArgumentStmtToken(TokenMeta meta) {
         super(meta, TokenType.T_J_CUSTOM);
     }
+
+    public php.runtime.reflection.support.PhpTypeDeclaration getDeclaredType() {return declaredType;}
+    public void setDeclaredType(php.runtime.reflection.support.PhpTypeDeclaration type) {declaredType = type;}
 
     public NameToken getHintTypeClass() {
         return hintTypeClass;

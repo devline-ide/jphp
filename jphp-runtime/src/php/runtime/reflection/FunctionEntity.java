@@ -23,8 +23,6 @@ public class FunctionEntity extends AbstractFunctionEntity {
 
     private boolean isStatic = false;
 
-    private Closure cachedClosure;
-
     public FunctionEntity(Context context) {
         super(context);
     }
@@ -90,7 +88,9 @@ public class FunctionEntity extends AbstractFunctionEntity {
 
     @Override
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
-        Memory result = getImmutableResult();
+        Memory result = getImmutableResultForTypeCheck(module);
+        if (result != null && module != null && module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return InvokeHelper.checkReturnType(env, trace, result, this);
 
         if (result != null && !resultTypeChecked) {
             result = InvokeHelper.checkReturnType(env, trace, result, this);
@@ -106,12 +106,10 @@ public class FunctionEntity extends AbstractFunctionEntity {
 
     @Override
     public Closure getClosure(Environment env) {
-        if (cachedClosure != null)
-            return cachedClosure;
-
         final FunctionEntity bind = this;
         final ClosureEntity closureEntity1 = new ClosureEntity(this.getContext());
         closureEntity1.setParent(env.scope.fetchUserClass(Closure.class));
+        closureEntity1.setModule(module);
         closureEntity1.parameters = this.parameters;
         closureEntity1.setReturnReference(this.isReturnReference());
 
@@ -121,7 +119,7 @@ public class FunctionEntity extends AbstractFunctionEntity {
         closureEntity1.addMethod(m, null);
         closureEntity1.doneDeclare();
 
-        Closure tmp = new Closure(env, closureEntity1, new ObjectMemory(env.getLateObject()), null, new Memory[0]){
+        Closure tmp = new Closure(env, closureEntity1, Memory.NULL, null, new Memory[0]){
             @Override
             public Memory __invoke(Environment e, Memory... args) {
                 try {
@@ -149,6 +147,9 @@ public class FunctionEntity extends AbstractFunctionEntity {
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(e);
         }
-        return cachedClosure = tmp;
+        tmp.initializeReflectionBinding(null, module != null
+                ? module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                : env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5);
+        return tmp;
     }
 }

@@ -9,10 +9,10 @@ import php.runtime.exceptions.CriticalException;
 import php.runtime.exceptions.RecursiveException;
 import php.runtime.lang.ForeachIterator;
 import php.runtime.lang.IObject;
+import php.runtime.lang.exception.BaseError;
 import php.runtime.lang.StdClass;
 import php.runtime.memory.helper.ArrayKeyMemory;
 import php.runtime.memory.helper.ArrayValueMemory;
-import php.runtime.memory.helper.ShortcutMemory;
 import php.runtime.memory.support.*;
 import php.runtime.reflection.support.ReflectionUtils;
 
@@ -24,9 +24,100 @@ import java.util.stream.StreamSupport;
 
 public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     protected transient long lastLongIndex;
+    private long nextFreeElement = Long.MIN_VALUE;
+    private boolean pointerNeedsFirst;
     protected transient int size;
     protected transient int copies;
     protected transient ArrayMemory original;
+
+    // One allocation identity follows backing contents across views, including empty arrays.
+    // Sharing a Java view does not itself register a PHP owner. The runtime adapter owns edges.
+    private static final class ArrayStorage {
+        // Empty ordinary arrays pay for one field, like the previous pin counter.
+        // Active leases form a private chain whose tail carries the allocation stamp.
+        Object authority;
+        Object ownership() {
+            Object current=authority;
+            while (current instanceof WriteFetchLease) current=((WriteFetchLease)current).previous;
+            return current;
+        }
+        void ownership(Object certificate) {
+            WriteFetchLease previous=null;Object current=authority;
+            while (current instanceof WriteFetchLease) {
+                previous=(WriteFetchLease)current;current=previous.previous;
+            }
+            if (previous == null) authority=certificate;
+            else previous.previous=certificate;
+        }
+    }
+    private transient ArrayStorage storage;
+
+    public final Object getStorageIdentity() { return storage; }
+
+    /** Explicit adapters stamp the actual backing allocation, never an individual Java view. */
+    public final php.runtime.PhpOwnershipArrays.StorageCertificate getOwnershipStorage() {
+        Object authority=storage.ownership();
+        return authority instanceof php.runtime.PhpOwnershipArrays.StorageCertificate
+                ? (php.runtime.PhpOwnershipArrays.StorageCertificate)authority : null;
+    }
+    /** Separate actual TABLE allocation capability; property tables are never ordinary array VALUEs. */
+    public final php.runtime.PhpOwnershipObjects.PropertiesCertificate getOwnershipTable() {
+        Object authority=storage.ownership();
+        return authority instanceof php.runtime.PhpOwnershipObjects.PropertiesCertificate
+                ? (php.runtime.PhpOwnershipObjects.PropertiesCertificate)authority : null;
+    }
+    public final void attachOwnershipTable(php.runtime.PhpOwnershipObjects.PropertiesCertificate certificate) {
+        certificate.validateAttachment(this);
+        if (storage.ownership() != null) throw new IllegalStateException("Backing allocation already has an origin authority");
+        storage.ownership(certificate);
+    }
+    public final void attachOwnershipStorage(php.runtime.PhpOwnershipArrays.StorageCertificate certificate) {
+        certificate.validateAttachment(this);
+        var current=storage.ownership();
+        if (current != null && current != certificate)
+            throw new IllegalArgumentException("Array allocation already belongs to another ownership certificate");
+        storage.ownership(certificate);
+    }
+    public final boolean hasWriteFetchPins() { return storage.authority instanceof WriteFetchLease; }
+
+    protected boolean hasOwnershipMutationAuthority() { return storage.ownership() != null; }
+
+    protected void rejectUnmanagedOwnershipMutation() {
+        Object authority=storage.ownership();
+        if (authority instanceof php.runtime.PhpOwnershipArrays.StorageCertificate)
+            ((php.runtime.PhpOwnershipArrays.StorageCertificate)authority).checkMutation(this);
+        else if (authority instanceof php.runtime.PhpOwnershipObjects.PropertiesCertificate)
+            ((php.runtime.PhpOwnershipObjects.PropertiesCertificate)authority).checkMutation(this);
+    }
+
+    public static final class WriteFetchLease implements AutoCloseable {
+        private final ArrayStorage captured;
+        private Object previous;
+        private boolean closed;
+        private WriteFetchLease(ArrayStorage captured) {
+            this.captured=captured;previous=captured.authority;captured.authority=this;
+        }
+        public boolean isAttached(Memory current) {
+            current = current.toValue();
+            return current instanceof ArrayMemory && ((ArrayMemory) current).storage == captured;
+        }
+        @Override public void close() {
+            if (closed) return;
+            WriteFetchLease parent=null;Object current=captured.authority;
+            while (current instanceof WriteFetchLease && current != this) {
+                parent=(WriteFetchLease)current;current=parent.previous;
+            }
+            if (current != this) throw new IllegalStateException("Write-fetch lease is detached from its backing allocation");
+            if (parent == null) captured.authority=previous;
+            else parent.previous=previous;
+            closed=true;previous=null;
+        }
+    }
+
+    public WriteFetchLease pinWriteFetch() {
+        return new WriteFetchLease(storage);
+    }
+
 
     protected transient ArrayMemoryList<ReferenceMemory> _list;
     protected transient ArrayMemoryMap map;
@@ -35,6 +126,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     public ArrayMemory(boolean asMap) {
         super(Type.ARRAY);
+        this.storage = new ArrayStorage();
 
         if (asMap) {
             convertToMap();
@@ -45,6 +137,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     private ArrayMemory(ArrayMemoryMap map) {
         super(Type.ARRAY);
+        this.storage = new ArrayStorage();
 
         this.map = map;
         this.lastLongIndex = -1;
@@ -52,9 +145,16 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     private ArrayMemory(ArrayMemoryList<ReferenceMemory> list) {
         super(Type.ARRAY);
+        this.storage = new ArrayStorage();
 
         this.map = null;
         this._list = list;
+        this.lastLongIndex = -1;
+    }
+
+    private ArrayMemory(ArrayStorage storage) {
+        super(Type.ARRAY);
+        this.storage = storage;
         this.lastLongIndex = -1;
     }
 
@@ -129,6 +229,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         }
         size = array.length;
         lastLongIndex = size - 1;
+        nextFreeElement = size == 0 ? Long.MIN_VALUE : size;
     }
 
     @Deprecated
@@ -141,6 +242,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             size = array.length;
 
             lastLongIndex = size - 1;
+            nextFreeElement = size == 0 ? Long.MIN_VALUE : size;
         }
     }
 
@@ -152,6 +254,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         }
         size = array.length;
         lastLongIndex = size - 1;
+        nextFreeElement = size == 0 ? Long.MIN_VALUE : size;
     }
 
     @Deprecated
@@ -191,22 +294,28 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public ArrayMemory duplicate() {
         ArrayMemory result = new ArrayMemory();
         result.lastLongIndex = lastLongIndex;
+        result.nextFreeElement = nextFreeElement;
         result.size = size;
 
-        if (size() == 0) {
+        if (size() == 0 && (map == null || !map.hasBucketLayout())) {
             return result;
         }
 
         if (map == null) {
             for (ReferenceMemory item : getList()) {
-                result.getList().add(item.duplicate());
+                Memory value = item.getValue();
+                result.getList().add(new ReferenceMemory(value.isReference() ? value : value.toImmutable()));
             }
         } else {
             result._list = null;
-            result.map = new ArrayMemoryMap();
-
-            for (Map.Entry<Object, Memory> entry : map.entrySet()) {
-                result.map.put(entry.getKey(), entry.getValue().toImmutable());
+            if (map.hasBucketLayout()) {
+                result.map = map.copyBuckets(value -> value.isReference() ? value : value.toImmutable());
+            } else {
+                result.map = new ArrayMemoryMap();
+                for (Map.Entry<Object, Memory> entry : map.entrySet()) {
+                    Memory value = entry.getValue();
+                    result.map.put(entry.getKey(), value.isReference() ? value : value.toImmutable());
+                }
             }
         }
 
@@ -214,18 +323,24 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ArrayMemory checkCopied() {
-        if (original != null || copies > 0) {
+        rejectUnmanagedOwnershipMutation();
+        boolean copied = original != null || copies > 0;
+        if (copied || hasWriteFetchPins()) {
             ArrayMemory dup = duplicate();
+            storage = dup.storage;
             this.map = dup.map;
             this._list = dup._list;
             this.lastLongIndex = dup.lastLongIndex;
+            this.nextFreeElement = dup.nextFreeElement;
 
-            if (this.original == null) {
-                this.copies--;
-            } else {
-                this.original.copies--;
-                this.original = null;
-                this.copies = 0;
+            if (copied) {
+                if (this.original == null) {
+                    this.copies--;
+                } else {
+                    this.original.copies--;
+                    this.original = null;
+                    this.copies = 0;
+                }
             }
             return dup;
         }
@@ -236,7 +351,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         switch (key.type) {
             case STRING: {
                 String key1 = key.toString();
-                Memory number = StringMemory.toLong(key1);
+                Memory number = integerKey(key1);
                 if (number == null)
                     return key1;
                 else
@@ -251,6 +366,27 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             default:
                 return LongMemory.valueOf(key.toLong());
         }
+    }
+
+    private static Memory integerKey(String value) {
+        int length = value.length();
+        if (length == 0) return null;
+        boolean negative = value.charAt(0) == '-';
+        int index = negative ? 1 : 0;
+        if (index == length) return null;
+        char first = value.charAt(index);
+        if (first == '0') return length == 1 ? CONST_INT_0 : null;
+        if (first < '1' || first > '9') return null;
+        long limit = negative ? Long.MIN_VALUE : -Long.MAX_VALUE;
+        long multiplicationLimit = limit / 10, result = 0;
+        for (; index < length; index++) {
+            int digit = value.charAt(index) - '0';
+            if (digit < 0 || digit > 9 || result < multiplicationLimit) return null;
+            result *= 10;
+            if (result < limit + digit) return null;
+            result -= digit;
+        }
+        return LongMemory.valueOf(negative ? result : -result);
     }
 
     public boolean containsLongKey(long key) {
@@ -286,6 +422,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public void renameKey(Memory oldKey, Memory newKey) {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
 
         if (_list != null || map == null) {
@@ -311,6 +448,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory getByScalarOrCreate(Object sKey, Memory initValue) {
+        rejectUnmanagedOwnershipMutation();
         ReferenceMemory value = getByScalar(sKey);
 
         if (value == null) {
@@ -321,30 +459,22 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory getByScalarOrCreateAsShortcut(Object sKey) {
-        //checkCopied();
-        ReferenceMemory value = getByScalar(sKey);
-
-        if (value == null) {
-            value = new ReferenceMemory(UNDEFINED);
-            return put(sKey, new ShortcutMemory(value));
-        }
-
-        if (value instanceof ShortcutMemory)
-            return (ShortcutMemory) value.getValue();
-        else {
-            put(sKey, new ShortcutMemory(value));
-            return value;
-        }
+        rejectUnmanagedOwnershipMutation();
+        ReferenceMemory value = getByScalarOrCreate(sKey);
+        return value.getReferenceForBinding();
     }
 
     public ReferenceMemory getByScalarOrCreate(Object sKey) {
+        rejectUnmanagedOwnershipMutation();
         return getByScalarOrCreate(sKey, UNDEFINED);
     }
 
     public ReferenceMemory getByScalar(Object key) {
         if (_list != null) {
             if (key instanceof Memory) {
-                int index = (int) ((Memory) key).toLong();
+                long numericKey = ((Memory) key).toLong();
+                if (numericKey < 0 || numericKey >= _list.size()) return null;
+                int index = (int) numericKey;
                 if (index >= 0 && index < _list.size()) {
                     return _list.get(index);
                 } else
@@ -359,22 +489,27 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public void add(IObject object) {
+        rejectUnmanagedOwnershipMutation();
         add(new ObjectMemory(object));
     }
 
     public void add(long value) {
+        rejectUnmanagedOwnershipMutation();
         add(LongMemory.valueOf(value));
     }
 
     public void add(String value) {
+        rejectUnmanagedOwnershipMutation();
         add(StringMemory.valueOf(value));
     }
 
     public void add(double value) {
+        rejectUnmanagedOwnershipMutation();
         add(new DoubleMemory(value));
     }
 
     public void add(boolean value) {
+        rejectUnmanagedOwnershipMutation();
         add(value ? TRUE : FALSE);
     }
 
@@ -383,15 +518,18 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory add(Memory value) {
+        rejectUnmanagedOwnershipMutation();
         if (value instanceof KeyValueMemory) {
             KeyValueMemory keyValue = (KeyValueMemory) value;
-            return put(keyValue.getArrayKey(), keyValue.getValue().toImmutable());
+            Memory entry = keyValue.getValue();
+            return put(keyValue.getArrayKey(), entry.isReference() ? entry : entry.toImmutable());
         }
 
         ReferenceMemory ref;
 
         if (map == null) {
             lastLongIndex++;
+            recordIntegerKey(lastLongIndex);
             ref = new ReferenceMemory(value);
             getList().add(ref);
             size++;
@@ -402,11 +540,76 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         return ref;
     }
 
+    /** Explicit certified-list construction only; no extra CELL payload publisher is attached. */
+    public ReferenceMemory appendOwnershipCanonical(ReferenceMemory cell) {
+        if (getOwnershipStorage() == null || !isList()) throw new IllegalStateException("Canonical carrier needs a certified list");
+        rejectUnmanagedOwnershipMutation();cell.getOwnershipCell().validateAttachment(cell);
+        if (cell.getOwnershipCell().domain() != getOwnershipStorage().domain()) throw new IllegalArgumentException("Foreign canonical carrier");
+        lastLongIndex++;recordIntegerKey(lastLongIndex);getList().add(cell);size++;return cell;
+    }
+    public void replaceOwnershipConstructionCarrier(int index,ReferenceMemory cell) {
+        if (getOwnershipStorage() == null || !isList()) throw new IllegalStateException("Canonical carrier needs a certified list");
+        rejectUnmanagedOwnershipMutation();cell.getOwnershipCell().validateAttachment(cell);
+        if (cell.getOwnershipCell().domain() != getOwnershipStorage().domain()) throw new IllegalArgumentException("Foreign canonical carrier");
+        getList().set(index,cell);
+    }
+    public void publishOwnershipCarrier(php.runtime.PhpOwnershipArrays.CarrierPublication publication) {
+        int index=publication.index(this);_list.set(index,publication.consume(this));
+    }
+
+    /** Actual layout publication; the permit has already validated all edges and addresses. */
+    public final void publishOwnershipUnset(php.runtime.PhpOwnershipArrays.UnsetPublication publication) {
+        ArrayMemoryMap replacement=publication.consumeArray(this,map);
+        if (replacement != null) {map=replacement;_list=null;}
+        else map.publishOwnershipUnlink(publication);
+        size--;foreachIterator=null;
+    }
+
+    public void unpack(Memory source, Environment env, TraceInfo trace) {
+        rejectUnmanagedOwnershipMutation();
+        unpack(source, env, trace, env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5);
+    }
+
+    public void unpack(Memory source, Environment env, TraceInfo trace, boolean php8) {
+        rejectUnmanagedOwnershipMutation();
+        source = source.toValue();
+        if (!source.isTraversable()) {
+            env.exception(trace, BaseError.class, "Only arrays and Traversables can be unpacked");
+            return;
+        }
+
+        ForeachIterator iterator = source.getNewIterator(env, false, false);
+        if (iterator == null) {
+            env.exception(trace, BaseError.class, "Only arrays and Traversables can be unpacked");
+            return;
+        }
+        checkCopied();
+        while (iterator.next()) {
+            Memory key = iterator.getMemoryKey();
+            Memory value = iterator.getValue();
+            Memory entry = source.isArray() && value.isReference() ? value : value.toImmutable();
+            if (key.getRealType() == Type.INT) {
+                if (php8) addPhp8(entry, env, trace); else add(entry);
+            } else if (key.isString()) {
+                Memory numericKey = integerKey(key.toString());
+                if (numericKey == null) {
+                    putAsKeyString(key.toString(), entry);
+                } else {
+                    if (php8) addPhp8(entry, env, trace); else add(entry);
+                }
+            } else {
+                env.exception(trace, BaseError.class, "Keys must be of type int|string during array unpacking");
+                return;
+            }
+        }
+    }
+
     /**
      * @param array
      * @param recursive
      */
     public void merge(ArrayMemory array, boolean recursive, Set<Integer> done) {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
 
         if (recursive && done == null) {
@@ -419,6 +622,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
             size = getList().size();
             lastLongIndex = size - 1;
+            nextFreeElement = size;
         } else {
             if (map == null) {
                 convertToMap();
@@ -463,6 +667,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public void putAll(ArrayMemory array) {
+        rejectUnmanagedOwnershipMutation();
         if (array.map == null) {
             int i = 0;
             for (ReferenceMemory memory : array.getList()) {
@@ -485,6 +690,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public void putAllRef(ArrayMemory array) {
+        rejectUnmanagedOwnershipMutation();
         if (array.map == null) {
             int i = 0;
             for (ReferenceMemory memory : array.getList()) {
@@ -505,7 +711,44 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         }
     }
 
+    /** Insert a physical PHP bucket, including a duplicate key, without rebinding older cells. */
+    public ReferenceMemory insertBucket(Object key, Memory value) {
+        rejectUnmanagedOwnershipMutation();
+        if (map == null) convertToMap();
+        if (key instanceof LongMemory) recordIntegerKey(((LongMemory) key).value);
+        ReferenceMemory result = map.insertBucket(key, value);
+        size++;
+        return result;
+    }
+
+    public void enableBucketLayout() {
+        rejectUnmanagedOwnershipMutation();
+        if (map == null) convertToMap();
+        map.enableBucketLayout();
+    }
+
+    public boolean hasNumericStringKeys() {
+        if (map == null) return false;
+        for (Object key : map.keySet()) if (key instanceof String && integerKey((String) key) != null) return true;
+        return false;
+    }
+
+    public void appendBucketHole() { enableBucketLayout(); map.appendBucketHole(); }
+
+    public boolean hasBucketLayout() { return map != null && map.hasBucketLayout(); }
+    public int bucketLimit() { return map == null ? 0 : map.bucketLimit(); }
+    public ReferenceMemory bucketAt(int ordinal) { return map == null ? null : map.bucketAt(ordinal); }
+    public int bucketOrdinal(ReferenceMemory entry) {
+        return map == null || !(entry instanceof ArrayMapEntryMemory) ? -1
+                : map.bucketOrdinal((ArrayMapEntryMemory) entry);
+    }
+    public Object bucketKey(int ordinal) {
+        ArrayMapEntryMemory entry = map == null ? null : map.bucketAt(ordinal);
+        return entry == null ? null : entry.getKey();
+    }
+
     public ReferenceMemory putAsKeyString(String key, Memory value) {
+        rejectUnmanagedOwnershipMutation();
         if (map == null) {
             convertToMap();
         }
@@ -520,13 +763,16 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory put(Object key, Memory value) {
+        rejectUnmanagedOwnershipMutation();
         if (key instanceof LongMemory) {
             ReferenceMemory mem = new ReferenceMemory(value);
 
-            int index = (int) ((LongMemory) key).value;
+            long numericKey = ((LongMemory) key).value;
+            int index = numericKey >= 0 && numericKey <= Integer.MAX_VALUE ? (int) numericKey : -1;
 
-            if (index > lastLongIndex)
-                lastLongIndex = index;
+            if (numericKey > lastLongIndex)
+                lastLongIndex = numericKey;
+            recordIntegerKey(numericKey);
 
             if (map == null) {
                 int size = getList().size();
@@ -564,17 +810,21 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public Memory removeByScalar(Object key) {
+        rejectUnmanagedOwnershipMutation();
         if (map == null) {
-            int index = -1;
+            long numericKey = -1;
             if (key instanceof Long)
-                index = ((Long) key).intValue();
+                numericKey = (Long) key;
             else if (key instanceof Integer)
-                index = ((Integer) key);
+                numericKey = (Integer) key;
+            else if (key instanceof LongMemory)
+                numericKey = ((LongMemory) key).value;
             else if (key instanceof String) {
-                Memory tmp = StringMemory.toLong((String) key);
+                Memory tmp = integerKey((String) key);
                 if (tmp != null)
-                    index = (int) tmp.toLong();
+                    numericKey = tmp.toLong();
             }
+            int index = numericKey >= 0 && numericKey <= Integer.MAX_VALUE ? (int) numericKey : -1;
 
             if (index < 0 || _list == null || index >= getList().size())
                 return null;
@@ -601,7 +851,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             else if (key instanceof Integer)
                 key = LongMemory.valueOf((Integer) key);
             else if (key instanceof String) {
-                Memory tmp = StringMemory.toLong((String) key);
+                Memory tmp = integerKey((String) key);
                 if (tmp != null)
                     key = tmp;
             }
@@ -615,9 +865,11 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public Memory remove(Memory key) {
+        rejectUnmanagedOwnershipMutation();
         Object _key = toKey(key);
         if (map == null) {
-            int index = _key instanceof LongMemory ? (int) key.toLong() : -1;
+            long numericKey = _key instanceof LongMemory ? ((LongMemory) _key).value : -1;
+            int index = numericKey >= 0 && numericKey <= Integer.MAX_VALUE ? (int) numericKey : -1;
             if (index < 0 || _list == null || index >= getList().size())
                 return null;
 
@@ -651,121 +903,93 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public void unshift(Memory value, int count) {
-        checkCopied();
-        if (size == 0) {
-            for (int i = 0; i < count; i++)
-                add(value);
-        } else {
-            if (map == null) {
-                List<ReferenceMemory> tmp = new ArrayList<ReferenceMemory>();
-                for (int i = 0; i < count; i++)
-                    tmp.add(new ReferenceMemory(value));
-
-                getList().addAll(0, tmp);
-                size = getList().size();
-            } else {
-                ArrayMemory tmp = new ArrayMemory();
-                tmp.convertToMap();
-
-                for (int i = 0; i < count; i++)
-                    tmp.add(value);
-
-                ForeachIterator iterator = getNewIterator(null, false, false);
-
-                while (iterator.next()) {
-                    Object key = iterator.getKey();
-                    if (key instanceof String)
-                        tmp.put(key, iterator.getValue());
-                    else
-                        add(iterator.getValue());
-                }
-
-                lastLongIndex = tmp.lastLongIndex;
-                map = tmp.map;
-                size = tmp.size;
-            }
-        }
+        rejectUnmanagedOwnershipMutation();
+        if (count < 0) throw new IllegalArgumentException("count must be non-negative");
+        Memory[] values = new Memory[count];
+        Arrays.fill(values, value);
+        unshift(values);
     }
 
     public void unshift(Memory... values) {
+        rejectUnmanagedOwnershipMutation();
+        Objects.requireNonNull(values);
         checkCopied();
-
-        if (values == null) {
-            throw new NullPointerException();
+        if (map == null) {
+            List<ReferenceMemory> prefix = new ArrayList<>(values.length);
+            for (Memory value : values) prefix.add(new ReferenceMemory(value));
+            getList().addAll(0, prefix);
+            size = _list.size();
+            lastLongIndex = size - 1;
+            nextFreeElement = size == 0 ? Long.MIN_VALUE : size;
+            resetToFirst();
+            return;
         }
+        ArrayMemory result = new ArrayMemory();
+        for (Memory value : values) result.add(value);
+        copyReindexed(result);
+        replaceStorage(result);
+    }
 
-        if (size == 0) {
-            for (Memory value : values)
-                add(value);
+    // Preserve shared PHP reference cells while rebuilding numeric keys.
+    private void copyReindexed(ArrayMemory result) {
+        if (map == null) {
+            if (_list != null) for (ReferenceMemory cell : _list) result.add(cell.getValue());
         } else {
-            if (map == null) {
-                if (values.length > 1) {
-                    List<ReferenceMemory> tmp = new ArrayList<ReferenceMemory>();
-                    for (Memory value : values)
-                        tmp.add(new ReferenceMemory(value));
-
-                    getList().addAll(0, tmp);
-                    size = getList().size();
-                } else if (values.length == 1) {
-                    getList().add(0, new ReferenceMemory(values[0]));
-                    size = getList().size();
-                }
-            } else {
-                ArrayMemory tmp = new ArrayMemory();
-                tmp.convertToMap();
-
-                for (Memory el : values)
-                    tmp.add(el);
-
-                ForeachIterator iterator = getNewIterator(null, false, false);
-
-                while (iterator.next()) {
-                    Object key = iterator.getKey();
-                    if (key instanceof String)
-                        tmp.put(key, iterator.getValue());
-                    else
-                        add(iterator.getValue());
-                }
-
-                lastLongIndex = tmp.lastLongIndex;
-                map = tmp.map;
-                size = tmp.size;
+            for (Map.Entry<Object, Memory> entry : map.entrySet()) {
+                Memory value = entry.getValue();
+                if (entry.getKey() instanceof String) result.put(entry.getKey(), value);
+                else result.add(value);
             }
         }
     }
 
+    private void replaceStorage(ArrayMemory result) {
+        _list = result._list;
+        map = result.map;
+        size = result.size;
+        lastLongIndex = result.lastLongIndex;
+        nextFreeElement = result.nextFreeElement;
+        resetToFirst();
+    }
+
     public Memory shift() {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
-        if (size < 1)
-            return null;
-
-        size -= 1;
-        Memory value;
+        if (size < 1) return null;
+        Memory value = map == null ? _list.remove(0) : map.remove(map.firstKey());
+        size--;
         if (map == null) {
-            value = getList().get(0);
-            getList().remove(0);
-        } else {
-            value = map.remove(map.firstKey());
+            lastLongIndex = size - 1;
+            nextFreeElement = size;
+            resetToFirst();
+            return value.toValue();
         }
-
+        ArrayMemory result = new ArrayMemory();
+        copyReindexed(result);
+        if (result.nextFreeElement == Long.MIN_VALUE) result.nextFreeElement = 0;
+        replaceStorage(result);
         return value.toValue();
     }
 
     public Memory pop() {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
-        if (size < 1)
-            return null;
-
-        Memory value;
-        if (getList() != null) {
-            value = getList().get(size - 1);
-            getList().remove(size - 1);
-        } else {
-            value = map.remove(map.lastKey());
+        if (size < 1) return null;
+        Memory key = peekKey();
+        Memory value = map == null ? _list.remove(size - 1) : map.remove(map.lastKey());
+        size--;
+        if (key.getRealType() == Memory.Type.INT) {
+            long index = key.toLong();
+            if (nextFreeElement != Long.MIN_VALUE && index == nextFreeElement - 1) nextFreeElement = index;
+            if (index == lastLongIndex) lastLongIndex = Math.max(-1, index - 1);
         }
-        size -= 1;
-
+        resetToFirst();
         return value.toValue();
+    }
+
+    private void resetToFirst() {
+        reset();
+        pointerNeedsFirst = true;
     }
 
     public Memory peek() {
@@ -820,6 +1044,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public void shuffle(Random rnd) {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
         if (map == null) {
             if (_list != null) {
@@ -840,10 +1065,13 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public void clear() {
+        rejectUnmanagedOwnershipMutation();
+        storage = new ArrayStorage();
         _list = null;
         map = null;
 
         size = 0;
+        nextFreeElement = Long.MIN_VALUE;
     }
 
     public int compare(ArrayMemory otherRef, boolean strict) {
@@ -919,13 +1147,14 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     @Override
     public Memory toImmutable() {
         if (copies >= 0) {
-            ArrayMemory mem = new ArrayMemory();
+            ArrayMemory mem = new ArrayMemory(storage);
             mem._list = _list;
             mem.original = this;
             mem.size = size;
             mem._list = _list;
             mem.map = map;
             mem.lastLongIndex = lastLongIndex;
+            mem.nextFreeElement = nextFreeElement;
             copies++;
             reset();
             return mem;
@@ -933,6 +1162,42 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             copies++;
             return this;
         }
+    }
+
+    /** Modern PHP arrays start on their first element; exhausted cursors stay exhausted. */
+    public ForeachIterator getCurrentIteratorForNative() {
+        if (foreachIterator == null) {
+            boolean alreadyStartsFirst=pointerNeedsFirst;
+            ForeachIterator cursor=getCurrentIterator();
+            if (!alreadyStartsFirst) cursor.next();
+        }
+        return foreachIterator;
+    }
+
+    /** COW snapshot for native read-only inputs; copying does not reset the caller's PHP cursor. */
+    public ArrayMemory toImmutableForNativeRead() {
+        ForeachIterator cursor=getCurrentIteratorForNative();
+        Memory keyMemory=cursor == null ? null : cursor.getMemoryKey().toValue().toImmutable();
+        Object key=keyMemory == null || keyMemory.isNull() ? null : keyMemory;
+        Memory current=cursor == null ? null : cursor.getValue();
+        ArrayMemory snapshot=(ArrayMemory)toImmutable();
+        foreachIterator=cursor;
+        if (snapshot != this && cursor != null)
+            snapshot.foreachIterator=new NativeReadCursor(key,keyMemory,current);
+        return snapshot;
+    }
+
+    // Native current/key/pos only read this captured position. No iterator edge to the original array.
+    private static final class NativeReadCursor extends ForeachIterator {
+        NativeReadCursor(Object key, Memory keyMemory, Memory value) {
+            super(false,false,true);
+            currentKey=key;currentKeyMemory=keyMemory;currentValue=value;
+            init=true;
+        }
+        @Override protected boolean init() {return false;}
+        @Override protected boolean nextValue() {return false;}
+        @Override protected boolean prevValue() {return false;}
+        @Override public void reset() {}
     }
 
     public ArrayMemory toConstant() {
@@ -954,6 +1219,16 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     public Memory[] values() {
         return values(false);
+    }
+
+    public Memory[] valuesForCall() {
+        Memory[] result = new Memory[size];
+        int i = 0;
+        for (ReferenceMemory cell : this) {
+            Memory value = cell.getValue();
+            result[i++] = value.isReference() ? ReferenceMemory.exportReference(value) : value.toImmutable();
+        }
+        return result;
     }
 
     @Override
@@ -1005,10 +1280,11 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                 ForeachIterator iterator = other.foreachIterator(false, false);
                 while (iterator.next()) {
                     Object key = iterator.getKey();
-                    Memory origin = getByScalar(key);
+                    Memory origin = left.getByScalar(key);
                     if (origin == null) {
                         left.checkCopied();
-                        left.put(key, iterator.getValue().toImmutable());
+                        Memory value = iterator.getValue();
+                        left.put(key, value.isReference() ? value : value.toImmutable());
                     }
                 }
                 return left;
@@ -1108,6 +1384,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public void unset() {
+        rejectUnmanagedOwnershipMutation();
         if (original != null) {
             original.copies--;
             original = null;
@@ -1158,13 +1435,13 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public Memory valueOfIndex(TraceInfo trace, boolean index) {
-        Memory e = getByScalar(index ? CONST_INT_0 : CONST_INT_1);
+        Memory e = getByScalar(index ? CONST_INT_1 : CONST_INT_0);
         return e == null ? UNDEFINED : e;
     }
 
     @Override
     public Memory valueOfIndex(TraceInfo trace, String index) {
-        Memory number = StringMemory.toLong(index);
+        Memory number = integerKey(index);
         Memory e = number == null ? getByScalar(index) : getByScalar(number);
         return e == null ? UNDEFINED : e;
     }
@@ -1183,8 +1460,51 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public Memory refOfPush(TraceInfo trace) {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
         return add(UNDEFINED);
+    }
+
+    private void recordIntegerKey(long key) {
+        if (key >= nextFreeElement) nextFreeElement = key == Long.MAX_VALUE ? key : key + 1;
+    }
+
+    public boolean canAppendPhp8() {
+        long key = nextFreeElement == Long.MIN_VALUE ? 0 : nextFreeElement;
+        return getByScalar(LongMemory.valueOf(key)) == null;
+    }
+
+    public ReferenceMemory addPhp8(Memory value, Environment env, TraceInfo trace) {
+        checkCopied();
+        if (value instanceof KeyValueMemory) return add(value);
+        if (!canAppendPhp8()) env.exception(trace, BaseError.class,
+                "Cannot add element to the array as the next element is already occupied");
+        long key = nextFreeElement == Long.MIN_VALUE ? 0 : nextFreeElement;
+        return put(LongMemory.valueOf(key), value);
+    }
+
+    public static Memory appendReferencePhp8(Memory root, Environment env, TraceInfo trace) {
+        Memory actual = root.toValue();
+        if (actual.isNull() || actual.getRealType() == Memory.Type.BOOL && !actual.toBoolean()) {
+            if (!actual.isNull()) env.error(trace, php.runtime.exceptions.support.ErrorType.E_DEPRECATED,
+                    "Automatic conversion of false to array is deprecated");
+            if (root instanceof ReferenceMemory) ((ReferenceMemory)root).initializeArray();
+            else root.assign(new ArrayMemory());
+            actual = root.toValue();
+        }
+        if (actual.isArray()) return actual.toValue(ArrayMemory.class).refOfPushPhp8(env, trace);
+        if (actual.isString()) env.exception(trace, BaseError.class, "[] operator not supported for strings");
+        if (actual.isObject()) {
+            if (!(actual.toValue(ObjectMemory.class).value instanceof php.runtime.lang.spl.ArrayAccess))
+                env.exception(trace, BaseError.class, "Cannot use object of type %s as array", actual.toValue(ObjectMemory.class).value.getReflection().getName());
+            return actual.refOfPush(trace);
+        }
+        env.exception(trace, BaseError.class, "Cannot use a scalar value as an array");
+        return Memory.NULL;
+    }
+
+    public Memory refOfPushPhp8(Environment env, TraceInfo trace) {
+        return addPhp8(UNDEFINED, env, trace);
     }
 
     @Override
@@ -1200,6 +1520,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, Memory index) {
+        rejectUnmanagedOwnershipMutation();
         switch (index.getRealType()) {
             case OBJECT:
             case ARRAY:
@@ -1211,25 +1532,29 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, long index) {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
         return getOrCreate(LongMemory.valueOf(index));
     }
 
     @Override
     public Memory refOfIndex(TraceInfo trace, double index) {
+        rejectUnmanagedOwnershipMutation();
         return refOfIndex(null, LongMemory.valueOf((long) index));
     }
 
     @Override
     public Memory refOfIndex(TraceInfo trace, boolean index) {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
         return getOrCreate(index ? CONST_INT_1 : CONST_INT_0);
     }
 
     @Override
     public Memory refOfIndex(TraceInfo trace, String index) {
+        rejectUnmanagedOwnershipMutation();
         checkCopied();
-        Memory number = StringMemory.toLong(index);
+        Memory number = integerKey(index);
         return number == null ? getByScalarOrCreate(index) : getByScalarOrCreate(number);
     }
 
@@ -1268,10 +1593,13 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     @Override
     @SuppressWarnings("unchecked")
     public Iterator<ReferenceMemory> iterator() {
-        if (map == null) {
-            return getList().iterator();
-        } else
-            return (Iterator<ReferenceMemory>) map.entriesIterator();
+        Iterator<ReferenceMemory> iterator = map == null ? getList().iterator() : (Iterator<ReferenceMemory>) map.entriesIterator();
+        if (!hasOwnershipMutationAuthority()) return iterator;
+        return new Iterator<ReferenceMemory>() {
+            public boolean hasNext() { return iterator.hasNext(); }
+            public ReferenceMemory next() { return iterator.next(); }
+            public void remove() { rejectUnmanagedOwnershipMutation(); iterator.remove(); }
+        };
     }
 
     public Stream<ReferenceMemory> stream() {
@@ -1288,6 +1616,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ForeachIterator foreachIterator(boolean getReferences, boolean getKeyReferences, boolean withPrevious, final boolean freeze) {
+        if (hasBucketLayout()) return bucketIterator(getReferences, getKeyReferences, withPrevious, freeze);
         return new ForeachIterator(getReferences, getKeyReferences, withPrevious) {
             protected int cursor = 0;
             protected int listMax;
@@ -1436,6 +1765,45 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         };
     }
 
+    private ForeachIterator bucketIterator(boolean references, boolean keyReferences, boolean previous, final boolean freeze) {
+        return new ForeachIterator(references, keyReferences, previous) {
+            private int cursor = -1;
+            private int limit;
+            private boolean invalid;
+            @Override public void reset() { cursor = -1; limit = bucketLimit(); invalid = false; }
+            @Override protected boolean init() { reset(); return true; }
+            private boolean select(int ordinal) {
+                ReferenceMemory entry = bucketAt(ordinal);
+                if (entry == null) return false;
+                currentKey = bucketKey(ordinal);
+                currentKeyMemory = null;
+                currentValue = getReferences ? (plainReferences ? entry
+                        : new ArrayValueMemory(getMemoryKey(), ArrayMemory.this, entry, ordinal)) : entry.getValue();
+                if (getKeyReferences) currentKeyMemory = new ArrayKeyMemory(ArrayMemory.this, getMemoryKey());
+                return true;
+            }
+            @Override protected boolean nextValue() {
+                if (invalid) return false;
+                int end = freeze ? limit : bucketLimit();
+                while (++cursor < end) if (select(cursor)) return true;
+                cursor = end; invalid = true;
+                currentKey = null; currentValue = null; return false;
+            }
+            @Override protected boolean prevValue() {
+                if (invalid) return false;
+                while (--cursor >= 0) if (select(cursor)) return true;
+                cursor = -1; invalid = true;
+                currentKey = null; currentValue = null; return false;
+            }
+            @Override public boolean end() {
+                init = true; limit = bucketLimit(); cursor = limit; invalid = false;
+                while (--cursor >= 0) if (select(cursor)) return true;
+                invalid = true;
+                currentKey = null; currentValue = null; return false;
+            }
+        };
+    }
+
     @Override
     public ForeachIterator getNewIterator(Environment env, boolean getReferences, boolean getKeyReferences) {
         return foreachIterator(getReferences, getKeyReferences, false);
@@ -1444,6 +1812,10 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public ForeachIterator getCurrentIterator() {
         if (foreachIterator == null) {
             foreachIterator = foreachIterator(false, true);
+            if (pointerNeedsFirst) {
+                foreachIterator.next();
+                pointerNeedsFirst = false;
+            }
         }
 
         return foreachIterator;
@@ -1451,6 +1823,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     protected void reset() {
         foreachIterator = null;
+        pointerNeedsFirst = false;
     }
 
     public Memory resetCurrentIterator() {
@@ -1462,7 +1835,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         else {
             iterator.next();
             Memory tmp = iterator.getValue();
-            iterator.prev();
+            if (!hasBucketLayout()) iterator.prev();
             return tmp;
         }
     }
@@ -1491,7 +1864,10 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         ArrayMemory props = stdClass.getProperties();
         ForeachIterator iterator = getNewIterator(env, false, false);
         while (iterator.next()) {
-            props.refOfIndex(null, iterator.getMemoryKey()).assign(iterator.getValue());
+            if (hasBucketLayout()) {
+                Memory value = iterator.getValue();
+                props.insertBucket(iterator.getMemoryKey().toString(), value.isReference() ? value : value.toImmutable());
+            } else props.refOfIndex(null, iterator.getMemoryKey()).assign(iterator.getValue());
         }
 
         return new ObjectMemory(stdClass);

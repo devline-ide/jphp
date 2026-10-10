@@ -9,6 +9,25 @@ import org.develnext.jphp.core.tokenizer.TokenMeta;
 import org.develnext.jphp.core.tokenizer.token.expr.OperatorExprToken;
 
 public class KeyValueExprToken extends OperatorExprToken {
+    private boolean valueReference;
+    private boolean arrayEntry;
+
+    public boolean isArrayEntry() {
+        return arrayEntry;
+    }
+
+    public void setArrayEntry(boolean arrayEntry) {
+        this.arrayEntry = arrayEntry;
+    }
+
+    public boolean isValueReference() {
+        return valueReference;
+    }
+
+    public void setValueReference(boolean valueReference) {
+        this.valueReference = valueReference;
+    }
+
     public KeyValueExprToken(TokenMeta meta) {
         super(meta, TokenType.T_DOUBLE_ARROW);
     }

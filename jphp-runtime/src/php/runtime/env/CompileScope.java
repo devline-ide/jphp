@@ -1,10 +1,13 @@
 package php.runtime.env;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.Memory;
 import php.runtime.Startup;
 import php.runtime.common.AbstractCompiler;
 import php.runtime.common.CompilerFactory;
 import php.runtime.common.LangMode;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.common.Messages;
 import php.runtime.env.handler.EntityFetchHandler;
 import php.runtime.env.handler.ProgramShutdownHandler;
@@ -53,8 +56,14 @@ public class CompileScope {
 
     public final ConcurrentHashMap<String, ModuleEntity> moduleMap;
     public final ConcurrentHashMap<String, ModuleEntity> moduleIndexMap;
+    private final ConcurrentHashMap<ModuleCacheKey, ModuleEntity> cachedModules = new ConcurrentHashMap<>();
 
+    /** Canonical ASCII class keys, including aliases; legacy lookup state stays private. */
     protected final Map<String, ClassEntity> classMap;
+    private final Map<String, ClassEntity> legacyClassMap = new HashMap<>();
+    private final Map<String, String> legacyClassKeys = new HashMap<>();
+    private final ThreadLocal<Boolean> classLookupModern = new ThreadLocal<>();
+    private final Map<String, CompileClass> canonicalCompileClassMap = new HashMap<>();
     protected final Map<String, FunctionEntity> functionMap;
     protected final Map<String, ConstantEntity> constantMap;
     protected final Map<Class<? extends Throwable>, Class<? extends JavaException>> exceptionMap;
@@ -81,11 +90,13 @@ public class CompileScope {
     // flags
     public boolean debugMode = false;
     protected LangMode langMode = LangMode.MODERN;
+    protected PhpLanguageProfile phpLanguageProfile = PhpLanguageProfile.JPHP_LEGACY;
 
     public CompileScope(CompileScope parent) {
         id = scopeCount.getAndIncrement();
         classLoader = parent.classLoader;
         langMode = parent.langMode;
+        phpLanguageProfile = parent.phpLanguageProfile;
 
         moduleMap = new ConcurrentHashMap<>();
         moduleIndexMap = new ConcurrentHashMap<>();
@@ -106,8 +117,13 @@ public class CompileScope {
         superGlobals = new HashSet<>();
         superGlobals.addAll(parent.superGlobals);
 
-        classMap.putAll(parent.classMap);
-        compileClassMap.putAll(parent.compileClassMap);
+        synchronized (parent.classMap) {
+            classMap.putAll(parent.classMap);
+            legacyClassMap.putAll(parent.legacyClassMap);
+            legacyClassKeys.putAll(parent.legacyClassKeys);
+            canonicalCompileClassMap.putAll(parent.canonicalCompileClassMap);
+            compileClassMap.putAll(parent.compileClassMap);
+        }
 
         functionMap.putAll(parent.functionMap);
         compileFunctionMap.putAll(parent.compileFunctionMap);
@@ -120,6 +136,7 @@ public class CompileScope {
 
         moduleMap.putAll(parent.moduleMap);
         moduleIndexMap.putAll(parent.moduleIndexMap);
+        cachedModules.putAll(parent.cachedModules);
 
         classCount.set(parent.classCount.longValue());
         moduleCount.set(parent.moduleCount.intValue());
@@ -190,11 +207,14 @@ public class CompileScope {
         registerLazyClass(extension, Closure.class);
         registerLazyClass(extension, Generator.class);
         registerLazyClass(extension, StdClass.class);
+        registerLazyClass(extension, php.runtime.lang.IncompleteClass.class);
         registerLazyClass(extension, BaseThrowable.class);
         registerLazyClass(extension, BaseException.class);
         registerLazyClass(extension, BaseError.class);
         registerLazyClass(extension, BaseParseError.class);
         registerLazyClass(extension, BaseTypeError.class);
+        registerLazyClass(extension, BaseArgumentCountError.class);
+        registerLazyClass(extension, BaseValueError.class);
         registerLazyClass(extension, BaseArithmeticError.class);
         registerLazyClass(extension, BaseDivisionByZeroError.class);
         registerLazyClass(extension, ErrorException.class);
@@ -224,6 +244,22 @@ public class CompileScope {
         }
     }
 
+    public CompilerFactory getCompilerFactory() {
+        return compilerFactory;
+    }
+
+    public void setCompilerFactory(CompilerFactory compilerFactory) {
+        this.compilerFactory = Objects.requireNonNull(compilerFactory, "compilerFactory");
+    }
+
+    public PhpLanguageProfile getPhpLanguageProfile() {
+        return phpLanguageProfile;
+    }
+
+    public void setPhpLanguageProfile(PhpLanguageProfile profile) {
+        phpLanguageProfile = Objects.requireNonNull(profile, "profile");
+    }
+
     public RuntimeClassLoader getClassLoader() {
         return classLoader;
     }
@@ -250,6 +286,19 @@ public class CompileScope {
 
     public Map<String, ClassEntity> getClassMap() {
         return classMap;
+    }
+
+    /** Snapshot of registered native/user names, including lazy declarations, without autoload. */
+    public Set<String> getRegisteredClassNames() {
+        Set<String> names = new TreeSet<>(compileClassMap.keySet());
+        names.addAll(classMap.keySet());
+        return Collections.unmodifiableSet(names);
+    }
+
+    public Set<String> getRegisteredConstantNames() {
+        Set<String> names = new TreeSet<>(compileConstantMap.keySet());
+        names.addAll(constantMap.keySet());
+        return Collections.unmodifiableSet(names);
     }
 
     public Map<String, FunctionEntity> getFunctionMap() {
@@ -282,7 +331,10 @@ public class CompileScope {
 
     public void registerLazyClass(Extension extension, Class<?> clazz) {
         CompileClass el = new CompileClass(extension, clazz);
-        compileClassMap.put(el.getLowerName(), el);
+        synchronized (classMap) {
+            compileClassMap.put(el.getLowerName(), el);
+            canonicalCompileClassMap.put(PhpClassNames.canonicalKey(el.getName()), el);
+        }
     }
 
     @SuppressWarnings("unchecked")
@@ -388,22 +440,39 @@ public class CompileScope {
     }
 
     public void registerClass(String name, ClassEntity entity) {
-        classMap.put(name.toLowerCase(), entity);
+        synchronized (classMap) {
+            String key = PhpClassNames.canonicalKey(name);
+            String legacyKey = name.toLowerCase();
+            ClassEntity existing = classMap.get(key);
+            String previousLegacyKey = legacyClassKeys.remove(key);
+            if (previousLegacyKey != null) legacyClassMap.remove(previousLegacyKey, existing);
+            // This public Java registration API has always allowed replacement; PHP declarations use registerModule.
+            classMap.put(key, entity);
+            if (!PhpClassNames.isModern(entity)) {
+                legacyClassMap.put(legacyKey, entity); legacyClassKeys.put(key, legacyKey);
+            }
+        }
     }
 
     public void registerClass(ClassEntity clazz) {
-        classMap.put(clazz.getLowerName(), clazz);
+        registerClass(clazz.getName(), clazz);
     }
 
     public void registerModule(ModuleEntity module) {
-        addUserModule(module);
-
-        for(ClassEntity entity : module.getClasses()) {
-            if (entity.isStatic()){
-                if (classMap.put(entity.getLowerName(), entity) != null) {
+        synchronized (classMap) {
+            Map<String, ClassEntity> canonical = new HashMap<>(classMap);
+            Map<String, ClassEntity> legacy = new HashMap<>(legacyClassMap);
+            for (ClassEntity entity : module.getClasses()) if (entity.isStatic()) {
+                String key = PhpClassNames.canonicalKey(entity.getName());
+                String oldKey = entity.getName().toLowerCase();
+                if (canonical.containsKey(key) || !PhpClassNames.isModern(entity) && legacy.containsKey(oldKey)) {
                     throw new CriticalException(Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(entity.getName()));
                 }
+                canonical.put(key, entity);
+                if (!PhpClassNames.isModern(entity)) legacy.put(oldKey, entity);
             }
+            for (ClassEntity entity : module.getClasses()) if (entity.isStatic()) registerClass(entity);
+            addUserModule(module);
         }
 
         for(FunctionEntity entity : module.getFunctions()) {
@@ -428,6 +497,9 @@ public class CompileScope {
     public void addUserModule(ModuleEntity module){
         moduleMap.put(module.getName(), module);
         moduleIndexMap.put(module.getInternalName(), module);
+        String inputName = module.getContext().getModuleNameNoThrow();
+        if (inputName != null) cachedModules.put(new ModuleCacheKey(inputName, module.isCompiledArtifact(),
+                module.getPhpLanguageProfile(), module.getContext().getImplicitClassImportsFingerprint()), module);
     }
 
     public void registerFunction(FunctionEntity function){
@@ -442,6 +514,22 @@ public class CompileScope {
         return moduleMap.get(name);
     }
 
+    public ModuleEntity findCachedModule(String name, boolean compiled, PhpLanguageProfile profile) {
+        return findCachedModule(name, compiled, profile, "");
+    }
+
+    public ModuleEntity findCachedModule(String name, boolean compiled, PhpLanguageProfile profile, String importsFingerprint) {
+        ModuleCacheKey key = new ModuleCacheKey(name, compiled, profile, importsFingerprint);
+        ModuleEntity module = cachedModules.get(key);
+        if (module != null && module.getContext().getLastModified() != 0
+                && module.getContext().getLastModified() != new java.io.File(key.getPath()).lastModified()) {
+            cachedModules.remove(key, module);
+            moduleMap.remove(module.getName(), module);
+            return null;
+        }
+        return module;
+    }
+
     public ModuleEntity removeUserModule(String name) {
         ModuleEntity userModule = findUserModule(name);
 
@@ -449,6 +537,10 @@ public class CompileScope {
             moduleMap.remove(name);
             moduleIndexMap.remove(userModule.getInternalName());
         }
+
+        String path = ModuleCacheKey.normalize(name);
+        cachedModules.entrySet().removeIf(entry -> entry.getKey().getPath().equals(path)
+                || name.equals(entry.getValue().getName()));
 
         return userModule;
     }
@@ -462,33 +554,62 @@ public class CompileScope {
     }
 
     public ClassEntity fetchUserClass(String name, String nameLower) {
+        return fetchUserClassInternal(name, nameLower, isModernClassLookup());
+    }
+
+    public boolean isModernClassLookup() {
+        Boolean active = classLookupModern.get();
+        return active == null ? getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5 : active;
+    }
+
+    public ClassEntity fetchUserClass(String name, String nameLower, boolean modern) {
+        Boolean previous = classLookupModern.get(); classLookupModern.set(modern);
+        try { return fetchUserClass(name, nameLower); }
+        finally { if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous); }
+    }
+
+    private ClassEntity fetchUserClassInternal(String name, String nameLower, boolean modern) {
         ClassEntity entity;
+        String canonical = PhpClassNames.canonicalKey(name);
+        nameLower = modern ? canonical : name.toLowerCase();
 
         if (classEntityFetchHandler != null) {
-            for (EntityFetchHandler handler : classEntityFetchHandler) {
-                handler.fetch(this, name, nameLower);
+            Boolean previous = classLookupModern.get();
+            classLookupModern.set(modern);
+            try {
+                for (EntityFetchHandler handler : classEntityFetchHandler) handler.fetch(this, name, nameLower);
+            } finally {
+                if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous);
             }
         }
 
-        entity = classMap.get(nameLower);
+        entity = classMap.get(canonical);
+        if (!modern && !PhpClassNames.isModern(entity)) entity = legacyClassMap.get(nameLower);
         if (entity != null) {
             return entity;
         }
 
-        CompileClass compileClass = compileClassMap.get(nameLower);
+        CompileClass compileClass = modern ? canonicalCompileClassMap.get(canonical) : compileClassMap.get(nameLower);
         if (compileClass == null)
             return null;
 
-        entity = new ClassEntity(new ClassWrapper(
-                compileClass.getExtension(), this, compileClass.getNativeClass()
-        ));
-        entity.setId(nextClassIndex());
-
         synchronized (classMap) {
-            classMap.put(name, entity);
+            entity = classMap.get(canonical);
+            if (!modern && !PhpClassNames.isModern(entity)) entity = legacyClassMap.get(nameLower);
+            if (entity != null) return entity;
+            Boolean previous = classLookupModern.get();
+            classLookupModern.set(modern);
+            try {
+                entity = new ClassEntity(new ClassWrapper(
+                        compileClass.getExtension(), this, compileClass.getNativeClass()
+                ));
+                entity.setId(nextClassIndex());
+                registerClass(entity);
+                return entity;
+            } finally {
+                if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous);
+            }
         }
-
-        return entity;
     }
 
     public FunctionEntity findUserFunction(String name) {
@@ -556,7 +677,8 @@ public class CompileScope {
     }
 
     public CompileClass findCompileClass(String name) {
-        return compileClassMap.get(name.toLowerCase());
+        return isModernClassLookup()
+                ? canonicalCompileClassMap.get(PhpClassNames.canonicalKey(name)) : compileClassMap.get(name.toLowerCase());
     }
 
     public Class<? extends JavaException> findJavaException(Class<? extends Throwable> clazz) {

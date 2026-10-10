@@ -92,13 +92,16 @@ public class ReflectionClass extends Reflection {
 
     @Signature
     public Memory getDefaultProperties(Environment env, Memory... args) {
+        entity.initializeRuntimeState(env);
         ArrayMemory result = new ArrayMemory();
         for (PropertyEntity e : entity.getStaticProperties()) {
-            result.put(e.getName(), e.getDefaultValue(env));
+            if (!e.hasDefaultValue()) continue;
+            result.put(e.getName(), entity.hasDeferredInitialization() ? e.getDefaultValue(env).toImmutable() : e.getDefaultValue(env));
         }
 
         for (PropertyEntity e : entity.getProperties()) {
-            result.put(e.getName(), e.getDefaultValue(env));
+            if (!e.hasDefaultValue()) continue;
+            result.put(e.getName(), entity.hasDeferredInitialization() ? e.getDefaultValue(env).toImmutable() : e.getDefaultValue(env));
         }
 
         return result.toConstant();
@@ -107,7 +110,7 @@ public class ReflectionClass extends Reflection {
     @Signature
     public Memory getDocComment(Environment env, Memory... args) {
         if (entity.getDocComment() == null)
-            return Memory.NULL;
+            return Memory.FALSE;
 
         return new StringMemory(entity.getDocComment().toString());
     }
@@ -184,6 +187,7 @@ public class ReflectionClass extends Reflection {
         }
 
         ReflectionMethod r = new ReflectionMethod(env, m);
+        r.setReflectedClass(entity);
 
         return new ObjectMemory(r);
     }
@@ -224,6 +228,7 @@ public class ReflectionClass extends Reflection {
             if (checkModifiers(e, mod)) {
                 ReflectionMethod method = new ReflectionMethod(env, classEntity);
                 method.setEntity(e);
+                method.setReflectedClass(entity);
                 result.add(new ObjectMemory(method));
             }
         }
@@ -327,9 +332,11 @@ public class ReflectionClass extends Reflection {
 
         ArrayMemory result = new ArrayMemory();
         ClassEntity classEntity = env.fetchClass("ReflectionProperty");
+        boolean modern = PhpReflectionModifiers.modern(env, env.trace());
 
-        if (mod == -1 || (mod & ReflectionProperty.IS_STATIC) == ReflectionProperty.IS_STATIC) {
+        if (modern || mod == -1 || (mod & ReflectionProperty.IS_STATIC) == ReflectionProperty.IS_STATIC) {
             for (PropertyEntity e : entity.getStaticProperties()) {
+                if (modern && mod != -1 && (mod & PhpReflectionModifiers.propertyFlags(e, true)) == 0) continue;
                 ReflectionProperty prop = new ReflectionProperty(env, classEntity);
                 prop.setEntity(e);
                 result.add(new ObjectMemory(prop));
@@ -337,7 +344,7 @@ public class ReflectionClass extends Reflection {
         }
 
         for (PropertyEntity e : entity.getProperties()) {
-            if (checkModifiers(e, mod)) {
+            if (modern ? mod == -1 || (mod & PhpReflectionModifiers.propertyFlags(e, true)) != 0 : checkModifiers(e, mod)) {
                 ReflectionProperty prop = new ReflectionProperty(env, classEntity);
                 prop.setEntity(e);
                 result.add(new ObjectMemory(prop));

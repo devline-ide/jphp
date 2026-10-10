@@ -4,6 +4,7 @@ import org.develnext.jphp.core.tokenizer.token.expr.value.YieldExprToken;
 import php.runtime.Memory;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
+import php.runtime.loader.dump.ModuleDumper;
 import php.runtime.reflection.*;
 import php.runtime.reflection.helper.ClosureEntity;
 import php.runtime.common.Messages;
@@ -46,6 +47,7 @@ public class JvmCompiler extends AbstractCompiler {
         super(environment, context);
         this.classes = new ArrayList<>();
         this.module = new ModuleEntity(context);
+        this.module.setPhpLanguageProfile(context.getPhpLanguageProfile(scope));
         this.module.setId( scope.nextModuleIndex() );
 
         this.tokens = analyzer.getTree();
@@ -95,6 +97,8 @@ public class JvmCompiler extends AbstractCompiler {
         return cmp.compile();
     }
 
+    private final java.util.Set<ConstStmtToken.Item> deferredGlobalConstants = java.util.Collections.newSetFromMap(new java.util.IdentityHashMap<>());
+
     public List<ConstantEntity> compileConstant(ConstStmtToken constant){
         List<ConstantEntity> result = new ArrayList<ConstantEntity>();
         for(ConstStmtToken.Item el : constant.items){
@@ -105,6 +109,10 @@ public class JvmCompiler extends AbstractCompiler {
 
             ExpressionStmtCompiler expressionStmtCompiler = new ExpressionStmtCompiler(this);
             Memory memory = expressionStmtCompiler.writeExpression(el.value, true, true, false);
+            if (memory == null && module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                memory = org.develnext.jphp.core.compiler.jvm.statement.PhpConstantExpression.check(el.value, expressionStmtCompiler);
+                if (memory == null) { deferredGlobalConstants.add(el); continue; }
+            }
             if (memory == null){
                 throw new CompileException(
                         Messages.ERR_EXPECTED_CONST_VALUE.fetch(el.getFulledName()),
@@ -124,7 +132,7 @@ public class JvmCompiler extends AbstractCompiler {
         MethodStmtCompiler compiler = new MethodStmtCompiler(clazzCompiler, method);
         compiler.setExternal(external);
         compiler.setGeneratorEntity(generatorEntity);
-        clazzCompiler.node.methods.add(compiler.node);
+        if (!clazzCompiler.statement.isInterface()) clazzCompiler.node.methods.add(compiler.node);
         return compiler.compile();
     }
 
@@ -181,8 +189,6 @@ public class JvmCompiler extends AbstractCompiler {
         for(Token token : tokens) {
             if (token instanceof NamespaceStmtToken) {
                 setNamespace((NamespaceStmtToken) token);
-            } if (token instanceof DeclareStmtToken) {
-                declareStmtTokens.add((DeclareStmtToken) token);
             } if (token instanceof ClassStmtToken){
                 ClassStmtCompiler cmp = new ClassStmtCompiler(this, (ClassStmtToken)token);
                 ClassEntity entity = cmp.compile();
@@ -199,6 +205,9 @@ public class JvmCompiler extends AbstractCompiler {
                 entity.setStatic(true);
                 module.addFunction(entity);
                 functions.put(entity.getLowerName(), entity);
+            } else if (token instanceof ConstStmtToken) {
+                for (ConstStmtToken.Item item : ((ConstStmtToken) token).items) if (deferredGlobalConstants.contains(item))
+                    externalCode.add(new ExprStmtToken(getEnvironment(), getContext(), new ConstantInitEnvironment(item)));
             } else if (token instanceof ExprStmtToken){
                 externalCode.add((ExprStmtToken)token);
             } else
@@ -213,8 +222,9 @@ public class JvmCompiler extends AbstractCompiler {
         this.classes = new ArrayList<>();
         module.setInternalName("$php_module_m" + UUID.randomUUID().toString().replace("-", ""));
 
-        List<ExprStmtToken> externalCode = process(tokens, NamespaceStmtToken.getDefault());
-
+        // Functions and closures must capture the module's strictness before emitting their bodies.
+        declareStmtTokens.clear();
+        for (Token token : tokens) if (token instanceof DeclareStmtToken) declareStmtTokens.add((DeclareStmtToken)token);
         for (DeclareStmtToken declare : declareStmtTokens) {
             String name = declare.getName().getName();
 
@@ -234,7 +244,8 @@ public class JvmCompiler extends AbstractCompiler {
             }
         }
 
-        NamespaceStmtToken namespace = NamespaceStmtToken.getDefault();
+        List<ExprStmtToken> externalCode = process(tokens, analyzer.newNamespace());
+        NamespaceStmtToken namespace = analyzer.newNamespace();
 
         ClassStmtToken token = new ClassStmtToken(TokenMeta.of( module.getName() ));
         token.setFinal(true);
@@ -261,6 +272,8 @@ public class JvmCompiler extends AbstractCompiler {
         classStmtCompiler.setSystem(true);
 
         module.setData(classStmtCompiler.compile().getData());
+        module.validateMethodSignatures(environment);
+        module.recordSourceCompilerAbi(ModuleDumper.COMPILER_ABI_VERSION);
         // ..
 
         if (autoRegister)
@@ -279,6 +292,11 @@ public class JvmCompiler extends AbstractCompiler {
 
     public String getSourceFile() {
         return context.getFileName();
+    }
+
+    public static class ConstantInitEnvironment extends StmtToken {
+        public final ConstStmtToken.Item item;
+        public ConstantInitEnvironment(ConstStmtToken.Item item) { super(item.name.getMeta(), TokenType.T_J_CUSTOM); this.item = item; }
     }
 
     public class ClassInitEnvironment extends StmtToken {

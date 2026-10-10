@@ -12,6 +12,7 @@ import java.util.List;
 public class CallExprToken extends ValueExprToken implements CallableExprToken {
     private ExprToken name;
     private List<ExprStmtToken> parameters;
+    private boolean firstClassCallable;
 
     protected CallExprToken(TokenMeta meta, TokenType type) {
         super(meta, type);
@@ -20,6 +21,9 @@ public class CallExprToken extends ValueExprToken implements CallableExprToken {
     public CallExprToken(TokenMeta meta) {
         super(meta, TokenType.T_J_CUSTOM);
     }
+
+    public boolean isFirstClassCallable() {return firstClassCallable;}
+    public void setFirstClassCallable(boolean value) {firstClassCallable=value;}
 
     public List<ExprStmtToken> getParameters() {
         return parameters;

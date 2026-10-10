@@ -1,0 +1,2 @@
+<?php
+error_reporting(0);class A implements ArrayAccess{public $a=[];public $gets=0;public function &offsetGet($k){$this->gets++;return $this->a;}public function offsetExists($k){return true;}public function offsetSet($k,$v){}public function offsetUnset($k){}}$a=new A;$ev=[];set_error_handler(function($n,$s)use(&$ev){$ev[]=[$n,$s];return true;});$r=$a["x"][null]++;restore_error_handler();echo serialize([$r,$a->a,$a->gets,$ev]);

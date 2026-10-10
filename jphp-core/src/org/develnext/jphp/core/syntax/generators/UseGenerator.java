@@ -124,7 +124,7 @@ public class UseGenerator extends Generator<NamespaceUseStmtToken> {
                             useStmtToken.setName(nameToken);
                             useStmtToken.setUseType(NamespaceUseStmtToken.UseType.CLASS);
 
-                            namespace.getUses().add(useStmtToken);
+                            analyzer.registerNamespaceUse(namespace, useStmtToken);
                         }
 
                         for (String s : aPackage.getFunctions()) {
@@ -134,7 +134,7 @@ public class UseGenerator extends Generator<NamespaceUseStmtToken> {
                             useStmtToken.setName(nameToken);
                             useStmtToken.setUseType(NamespaceUseStmtToken.UseType.FUNCTION);
 
-                            namespace.getUses().add(useStmtToken);
+                            analyzer.registerNamespaceUse(namespace, useStmtToken);
                         }
 
                         for (String s : aPackage.getConstants()) {
@@ -144,16 +144,16 @@ public class UseGenerator extends Generator<NamespaceUseStmtToken> {
                             useStmtToken.setName(nameToken);
                             useStmtToken.setUseType(NamespaceUseStmtToken.UseType.CONSTANT);
 
-                            namespace.getUses().add(useStmtToken);
+                            analyzer.registerNamespaceUse(namespace, useStmtToken);
                         }
                     } else {
-                        namespace.getUses().add(use);
+                        analyzer.registerNamespaceUse(namespace, use);
                     }
                 } else {
-                    namespace.getUses().add(use);
+                    analyzer.registerNamespaceUse(namespace, use);
                 }
             } else {
-                namespace.getUses().add(use);
+                analyzer.registerNamespaceUse(namespace, use);
             }
 
             if (token instanceof CommaToken){

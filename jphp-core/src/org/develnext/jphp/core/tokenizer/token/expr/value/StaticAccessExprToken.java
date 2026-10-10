@@ -9,6 +9,12 @@ public class StaticAccessExprToken extends ValueExprToken {
     protected ValueExprToken clazz;
     protected ValueExprToken field;
     protected ExprStmtToken fieldExpr;
+    protected boolean dynamicConstant;
+    private boolean writeAccess, quietRead;
+    public boolean isWriteAccess() {return writeAccess;}
+    public void setWriteAccess(boolean value) {writeAccess=value;}
+    public boolean isQuietRead() {return quietRead;}
+    public void setQuietRead(boolean value) {quietRead=value;}
 
     public StaticAccessExprToken(TokenMeta meta) {
         super(meta, TokenType.T_DOUBLE_COLON);
@@ -37,6 +43,10 @@ public class StaticAccessExprToken extends ValueExprToken {
     public void setFieldExpr(ExprStmtToken fieldExpr) {
         this.fieldExpr = fieldExpr;
     }
+
+    public boolean isDynamicConstant() { return dynamicConstant; }
+
+    public void setDynamicConstant(boolean dynamicConstant) { this.dynamicConstant = dynamicConstant; }
 
     public boolean isGetStaticField(){
         return field instanceof VariableExprToken;

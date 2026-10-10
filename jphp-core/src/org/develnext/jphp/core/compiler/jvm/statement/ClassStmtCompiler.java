@@ -23,6 +23,7 @@ import org.objectweb.asm.tree.*;
 import php.runtime.Memory;
 import php.runtime.common.Function;
 import php.runtime.common.Messages;
+import php.runtime.common.PhpClassNames;
 import php.runtime.env.Environment;
 import php.runtime.env.TraceInfo;
 import php.runtime.exceptions.CriticalException;
@@ -64,6 +65,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     protected List<ConstStmtToken.Item> dynamicConstants = new ArrayList<ConstStmtToken.Item>();
     protected List<ClassVarStmtToken> dynamicProperties = new ArrayList<ClassVarStmtToken>();
     private ClassStmtToken classContext;
+    private final Set<String> deferredTraitConstants = new HashSet<>();
 
     public ClassStmtCompiler(JvmCompiler compiler, ClassStmtToken statement) {
         super(compiler);
@@ -281,6 +283,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         constructor.exceptions = new ArrayList();
 
         MethodStmtCompiler methodCompiler = new MethodStmtCompiler(this, constructor);
+        methodCompiler.setInitializer(true);
         ExpressionStmtCompiler expressionCompiler = new ExpressionStmtCompiler(methodCompiler, null);
         methodCompiler.writeHeader();
 
@@ -357,9 +360,12 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             // PROPERTIES
             for (ClassVarStmtToken property : statement.getProperties()) {
                 ExpressionStmtCompiler expressionStmtCompiler = new ExpressionStmtCompiler(methodCompiler, null);
-                Memory value = Memory.NULL;
-                if (property.getValue() != null)
-                    value = expressionStmtCompiler.writeExpression(property.getValue(), true, true, false);
+                Memory value = property.getDeclaredType() == null ? Memory.NULL : Memory.UNDEFINED;
+                boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+                if (property.getValue() != null) {
+                    value = modern ? PhpConstantExpression.check(property.getValue(), expressionStmtCompiler)
+                            : expressionStmtCompiler.writeExpression(property.getValue(), true, true, false);
+                }
 
                 PropertyEntity prop = new PropertyEntity(compiler.getContext());
                 prop.setName(property.getVariable().getName());
@@ -368,6 +374,14 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 prop.setDefaultValue(value);
                 prop.setDefault(property.getValue() != null);
                 prop.setTrace(property.toTraceInfo(compiler.getContext()));
+                prop.setDeclaredType(property.getDeclaredType());
+                prop.setFinal(property.isFinal());
+                if (modern && property.isFinal() && prop.isPrivate())
+                    compiler.getEnvironment().error(prop.getTrace(), ErrorType.E_COMPILE_ERROR,
+                            "Private property %s::$%s cannot be final", entity.getName(), prop.getName());
+                if (value != null && prop.getDeclaredType() != null && property.getValue() != null
+                        && !(value instanceof php.runtime.memory.helper.ConstantMemory) && !(value instanceof php.runtime.memory.helper.ClassConstantMemory))
+                    prop.setDefaultValue(prop.validateDefaultValue(compiler.getEnvironment(), value, entity, true));
 
                 if (property.getDocComment() != null) {
                     prop.setDocComment(new DocumentComment(property.getDocComment().getComment()));
@@ -377,7 +391,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 result.check(compiler.getEnvironment());
 
                 if (value == null && property.getValue() != null) {
-                    if (property.getValue().isSingle() && ValueExprToken.isConstable(property.getValue().getSingle(), true))
+                    if (modern || property.getValue().isSingle() && ValueExprToken.isConstable(property.getValue().getSingle(), true))
                         dynamicProperties.add(property);
                     else
                         compiler.getEnvironment().error(
@@ -396,18 +410,28 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
     protected void writeConstant(ConstStmtToken constant) {
         MethodStmtCompiler methodStmtCompiler = new MethodStmtCompiler(this, (MethodStmtToken) null);
+        methodStmtCompiler.setInitializer(true);
         ExpressionStmtCompiler expressionStmtCompiler = new ExpressionStmtCompiler(methodStmtCompiler, null);
 
         DocumentComment documentComment = null;
         if (constant.getDocComment() != null)
-            documentComment = new DocumentComment(constant.getDocComment().getComment());
+            documentComment = new DocumentComment(compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    ? constant.getDocComment().getWord() + "*/" : constant.getDocComment().getComment());
 
+        boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         for (ConstStmtToken.Item el : constant.items) {
-            Memory value = expressionStmtCompiler.writeExpression(el.value, true, true, false);
+            Memory value = modern ? PhpConstantExpression.check(el.value, expressionStmtCompiler)
+                    : expressionStmtCompiler.writeExpression(el.value, true, true, false);
             ConstantEntity constantEntity = new ConstantEntity(el.getFulledName(), value, true);
             constantEntity.setTrace(el.name.toTraceInfo(compiler.getContext()));
             constantEntity.setDocComment(documentComment);
             constantEntity.setModifier(constant.getModifier());
+            constantEntity.setFinal(constant.isFinal());
+            constantEntity.setDeclaredType(constant.getDeclaredType());
+            if (value != null && constant.getDeclaredType() != null) {
+                value = constantEntity.validateValue(compiler.getEnvironment(), value, entity, true);
+                constantEntity.setValue(value);
+            }
 
             if (value != null && !value.isArray()) {
                 ConstantEntity c = entity.findConstant(el.getFulledName());
@@ -422,7 +446,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 }
                 entity.addConstant(constantEntity).check(compiler.getEnvironment());
             } else {
-                if (ValueExprToken.isConstable(el.value.getSingle(), false)) {
+                if (modern || ValueExprToken.isConstable(el.value.getSingle(), false)) {
                     dynamicConstants.add(el);
                     entity.addConstant(constantEntity).check(compiler.getEnvironment());
                 } else {
@@ -511,6 +535,31 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     }
 
     @SuppressWarnings("unchecked")
+    private void writeConstantInitializers() {
+        int index = 0;
+        for (ConstStmtToken.Item item : dynamicConstants) {
+            ConstantEntity constant = entity.findConstant(item.getFulledName());
+            if (constant.getValue() != null) continue;
+            MethodNode node = new MethodNodeImpl();
+            node.access = ACC_PUBLIC | ACC_STATIC;
+            node.name = "__$constant" + index++;
+            node.desc = Type.getMethodDescriptor(Type.getType(Memory.class), Type.getType(Environment.class));
+            constant.setInitializer(entity.getName(), node.name);
+            MethodStmtCompiler methodCompiler = new MethodStmtCompiler(this, node);
+            methodCompiler.setInitializer(true);
+            ExpressionStmtCompiler expressionCompiler = new ExpressionStmtCompiler(methodCompiler, null);
+            methodCompiler.writeHeader();
+            LabelNode start = expressionCompiler.makeLabel();
+            methodCompiler.addLocalVariable("~env", start, Environment.class);
+            expressionCompiler.writeExpression(item.value, true, false, true);
+            expressionCompiler.writePopBoxing(true);
+            node.instructions.add(new InsnNode(ARETURN));
+            expressionCompiler.stackPop();
+            methodCompiler.writeFooter();
+            this.node.methods.add(node);
+        }
+    }
+
     protected void writeInitEnvironment() {
         if (!dynamicConstants.isEmpty() || !dynamicProperties.isEmpty()) {
             initDynamicExists = true;
@@ -527,6 +576,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             }
 
             MethodStmtCompiler methodCompiler = new MethodStmtCompiler(this, node);
+            methodCompiler.setInitializer(true);
             ExpressionStmtCompiler expressionCompiler = new ExpressionStmtCompiler(methodCompiler, null);
             methodCompiler.writeHeader();
 
@@ -563,10 +613,10 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                     if (access.getClazz() instanceof SelfExprToken)
                         self = true;
                     else if (access.getClazz() instanceof FulledNameToken
-                            && ((FulledNameToken) access.getClazz()).getName().equalsIgnoreCase(entity.getName())) {
+                            && sameClassName(((FulledNameToken) access.getClazz()).getName(), entity.getName())) {
                         self = true;
                     }
-                    if (self) {
+                    if (self && access.getField() instanceof NameToken) {
                         String name = ((NameToken) access.getField()).getName();
                         if (usedNames.contains(el.getFulledName()))
                             first.add(0, el);
@@ -586,6 +636,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             other.addAll(0, first);
 
             for (ConstStmtToken.Item el : other) {
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) continue;
                 expressionCompiler.writeVarLoad(l_class);
                 expressionCompiler.writePushEnv();
                 expressionCompiler.writePushConstString(el.getFulledName());
@@ -593,7 +644,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 expressionCompiler.writePopBoxing(true);
 
                 expressionCompiler.writeSysDynamicCall(
-                        ClassEntity.class, "addDynamicConstant", void.class,
+                        ClassEntity.class, entity.isTrait() && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                                ? "addTraitDynamicConstant" : "addDynamicConstant", void.class,
                         Environment.class, String.class, Memory.class
                 );
             }
@@ -631,64 +683,12 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         ExpressionStmtCompiler expressionCompiler = new ExpressionStmtCompiler(methodCompiler, null);
         methodCompiler.writeHeader();
 
-        // trace list
-        expressionCompiler.writePushSmallInt(traceList.size());
-        node.instructions.add(new TypeInsnNode(ANEWARRAY, Type.getInternalName(TraceInfo.class)));
-        expressionCompiler.stackPush(Memory.Type.REFERENCE);
-
-        int i = 0;
-        for (TraceInfo traceInfo : traceList) {
-            expressionCompiler.writePushDup();
-            expressionCompiler.writePushSmallInt(i);
-            expressionCompiler.writePushCreateTraceInfo(traceInfo.getStartLine(), traceInfo.getStartPosition());
-
-            node.instructions.add(new InsnNode(AASTORE));
-            expressionCompiler.stackPop();
-            expressionCompiler.stackPop();
-            i++;
-        }
-        expressionCompiler.writePutStatic("$TRC", TraceInfo[].class);
-
-        // memory constants
-        expressionCompiler.writePushSmallInt(memoryConstants.size());
-        node.instructions.add(new TypeInsnNode(ANEWARRAY, Type.getInternalName(Memory.class)));
-        expressionCompiler.stackPush(Memory.Type.REFERENCE);
-
-        i = 0;
-        for (Memory memory : memoryConstants) {
-            expressionCompiler.writePushDup();
-            expressionCompiler.writePushSmallInt(i);
-
-            expressionCompiler.writePushMemory(memory);
-            expressionCompiler.writePopBoxing(true, false);
-
-            node.instructions.add(new InsnNode(AASTORE));
-            expressionCompiler.stackPop();
-            expressionCompiler.stackPop();
-
-            i++;
-        }
-        expressionCompiler.writePutStatic("$MEM", Memory[].class);
-
-        // memory array constants
-        expressionCompiler.writePushSmallInt(memoryArrayConstants.size());
-        node.instructions.add(new TypeInsnNode(ANEWARRAY, Type.getInternalName(Memory[].class)));
-        expressionCompiler.stackPush(Memory.Type.REFERENCE);
-
-        i = 0;
-        for (Collection<Memory> memories : memoryArrayConstants) {
-            expressionCompiler.writePushDup();
-            expressionCompiler.writePushSmallInt(i);
-
-            expressionCompiler.writePushParameters(memories);
-
-            node.instructions.add(new InsnNode(AASTORE));
-            expressionCompiler.stackPop();
-            expressionCompiler.stackPop();
-
-            i++;
-        }
-        expressionCompiler.writePutStatic("$AMEM", Memory[][].class);
+        ClassArrayTableCompiler.write(this, expressionCompiler, "$TRC", TraceInfo[].class, TraceInfo.class,
+                traceList, (expr, trace) -> expr.writePushCreateTraceInfo(trace.getStartLine(), trace.getStartPosition()));
+        ClassArrayTableCompiler.write(this, expressionCompiler, "$MEM", Memory[].class, Memory.class,
+                memoryConstants, (expr, memory) -> {expr.writePushMemory(memory);expr.writePopBoxing(true, false);});
+        ClassArrayTableCompiler.write(this, expressionCompiler, "$AMEM", Memory[][].class, Memory[].class,
+                memoryArrayConstants, (expr, memories) -> expr.writePushParameters(memories));
 
         // cached calls
         expressionCompiler.writePushNewObject(FunctionCallCache.class);
@@ -772,7 +772,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     protected ClassEntity fetchClass(String name) {
         ClassEntity result = compiler.getModule().findClass(name);
         if (result == null)
-            result = getCompiler().getEnvironment().fetchClass(name, true);
+            result = getCompiler().getEnvironment().fetchClass(name, true, compiler.getModule().getPhpLanguageProfile());
 
         return result;
     }
@@ -921,17 +921,17 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             boolean replaceAlias = false;
 
             for (ClassStmtToken.Alias alias : aliases) {
-                if (replacement != null && alias.getTrait().equalsIgnoreCase(replacement.getOrigin())) {
+                if (replacement != null && sameClassName(alias.getTrait(), replacement.getOrigin())) {
                     replaceExists = true;
-                    break;
                 }
-                if ((alias.getModifier() == null || alias.getModifier() == methodEntity.getModifier())
-                        || alias.getName() == null)
+                if (alias.getName() == null || alias.getName().equalsIgnoreCase(methodEntity.getName()))
                     replaceAlias = true;
             }
 
-            if (replacement != null && !replaceExists)
+            if (replacement != null && !replaceExists) {
                 aliases.add(new ClassStmtToken.Alias(replacement.getOrigin(), null, methodEntity.getName()));
+                replaceAlias = true;
+            }
 
             if (!replaceAlias)
                 aliases.add(new ClassStmtToken.Alias(trait.getName(), null, methodEntity.getName()));
@@ -944,7 +944,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
     protected void writeTraitProperties(ClassEntity trait, Collection<PropertyEntity> props) {
         for (PropertyEntity el : props) {
-            PropertyEntity origin = entity.properties.get(el.getLowerName());
+            PropertyEntity origin = (el.isStatic() ? entity.staticProperties : entity.properties).get(el.getName());
 
             if (origin != null) {
                 // doesn't work with parent private properties of non-traits  (see: the traits/property006.php test)
@@ -958,7 +958,12 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                     if (origin.getTrait() != null)
                         ownerName = origin.getTrait().getName();
 
-                    boolean isFatal = origin.getModifier() != el.getModifier();
+                    boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+                    boolean sameType = origin.getDeclaredType() == null ? el.getDeclaredType() == null
+                            : el.getDeclaredType() != null && origin.getDeclaredType().equivalentTo(el.getDeclaredType());
+                    boolean isFatal = origin.getModifier() != el.getModifier()
+                            || modern && (!sameType || origin.isStatic() != el.isStatic() || origin.isFinal() != el.isFinal()
+                                || origin.getDeclaredType() != null && origin.isDefault() != el.isDefault());
                     if (origin.getDefaultValue() != null && el.getDefaultValue() == null)
                         isFatal = true;
                     else if (origin.getDefaultValue() == null && el.getDefaultValue() != null)
@@ -969,6 +974,9 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                         isFatal = true;
 
                     if (isFatal) {
+                        if (modern) env.error(entity.getTrace(), ErrorType.E_COMPILE_ERROR,
+                                "%s and %s define the same property ($%s) in the composition of %s. However, the definition differs and is considered incompatible. Class was composed",
+                                ownerName, trait.getName(), el.getName(), entity.getName());
                         env.error(
                                 entity.getTrace(),
                                 Messages.ERR_TRAIT_SAME_PROPERTY.fetch(
@@ -976,7 +984,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                                         trait.getName(), el.getName(), entity.getName()
                                 )
                         );
-                    } else {
+                    } else if (!modern) {
                         env.error(
                                 entity.getTrace(), ErrorType.E_STRICT,
                                 Messages.ERR_TRAIT_SAME_PROPERTY_STRICT.fetch(
@@ -1003,18 +1011,49 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         writeTraitProperties(trait, trait.getStaticProperties());
     }
 
+    protected void writeTraitConstants(ClassEntity trait) {
+        for (ConstantEntity candidate : trait.getConstants()) {
+            ConstantEntity origin = entity.findConstant(candidate.getName());
+            if (origin != null && origin.getClazz() == entity) {
+                boolean sameType = origin.getDeclaredType() == null ? candidate.getDeclaredType() == null
+                        : candidate.getDeclaredType() != null && origin.getDeclaredType().forTraitComposition(entity)
+                            .equivalentTo(candidate.getDeclaredType().forTraitComposition(entity));
+                boolean compatible = sameType && origin.getModifier() == candidate.getModifier() && origin.isFinal() == candidate.isFinal();
+                boolean deferred = deferredTraitConstants.contains(candidate.getName())
+                        || origin.getValue() == null || candidate.getValue() == null;
+                if (compatible && !deferred) compatible = origin.getValue().identical(candidate.getValue());
+                if (!compatible) entity.traitConstantConflict(compiler.getEnvironment(), candidate.getName(), trait.getName());
+                else if (deferred) {
+                    deferredTraitConstants.add(candidate.getName());
+                    entity.addTraitConstantCheck(candidate.getName(), trait.getName(), candidate.getValue(),
+                            origin.getTraitName() == null ? entity.getName() : origin.getTraitName());
+                }
+                if (origin.getTraitName() == null) origin.setTraitName(trait.getName());
+                continue;
+            }
+            entity.addConstant(candidate.duplicateForTrait(entity, trait.getName())).check(compiler.getEnvironment());
+        }
+    }
+
     protected void writeTrait(ClassEntity trait) {
         entity.addTrait(trait);
         initDynamicExists = true;
 
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            writeTraitConstants(trait);
         writeTraitProperties(trait);
         for (MethodEntity methodEntity : trait.getMethods().values()) {
             writeCopiedMethod(methodEntity, trait);
         }
     }
 
+    private boolean sameClassName(String left, String right) {
+        return compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                ? PhpClassNames.canonicalKey(left).equals(PhpClassNames.canonicalKey(right)) : left.equalsIgnoreCase(right);
+    }
+
     protected void checkRequiredTrait(String trait) {
-        if (!entity.hasTrait(trait.toLowerCase())) {
+        if (!entity.hasTrait(PhpClassNames.key(trait, compiler.getModule().getPhpLanguageProfile()))) {
             compiler.getEnvironment().error(
                     entity.getTrace(),
                     Messages.ERR_TRAIT_WAS_NOT_ADDED.fetch(trait, entity.getName())
@@ -1072,6 +1111,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     @Override
     public ClassEntity compile() {
         entity = new ClassEntity(compiler.getContext());
+        entity.setModule(compiler.getModule());
         entity.setId(compiler.getScope().nextClassIndex());
 
         entity.setFinal(statement.isFinal());
@@ -1120,13 +1160,15 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         }
 
         if (compiler.getModule().findClass(entity.getLowerName()) != null
-                || compiler.getEnvironment().isLoadedClass(entity.getLowerName())) {
+                || compiler.getEnvironment().isLoadedClass(entity.getName(), compiler.getModule().getPhpLanguageProfile())) {
             throw new FatalException(
                     Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(entity.getName()),
                     statement.getName().toTraceInfo(compiler.getContext())
             );
         }
 
+        boolean deferred = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+        entity.setDeferredInitialization(deferred);
         if (!statement.isInterface()) {
             node.access = ACC_SUPER + ACC_PUBLIC;
             node.name = !isSystem /*&& !statement.isTrait()*/
@@ -1147,8 +1189,18 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             } */
 
             writeSystemInfo();
-            writeConstructor();
-            writeDefaultConstructors();
+            if (!deferred) {
+                writeConstructor();
+                writeDefaultConstructors();
+            }
+        }
+
+        if (statement.isInterface() && deferred) {
+            node.access = ACC_SUPER | ACC_PUBLIC;
+            node.name = entity.getCompiledInternalName();
+            node.superName = Type.getInternalName(Object.class);
+            node.sourceFile = compiler.getSourceFile();
+            writeSystemInfo();
         }
 
         // constants
@@ -1156,6 +1208,11 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             for (ConstStmtToken constant : statement.getConstants()) {
                 writeConstant(constant);
             }
+
+        if (deferred && !statement.isInterface()) {
+            writeConstructor();
+            writeDefaultConstructors();
+        }
 
         if (statement.getMethods() != null) {
             for (MethodStmtToken method : statement.getMethods()) {
@@ -1165,6 +1222,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             }
         }
 
+        if (deferred) writeConstantInitializers();
         writeTraits(traits);
         ClassEntity.SignatureResult result = entity.updateParentBody();
         if (isInterfaceCheck) {
@@ -1174,8 +1232,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         writeImplements();
         entity.doneDeclare();
 
-        if (!statement.isInterface()) {
-            writeDestructor();
+        if (!statement.isInterface() || deferred) {
+            if (!statement.isInterface()) writeDestructor();
 
             if (entity.getType() != ClassEntity.Type.INTERFACE) {
                 writeInitEnvironment();
@@ -1183,7 +1241,13 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
             writeInitStatic();
             cw = new JPHPClassWriter(entity.isTrait());
-            node.accept(cw);
+            try {
+                node.accept(cw);
+            } catch (RuntimeException error) {
+                TraceInfo trace = statement.toTraceInfo(compiler.getContext());
+                throw new CriticalException("Invalid JVM bytecode for " + entity.getName() + " at "
+                        + trace.getFileName() + ":" + (trace.getStartLine() + 1), error);
+            }
 
             entity.setData(cw.toByteArray());
         }

@@ -5,6 +5,8 @@ import org.develnext.jphp.core.compiler.jvm.JvmCompiler;
 import php.runtime.lang.Closure;
 import php.runtime.reflection.ClassEntity;
 import php.runtime.reflection.MethodEntity;
+import php.runtime.reflection.ParameterEntity;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.reflection.helper.ClosureEntity;
 import org.develnext.jphp.core.tokenizer.token.expr.value.ClosureStmtToken;
 import org.develnext.jphp.core.tokenizer.token.expr.value.NameToken;
@@ -63,6 +65,18 @@ public class ClosureStmtCompiler extends StmtCompiler<ClosureEntity> {
         entity.doneDeclare();
 
         entity.setGeneratorEntity(__invoke.getGeneratorEntity());
+        var captures = statement.getFunction().getUses();
+        ParameterEntity[] uses = new ParameterEntity[captures.size()];
+        for (int i = 0; i < uses.length; i++) {
+            var capture = captures.get(i);
+            uses[i] = new ParameterEntity(compiler.getContext());
+            uses[i].setName(capture.getName().getName());
+            uses[i].setReference(capture.isReference());
+            uses[i].setTrace(capture.toTraceInfo(compiler.getContext()));
+        }
+        entity.setUses(uses);
+        if (compiler.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5)
+            entity.recordSourceCapturePlan(statement.isStaticClosure(), statement.getFunction().isThisExists());
         return entity;
     }
 }

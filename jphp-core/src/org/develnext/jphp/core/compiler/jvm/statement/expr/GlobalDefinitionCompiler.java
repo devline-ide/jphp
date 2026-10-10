@@ -25,7 +25,17 @@ public class GlobalDefinitionCompiler extends BaseStatementCompiler<GlobalStmtTo
                 expr.writePushEnv();
                 expr.writePushConstString(local.name);
                 expr.writeSysDynamicCall(Environment.class, "getOrCreateGlobal", Memory.class, String.class);
-                expr.writeVarStore(local, false, false);
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5 && !method.isExternal()) {
+                    expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "exportReference", Memory.class, Memory.class);
+                    if (methodStatement.isDynamicLocal()) {
+                        expr.writeVarLoad(local);
+                        expr.writeSysStaticCall(Memory.class, "assignRefRight", Memory.class, Memory.class, Memory.class);
+                        expr.writePopAll(1);
+                    } else {
+                        expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "valueOf", Memory.class, Memory.class);
+                        expr.writeVarStore(local, false, false);
+                    }
+                } else expr.writeVarStore(local, false, false);
             } else if (variable instanceof GetVarExprToken) {
                 BaseExprCompiler<GetVarExprToken> compiler =
                         (BaseExprCompiler<GetVarExprToken>) expr.getCompiler(GetVarExprToken.class);
@@ -44,7 +54,9 @@ public class GlobalDefinitionCompiler extends BaseStatementCompiler<GlobalStmtTo
                 }
                 expr.writeSysDynamicCall(Environment.class, "getOrCreateGlobal", Memory.class, String.class);
 
-                expr.writeSysDynamicCall(Memory.class, "assign", Memory.class, Memory.class);
+                boolean modern = this.compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+                if (modern) expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "exportReference", Memory.class, Memory.class);
+                expr.writeSysDynamicCall(Memory.class, modern ? "assignRef" : "assign", Memory.class, Memory.class);
                 expr.writePopAll(1);
             }
         }

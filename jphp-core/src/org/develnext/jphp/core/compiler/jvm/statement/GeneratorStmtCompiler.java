@@ -36,6 +36,13 @@ public class GeneratorStmtCompiler extends StmtCompiler<GeneratorEntity> {
         methodToken.setClazz(classStmtToken);
         methodToken.setGenerator(false);
         methodToken.setReturnReference(false);
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            // The declared type constrains the Generator object, not its eventual getReturn() value.
+            methodToken.setReturnHintType(null);
+            methodToken.setDeclaredReturnType(null);
+            methodToken.setReturnHintTypeClass(null);
+            methodToken.setReturnOptional(false);
+        }
         methodToken.setModifier(Modifier.PROTECTED);
         methodToken.setName(NameToken.valueOf("_run"));
         methodToken.setUses(statement.getArguments());

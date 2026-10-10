@@ -79,6 +79,52 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
 
     protected transient ArrayMapEntryMemory header;
 
+    // Zend object tables can contain two physical buckets with the same key.
+    // Ordinary maps keep their usual Java Map semantics and allocate no layout.
+    private transient ArrayList<ArrayMapEntryMemory> buckets;
+    private transient IdentityHashMap<ArrayMapEntryMemory, Integer> bucketOrdinals;
+
+    public void enableBucketLayout() {
+        if (buckets != null) return;
+        buckets = new ArrayList<>();
+        bucketOrdinals = new IdentityHashMap<>();
+        for (ArrayMapEntryMemory entry = header.after; entry != header; entry = entry.after) {
+            bucketOrdinals.put(entry, buckets.size());
+            buckets.add(entry);
+        }
+    }
+
+    public boolean hasBucketLayout() { return buckets != null; }
+    public int bucketLimit() { return buckets == null ? 0 : buckets.size(); }
+    public ArrayMapEntryMemory bucketAt(int ordinal) {
+        return buckets == null || ordinal < 0 || ordinal >= buckets.size() ? null : buckets.get(ordinal);
+    }
+    public int bucketOrdinal(ArrayMapEntryMemory entry) {
+        Integer ordinal = bucketOrdinals == null ? null : bucketOrdinals.get(entry);
+        return ordinal == null ? -1 : ordinal;
+    }
+
+    public void appendBucketHole() { enableBucketLayout(); buckets.add(null); }
+
+    public ArrayMapEntryMemory insertBucket(Object key, Memory value) {
+        enableBucketLayout();
+        int hashCode = hash(key == null ? NULL : key);
+        return addMapping(hashIndex(hashCode, data.length), hashCode, key, value);
+    }
+
+    public ArrayMemoryMap copyBuckets(java.util.function.Function<Memory, Memory> copyValue) {
+        ArrayMemoryMap result = new ArrayMemoryMap();
+        result.enableBucketLayout();
+        for (ArrayMapEntryMemory entry : buckets) {
+            if (entry == null) {
+                result.buckets.add(null);
+            } else {
+                result.insertBucket(entry.getKey(), copyValue.apply(entry.getValue()));
+            }
+        }
+        return result;
+    }
+
     /**
      * Constructor only used in deserialization, do not use otherwise.
      */
@@ -144,7 +190,13 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      */
     public ArrayMemoryMap(ArrayMemoryMap map) {
         this(Math.max(2 * map.size(), DEFAULT_CAPACITY), DEFAULT_LOAD_FACTOR);
-        putAll(map);
+        if (map.hasBucketLayout()) {
+            enableBucketLayout();
+            for (ArrayMapEntryMemory entry : map.buckets) {
+                if (entry == null) appendBucketHole();
+                else insertBucket(entry.getKey(), entry.getValue());
+            }
+        } else putAll(map);
     }
 
     /**
@@ -431,6 +483,15 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      * @param key the mapping to remove
      * @return the value mapped to the removed key, null if key not in map
      */
+    private void removePhysicalEntry(ArrayMapEntryMemory wanted) {
+        int index = hashIndex(wanted.hashCode, data.length);
+        ArrayMapEntryMemory previous = null;
+        for (ArrayMapEntryMemory entry = data[index]; entry != null; entry = entry.next) {
+            if (entry == wanted) { removeMapping(entry, index, previous); return; }
+            previous = entry;
+        }
+    }
+
     public Memory remove(Object key) {
         int hashCode = hash((key == null) ? NULL : key);
         int index = hashIndex(hashCode, data.length);
@@ -453,6 +514,9 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      * to avoid garbage collection issues.
      */
     public void clear() {
+        // Validate every carrier before any bulk unlink, including retained collection views.
+        for (ArrayMapEntryMemory entry = header.after; entry != header; entry = entry.after)
+            rejectCertifiedUnlink(entry);
         modCount++;
         ArrayMapEntryMemory[] data = this.data;
         for (int i = data.length - 1; i >= 0; i--) {
@@ -461,6 +525,10 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
         size = 0;
 
         header.before = header.after = header;
+        if (buckets != null) {
+            buckets.clear();
+            bucketOrdinals.clear();
+        }
     }
 
     /**
@@ -686,6 +754,10 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
         header.before.after = link;
         header.before = link;
         data[hashIndex] = entry;
+        if (buckets != null) {
+            bucketOrdinals.put(entry, buckets.size());
+            buckets.add(entry);
+        }
     }
 
 
@@ -700,7 +772,26 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      * @param hashIndex the index into the data structure
      * @param previous  the previous entry in the chain
      */
+    private void rejectCertifiedUnlink(ArrayMapEntryMemory entry) {
+        if (entry.getOwnershipEntry() != null)
+            throw new IllegalStateException("Certified map unlink requires its actual ownership publisher");
+    }
+
+    /** A private-origin token authorizes only this actual bucket, never payload destruction. */
+    public void publishOwnershipUnlink(php.runtime.PhpOwnershipArrays.UnsetPublication publication) {
+        ArrayMapEntryMemory wanted=publication.mapEntry(this);
+        int index=hashIndex(wanted.hashCode,data.length);ArrayMapEntryMemory previous=null;
+        for (ArrayMapEntryMemory entry=data[index];entry != null;entry=entry.next) {
+            if (entry == wanted) {
+                publication.consumeMap(this,wanted);modCount++;removeEntry(entry,index,previous);size--;return;
+            }
+            previous=entry;
+        }
+        throw new IllegalArgumentException("Removal bucket is no longer attached");
+    }
+
     protected void removeMapping(ArrayMapEntryMemory entry, int hashIndex, ArrayMapEntryMemory previous) {
+        rejectCertifiedUnlink(entry);
         modCount++;
         removeEntry(entry, hashIndex, previous);
         size--;
@@ -719,6 +810,10 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      * @param previous  the previous entry in the chain
      */
     protected void removeEntry(ArrayMapEntryMemory entry, int hashIndex, ArrayMapEntryMemory previous) {
+        if (buckets != null) {
+            Integer ordinal = bucketOrdinals.remove(entry);
+            if (ordinal != null) buckets.set(ordinal, null);
+        }
         ArrayMapEntryMemory link = entry;
         link.before.after = link.after;
         link.after.before = link.before;
@@ -770,6 +865,7 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
     protected void destroyEntry(ArrayMapEntryMemory entry) {
         entry.next = null;
         entry.setKey(null);
+        entry.detachPropertySource();
         entry.setValue(null);
     }
 
@@ -805,7 +901,15 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
             ArrayMapEntryMemory newEntries[] = new ArrayMapEntryMemory[newCapacity];
 
             modCount++;
-            for (int i = oldCapacity - 1; i >= 0; i--) {
+            if (buckets != null) {
+                // Insert in physical order: the newest duplicate must stay the hash head.
+                for (ArrayMapEntryMemory entry : buckets) {
+                    if (entry == null) continue;
+                    int index = hashIndex(entry.hashCode, newCapacity);
+                    entry.next = newEntries[index];
+                    newEntries[index] = entry;
+                }
+            } else for (int i = oldCapacity - 1; i >= 0; i--) {
                 ArrayMapEntryMemory entry = oldEntries[i];
                 if (entry != null) {
                     oldEntries[i] = null;  // gc
@@ -1312,7 +1416,10 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
             if (parent.modCount != expectedModCount) {
                 throw new ConcurrentModificationException();
             }
-            parent.remove(last.getKey());
+            if (parent.hasBucketLayout()) {
+                if (next == last) next = last.after;
+                parent.removePhysicalEntry(last);
+            } else parent.remove(last.getKey());
             last = null;
             expectedModCount = parent.modCount;
         }

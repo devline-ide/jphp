@@ -32,10 +32,16 @@ public class JumpCompiler extends BaseStatementCompiler<JumpStmtToken> {
             return;
         }
 
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && method.isLeavingFinally(jump)) {
+            env.error(token.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
+                    "jump out of a finally block is disallowed");
+            return;
+        }
         if (token instanceof ContinueStmtToken){
-            add(new JumpInsnNode(GOTO, jump.continueLabel));
+            add(new JumpInsnNode(GOTO, method.routeFinallyExit(jump.continueLabel, jump.tryScopes)));
         } else if (token instanceof BreakStmtToken){
-            add(new JumpInsnNode(GOTO, jump.breakLabel));
+            add(new JumpInsnNode(GOTO, method.routeFinallyExit(jump.breakLabel, jump.tryScopes)));
         }
     }
 }

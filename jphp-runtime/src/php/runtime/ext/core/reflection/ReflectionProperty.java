@@ -19,6 +19,7 @@ import static php.runtime.annotation.Reflection.*;
 })
 public class ReflectionProperty extends Reflection implements Reflector {
     public final static int IS_STATIC = 1;
+    public final static int IS_FINAL = 32;
     public final static int IS_PUBLIC = 256;
     public final static int IS_PROTECTED = 512;
     public final static int IS_PRIVATE = 1024;
@@ -88,20 +89,8 @@ public class ReflectionProperty extends Reflection implements Reflector {
 
     @Signature
     public Memory getModifiers(Environment env, Memory... args){
-        int mod = 0;
-        if (entity.isStatic())
-            mod += IS_STATIC;
-
-        if (entity.isPrivate())
-            mod += IS_PRIVATE;
-
-        if (entity.isProtected())
-            mod += IS_PROTECTED;
-
-        if (entity.isPublic())
-            mod += IS_PUBLIC;
-
-        return LongMemory.valueOf(mod);
+        return LongMemory.valueOf(PhpReflectionModifiers.propertyFlags(entity,
+                PhpReflectionModifiers.modern(env, env.trace())));
     }
 
     @Signature
@@ -111,7 +100,7 @@ public class ReflectionProperty extends Reflection implements Reflector {
 
     @Signature(@Arg(value = "object", optional = @Optional(value = "NULL")))
     public Memory getValue(Environment env, Memory... args) throws Throwable {
-        if (!hackAccess){
+        if (!hackAccess && !modern(env)){
             int access = entity.canAccess(env);
             if (access != 0) {
                 exception(env, "Cannot access non-public member %s::$%s",
@@ -126,16 +115,18 @@ public class ReflectionProperty extends Reflection implements Reflector {
                 exception(env, "Dynamic property %s::$%s cannot get a property value statically",
                         entity.getClazz().getName(), entity.getName());
 
-            return entity.getClazz().getStaticProperty(
-                    env, env.trace(),
-                    entity.getName(), true, false, null, null, 0, false);
+            Memory value = entity.getClazz().getStaticProperty(
+                    env, env.trace(), entity.getName(), true, false, null, null, 0, false);
+            return entity.readInitialized(env, env.trace(), value);
         } else {
             if (arg.isObject()){
                 if (entity.isStatic())
                     exception(env, "Static property %s::$%s cannot get a property value dynamically",
                             entity.getClazz().getName(), entity.getName());
 
-                return arg.toValue(ObjectMemory.class).getProperties().valueOfIndex(entity.getSpecificName());
+                ObjectMemory object = arg.toValue(ObjectMemory.class);
+                if (modern(env)) return object.getReflection().getReflectedProperty(env, env.trace(), object.value, entity);
+                return entity.readInitialized(env, env.trace(), object.getProperties().getByScalar(entity.getSpecificName()));
             } else
                 exception(env, "Argument 1 must be object, given %s", arg.getRealType().toString());
         }
@@ -144,7 +135,37 @@ public class ReflectionProperty extends Reflection implements Reflector {
 
     @Signature
     public Memory isDefault(Environment env, Memory... args){
-        return entity.isDefault() ? Memory.TRUE : Memory.FALSE;
+        return modern(env) || entity.isDefault() ? Memory.TRUE : Memory.FALSE;
+    }
+
+    private boolean modern(Environment env) {
+        return entity != null && (entity.getClazz().getModule() != null
+                && entity.getClazz().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                || env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5);
+    }
+
+    @Signature public Memory hasType(Environment env, Memory... args) {return entity.getDeclaredType() == null ? Memory.FALSE : Memory.TRUE;}
+    @Signature public Memory getType(Environment env, Memory... args) {
+        return entity.getDeclaredType() == null ? Memory.NULL : ObjectMemory.valueOf(ReflectionType.fromDeclaration(env, entity.getDeclaredType()));
+    }
+    @Signature public Memory isFinal(Environment env, Memory... args) {return entity.isFinal() ? Memory.TRUE : Memory.FALSE;}
+    @Signature public Memory hasDefaultValue(Environment env, Memory... args) {return entity.hasDefaultValue() ? Memory.TRUE : Memory.FALSE;}
+    @Signature public Memory getDefaultValue(Environment env, Memory... args) {
+        return entity.hasDefaultValue() ? entity.getDefaultValue(env).toImmutable() : Memory.NULL;
+    }
+    @Signature(@Arg(value = "object", optional = @Optional(value = "NULL")))
+    public Memory isInitialized(Environment env, Memory... args) {
+        if (entity.isStatic()) return entity.getStaticValue(env, env.trace()).isUndefined() ? Memory.FALSE : Memory.TRUE;
+        if (args[0].isNull()) env.exception(env.trace(), php.runtime.lang.exception.BaseTypeError.class,
+                "ReflectionProperty::isInitialized(): Argument #1 ($object) must be provided for instance properties");
+        if (!args[0].isObject()) env.exception(env.trace(), php.runtime.lang.exception.BaseTypeError.class,
+                "ReflectionProperty::isInitialized(): Argument #1 ($object) must be of type ?object, %s given",
+                php.runtime.reflection.support.PhpTypeDeclaration.valueType(args[0]));
+        var object = args[0].toValue(ObjectMemory.class);
+        if (!object.getReflection().isInstanceOf(entity.getClazz())) exception(env,
+                "Given object is not an instance of the class this property was declared in");
+        Memory value = object.getProperties().getByScalar(entity.getSpecificName());
+        return value == null || value.isUndefined() ? Memory.FALSE : Memory.TRUE;
     }
 
     @Signature
@@ -173,9 +194,15 @@ public class ReflectionProperty extends Reflection implements Reflector {
         return Memory.NULL;
     }
 
-    @Signature({@Arg("object"), @Arg("value")})
+    @Signature({@Arg("object"), @Arg(value="value", optional=@Optional(undefined=true))})
     public Memory setValue(Environment env, Memory... args) throws Throwable {
-        if (!hackAccess){
+        var context=php.runtime.PhpPropertyWriteContext.enter(env, env.trace(), false);
+        try {return setValueInternal(env, args);}
+        finally {php.runtime.PhpPropertyWriteContext.leave(context);}
+    }
+
+    private Memory setValueInternal(Environment env, Memory... args) throws Throwable {
+        if (!hackAccess && !modern(env)){
             int access = entity.canAccess(env);
             if (access != 0) {
                 exception(env, "Cannot access non-public member %s::$%s",
@@ -185,14 +212,20 @@ public class ReflectionProperty extends Reflection implements Reflector {
 
         Memory arg = args[0];
         if (entity.isStatic()){
-            if (!arg.isNull())
+            Memory assigned=args[1];
+            if (modern(env) && assigned.isUndefined()) {
+                env.error(env.trace(),php.runtime.exceptions.support.ErrorType.E_DEPRECATED,
+                        "Calling ReflectionProperty::setValue() with a single argument is deprecated");
+                assigned=arg;arg=Memory.NULL;
+            }
+            if (!arg.isNull() && !modern(env))
                 exception(env, "Static property %s::$%s cannot get a property value dynamically",
                         entity.getClazz().getName(), entity.getName());
 
-            entity.getClazz().getStaticProperty(env, env.trace(), entity.getName(), true, false, null, null, 0, false).assign(args[1]);
+            entity.getClazz().getStaticProperty(env, env.trace(), entity.getName(), true, false, null, null, 0, false).assign(assigned);
         } else {
             if (arg.isObject()){
-                arg.toValue(ObjectMemory.class).getProperties().refOfIndex(entity.getSpecificName()).assign(args[1]);
+                entity.assignValue(env,env.trace(),arg.toValue(ObjectMemory.class).value,entity.getSpecificName(),args[1]);
             } else
                 exception(env, "Argument 1 must be object, given %s", arg.getRealType().toString());
         }

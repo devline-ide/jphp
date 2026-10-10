@@ -21,6 +21,16 @@ import php.runtime.reflection.MethodEntity;
 import php.runtime.reflection.ParameterEntity;
 
 final public class ObjectInvokeHelper {
+    private static String argumentScope(IObject object, MethodEntity method, String fallback) {
+        if (object instanceof Closure && ((Closure) object).hasPhp8Binding()) {
+            String scope = ((Closure) object).getScope();
+            return scope == null ? "" : scope;
+        }
+        ClassEntity owner = method.getClazz();
+        if (owner.getModule() != null && owner.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return owner.getName();
+        return fallback;
+    }
 
     private ObjectInvokeHelper() {
     }
@@ -28,13 +38,18 @@ final public class ObjectInvokeHelper {
     public static Memory invokeParentMethod(Memory object, String methodName, String methodLowerName,
                                             Environment env, TraceInfo trace, Memory[] args)
             throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            ClassEntity parent = PhpMethodResolver.parentClass(env, trace);
+            return PhpMethodResolver.stat(parent, new StringMemory(methodName), env, trace, null, 0, true).call(args);
+        }
         Memory[] passed = null;
         boolean doublePop = false;
 
         if (object.isNull()) {
             ClassEntity parent = env.__getParentClass(trace);
             return InvokeHelper.callStatic(
-                    env, trace, parent.getLowerName(), methodLowerName, parent.getName(), methodName, args, null, 0
+                    env, trace, parent.getLowerName(), methodLowerName, parent.getName(), methodName, args, null, 0,
+                    env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
             );
         }
 
@@ -82,7 +97,7 @@ final public class ObjectInvokeHelper {
 
         if (passed == null) {
             passed = InvokeArgumentHelper.makeArguments(
-                    env, args, method.getParameters(), className, methodName, className, trace
+                    env, args, method.getParameters(), className, methodName, argumentScope(iObject, method, className), trace
             );
         }
 
@@ -94,9 +109,11 @@ final public class ObjectInvokeHelper {
 
         try {
             if (trace != null) {
-                env.pushCall(trace, iObject, args, methodName, method.getClazz().getName(), className);
+                String calledClass = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                        ? iObject.getReflection().getName() : className;
+                env.pushCall(trace, iObject, args, methodName, method.getClazz().getName(), calledClass);
                 if (doublePop)
-                    env.pushCall(trace, iObject, passed, method.getName(), method.getClazz().getName(), className);
+                    env.pushCall(trace, iObject, passed, method.getName(), method.getClazz().getName(), calledClass);
             }
 
             result = method.invokeDynamic(iObject, env, trace, passed);
@@ -126,6 +143,10 @@ final public class ObjectInvokeHelper {
     public static Memory invokeMethod(Memory object, String methodName, String methodLowerName,
                                       Environment env, TraceInfo trace, Memory[] args)
             throws Throwable {
+        if (methodName != null && env.getModuleManager().getPhpLanguageProfile(trace)
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            return PhpMethodResolver.instance(object, new StringMemory(methodName), env, trace).call(args);
+        }
         object = object.toValue();
         Memory[] passed = null;
         boolean doublePop = false;
@@ -177,7 +198,8 @@ final public class ObjectInvokeHelper {
 
         InvokeHelper.checkAccess(env, trace, method);
 
-        Memory result = method.getImmutableResultTyped(env, trace);
+        boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+        Memory result = modern ? null : method.getImmutableResultTyped(env, trace);
 
         if (passed == null) {
             ParameterEntity[] parameters = method.getParameters(args == null ? 0 : args.length);
@@ -187,10 +209,12 @@ final public class ObjectInvokeHelper {
             }
 
             passed = InvokeArgumentHelper.makeArguments(
-                    env, args, parameters, className, methodName, className, trace
+                    env, args, parameters, modern ? method.getClazzName() : className, methodName,
+                    argumentScope(iObject, method, className), trace
             );
         }
 
+        if (modern) result = method.getImmutableResultTyped(env, trace);
         if (result != null) {
             return result;
         }
@@ -200,7 +224,8 @@ final public class ObjectInvokeHelper {
                 String staticClass = className;
 
                 if (iObject instanceof Closure) {
-                    staticClass = ((Closure) iObject).getScope();
+                    Closure closure = (Closure) iObject;
+                    staticClass = closure.hasPhp8Binding() ? closure.getCalledClass() : closure.getScope();
                 }
 
                 String stackClass = clazz.isHiddenInCallStack() ? staticClass : method.getClazz().getName();
@@ -235,6 +260,12 @@ final public class ObjectInvokeHelper {
     public static Memory invokeMethod(IObject iObject, MethodEntity method,
                                       Environment env, TraceInfo trace, Memory[] args, boolean checkAccess)
             throws Throwable {
+        return invokeMethod(iObject, method, env, trace, args, checkAccess, false);
+    }
+
+    public static Memory invokeMethod(IObject iObject, MethodEntity method,
+                                      Environment env, TraceInfo trace, Memory[] args, boolean checkAccess,
+                                      boolean internalCall) throws Throwable {
         ClassEntity clazz = iObject.getReflection();
         if (method == null)
             method = clazz.methodMagicInvoke;
@@ -249,8 +280,16 @@ final public class ObjectInvokeHelper {
         if (checkAccess)
             InvokeHelper.checkAccess(env, trace, method);
 
+        boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+        String originClassName = modern ? method.getClazzName() : className;
+        String originMethodName = method.getName();
+        if (modern && iObject instanceof Closure) {
+            originClassName = InvokeArgumentHelper.closureCallName((Closure) iObject);
+            originMethodName = null;
+        }
         Memory[] passed = InvokeArgumentHelper.makeArguments(
-                env, args, method.getParameters(args == null ? 0 : args.length), className, method.getName(), className, trace
+                env, args, method.getParameters(args == null ? 0 : args.length), originClassName, originMethodName,
+                argumentScope(iObject, method, className), trace, internalCall
         );
 
         Memory result = method.getImmutableResultTyped(env, trace);
@@ -263,7 +302,8 @@ final public class ObjectInvokeHelper {
             String staticClass = className;
 
             if (iObject instanceof Closure) {
-                staticClass = ((Closure) iObject).getScope();
+                Closure closure = (Closure) iObject;
+                staticClass = closure.hasPhp8Binding() ? closure.getCalledClass() : closure.getScope();
             }
 
             String stackClass = clazz.isHiddenInCallStack() ? staticClass : method.getClazz().getName();
@@ -322,44 +362,83 @@ final public class ObjectInvokeHelper {
     public static Memory getConstant(String className, String lowerClassName, String constant,
                                      Environment env, TraceInfo trace, ConstantCallCache callCache, int cacheIndex,
                                      boolean lateStaticCall) {
-        ConstantEntity constantEntity = null;
-
-        if (callCache != null) {
-            constantEntity = callCache.get(env, cacheIndex);
+        boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+        ClassEntity entity = env.fetchClass(className, lowerClassName, true);
+        if (entity == null) {
+            if (modern) env.exception(trace, php.runtime.lang.exception.BaseError.class, "Class \"%s\" not found", className);
+            else env.error(trace, Messages.ERR_CLASS_NOT_FOUND.fetch(className));
+            return Memory.NULL;
         }
+        return getResolvedConstant(entity, constant, env, trace, callCache, cacheIndex, lateStaticCall, modern, className);
+    }
 
+    public static Memory getRelativeConstant(Memory name, Environment env, TraceInfo trace, String keyword,
+                                             ConstantCallCache callCache, int cacheIndex) {
+        ClassEntity entity = "parent".equals(keyword) ? PhpMethodResolver.parentClass(env, trace)
+                : "static".equals(keyword) ? PhpMethodResolver.staticClass(env, trace)
+                : PhpMethodResolver.resolveClass(new StringMemory(env.__getSelf(trace)), env, trace);
+        return getConstant(entity, name, env, trace, callCache, cacheIndex, "static".equals(keyword), keyword);
+    }
+
+    public static Memory getConstant(ClassEntity entity, Memory name, Environment env, TraceInfo trace,
+                                     ConstantCallCache callCache, int cacheIndex, boolean lateStaticCall) {
+        return getConstant(entity, name, env, trace, callCache, cacheIndex, lateStaticCall, entity.getName());
+    }
+
+    public static Memory getConstant(ClassEntity entity, Memory name, Environment env, TraceInfo trace,
+                                     ConstantCallCache callCache, int cacheIndex, boolean lateStaticCall, String referenceClassName) {
+        name = name.toValue();
+        if (!name.isString()) {
+            env.exception(trace, php.runtime.lang.exception.BaseTypeError.class,
+                    "Cannot use value of type %s as class constant name", name.isNull() ? "null"
+                            : name.getRealType() == Memory.Type.INT ? "int" : name.getRealType() == Memory.Type.BOOL ? "bool"
+                            : name.getRealType().toString());
+            return Memory.NULL;
+        }
+        String constant = name.toString();
+        if ("class".equalsIgnoreCase(constant)) return new StringMemory(entity.getName());
+        return getResolvedConstant(entity, constant, env, trace, callCache, cacheIndex, lateStaticCall, true,
+                referenceClassName == null ? entity.getName() : referenceClassName);
+    }
+
+    private static Memory getResolvedConstant(ClassEntity entity, String constant, Environment env, TraceInfo trace,
+                                              ConstantCallCache callCache, int cacheIndex, boolean lateStaticCall, boolean modern, String referenceClassName) {
+        ConstantEntity constantEntity = callCache == null ? null : callCache.get(env, cacheIndex, entity, constant);
         boolean alreadyCached = constantEntity != null;
-
         if (!alreadyCached) {
-            ClassEntity entity = env.fetchClass(className, lowerClassName, true);
-
-            if (entity == null) {
-                env.error(trace, Messages.ERR_CLASS_NOT_FOUND.fetch(className));
-                return Memory.NULL;
-            }
-
             constantEntity = entity.findConstant(constant);
             if (constantEntity == null) {
-                env.error(trace, Messages.ERR_UNDEFINED_CLASS_CONSTANT.fetch(constant));
+                if (modern) env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                        "Undefined constant %s::%s", entity.getName(), constant);
+                else env.error(trace, Messages.ERR_UNDEFINED_CLASS_CONSTANT.fetch(constant));
                 return Memory.NULL;
             }
-
-            if (callCache != null) {
-                callCache.put(env, cacheIndex, constantEntity);
-            }
         }
-
-        Memory value = constantEntity.getValue(env);
-
-        if (!alreadyCached) {
-            InvokeHelper.checkAccess(env, trace, constantEntity, lateStaticCall);
+        // A cached declaration grants no access: the same site can run in different closure scopes.
+        InvokeHelper.checkAccess(env, trace, constantEntity, lateStaticCall, entity);
+        if (modern && entity.isTrait()) {
+            env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                    "Cannot access trait constant %s::%s directly", entity.getName(), constant);
+            return Memory.NULL;
         }
+        if (!alreadyCached && callCache != null) callCache.put(env, cacheIndex, constantEntity, entity, constant);
+        Memory value = modern ? php.runtime.PhpConstantInitializer.resolveReference(constantEntity, env, trace, referenceClassName)
+                : constantEntity.getValue(env, trace);
 
         if (value == null) {
             return Memory.NULL;
         }
 
-        return value;
+        return modern ? value.toImmutable() : value;
+    }
+
+    public static Memory getQuietProperty(Memory object, String property, Environment env, TraceInfo trace,
+                                          PropertyCallCache callCache, int cacheIndex) throws Throwable {
+        object = object.toValue();
+        if (!object.isObject()) return Memory.NULL;
+        var receiver = object.toValue(ObjectMemory.class).value;
+        var clazz = receiver.getReflection();
+        return clazz.getQuietProperty(env, trace, receiver, property, callCache, cacheIndex);
     }
 
     public static Memory getProperty(Memory object, String property, Environment env, TraceInfo trace,
@@ -368,9 +447,11 @@ final public class ObjectInvokeHelper {
         object = object.toValue();
 
         if (!object.isObject()) {
-            env.error(trace,
-                    Messages.ERR_CANNOT_GET_PROPERTY_OF_NON_OBJECT.fetch(property)
-            );
+            if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                String type=object.isNull() ? "null" : object.getRealType()==Memory.Type.BOOL ? "bool"
+                        : object.getRealType()==Memory.Type.INT ? "int" : object.getRealType().toString();
+                env.warning(trace,"Attempt to read property \"%s\" on %s",property,type);
+            } else env.error(trace,Messages.ERR_CANNOT_GET_PROPERTY_OF_NON_OBJECT.fetch(property));
             return Memory.NULL;
         }
 
@@ -407,6 +488,12 @@ final public class ObjectInvokeHelper {
         );
     }
 
+    public static Memory readStaticProperty(String className, String lowerClassName, String property, Environment env,
+                                          TraceInfo trace, PropertyCallCache callCache, int cacheIndex, boolean lateStaticCall) throws Throwable {
+        Memory value=getStaticProperty(className, lowerClassName, property, env, trace, callCache, cacheIndex, lateStaticCall);
+        return value instanceof ReferenceMemory ? ((ReferenceMemory)value).readProperty(env,trace) : value;
+    }
+
     public static Memory issetStaticProperty(String className, String lowerClassName, String property, Environment env,
                                              TraceInfo trace, PropertyCallCache callCache, int cacheIndex, boolean lateStaticCall) throws Throwable {
         ClassEntity entity = env.fetchClass(className, lowerClassName, true);
@@ -420,6 +507,11 @@ final public class ObjectInvokeHelper {
 
     public static Memory unsetStaticProperty(String className, String lowerClassName, String property, Environment env,
                                              TraceInfo trace, PropertyCallCache callCache, int cacheIndex, boolean lateStaticCall) throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            ClassEntity entity=env.fetchClass(className,lowerClassName,true);
+            if (entity != null) env.exception(trace,php.runtime.lang.exception.BaseError.class,
+                    "Attempt to unset static property %s::$%s",entity.getName(),property);
+        }
         Memory get = getStaticProperty(className, lowerClassName, property, env, trace, callCache, cacheIndex, lateStaticCall);
         get.manualUnset(env);
         return Memory.NULL;
@@ -428,6 +520,9 @@ final public class ObjectInvokeHelper {
     private static IObject fetchObject(Memory object, String property, Environment env, TraceInfo trace) {
         object = object.toValue();
         if (!object.isObject()) {
+            if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                env.exception(trace,php.runtime.lang.exception.BaseError.class,"Attempt to assign property \"%s\" on %s",property,
+                        php.runtime.reflection.support.PhpTypeDeclaration.valueType(object));
             env.error(trace, Messages.ERR_CANNOT_SET_PROPERTY_OF_NON_OBJECT.fetch(property));
             return null;
         }
@@ -435,15 +530,26 @@ final public class ObjectInvokeHelper {
         return ((ObjectMemory) object).value;
     }
 
+    public static Memory incrementProperty(Memory object, String property, Environment env, TraceInfo trace,
+                                           PropertyCallCache cache, int index, boolean decrement, boolean post) throws Throwable {
+        IObject receiver = fetchObject(object, property, env, trace);
+        if (receiver == null) return Memory.NULL;
+        return receiver.getReflection().incrementProperty(env, trace, receiver, property, decrement, post, cache, index);
+    }
+
     public static Memory incAndGetProperty(Memory object, String property, Environment env, TraceInfo trace,
                                            PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return incrementProperty(object, property, env, trace, callCache, cacheIndex, false, false);
         return assignPlusProperty(object, Memory.CONST_INT_1, property, env, trace, callCache, cacheIndex);
     }
 
     public static Memory GetAndIncProperty(Memory object, String property, Environment env, TraceInfo trace,
                                            PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return incrementProperty(object, property, env, trace, callCache, cacheIndex, false, true);
         IObject iObject = fetchObject(object, property, env, trace);
         if (iObject == null) return Memory.NULL;
 
@@ -455,18 +561,27 @@ final public class ObjectInvokeHelper {
     public static Memory decAndGetProperty(Memory object, String property, Environment env, TraceInfo trace,
                                            PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return incrementProperty(object, property, env, trace, callCache, cacheIndex, true, false);
         return assignMinusProperty(object, Memory.CONST_INT_1, property, env, trace, callCache, cacheIndex);
     }
 
     public static Memory GetAndDecProperty(Memory object, String property, Environment env, TraceInfo trace,
                                            PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return incrementProperty(object, property, env, trace, callCache, cacheIndex, true, true);
         IObject iObject = fetchObject(object, property, env, trace);
         if (iObject == null) return Memory.NULL;
 
         ReferenceMemory ref = new ReferenceMemory();
         iObject.getReflection().minusProperty(env, trace, iObject, property, Memory.CONST_INT_1, ref);
         return ref.getValue();
+    }
+
+    public static Memory assignRefProperty(Memory object, Memory value, String property, Environment env, TraceInfo trace,
+                                           PropertyCallCache callCache, int cacheIndex) throws Throwable {
+        return getRefProperty(object, property, env, trace, callCache, cacheIndex).assignRef(value);
     }
 
     public static Memory assignProperty(Memory object, Memory value, String property, Environment env, TraceInfo trace,

@@ -38,6 +38,8 @@ public class MethodEntity extends AbstractFunctionEntity {
     protected boolean dynamicSignature = false;
 
     protected String signature;
+    /** Retained only for Java subclass ABI; closures are allocated for each receiver/request. */
+    @Deprecated
     protected Closure cachedClosure;
 
     protected boolean contextDepends = false;
@@ -128,12 +130,10 @@ public class MethodEntity extends AbstractFunctionEntity {
     */
 
     public Closure getClosure(Environment env, final IObject object) {
-        if (cachedClosure != null)
-            return cachedClosure;
-
         final MethodEntity bind = this;
         final ClosureEntity closureEntity1 = new ClosureEntity(this.getContext());
         closureEntity1.setParent(env.scope.fetchUserClass(Closure.class));
+        closureEntity1.setModule(clazz.getModule());
         closureEntity1.parameters = this.parameters;
         closureEntity1.setReturnReference(this.isReturnReference());
 
@@ -143,14 +143,14 @@ public class MethodEntity extends AbstractFunctionEntity {
         closureEntity1.addMethod(m, null);
         closureEntity1.doneDeclare();
 
-        Closure tmp = new Closure(env, closureEntity1, new ObjectMemory(env.getLateObject()), clazz.getName(), new Memory[0]){
+        Closure tmp = new Closure(env, closureEntity1, isStatic() || object == null ? Memory.NULL : new ObjectMemory(object), clazz.getName(), new Memory[0]){
             @Override
             public Memory __invoke(Environment e, Memory... args) {
                 try {
-                    if (object == null)
+                    if (bind.isStatic())
                         return bind.invokeStatic(e, args);
                     else
-                        return bind.invokeDynamic(object, e, trace, args);
+                        return bind.invokeDynamic(getSelf().toObject(IObject.class), e, trace, args);
                 } catch (RuntimeException e1){
                     throw e1;
                 } catch (Throwable throwable) {
@@ -174,7 +174,10 @@ public class MethodEntity extends AbstractFunctionEntity {
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(e);
         }
-        return cachedClosure = tmp;
+        tmp.initializeReflectionBinding(this, clazz.getModule() != null
+                && clazz.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                || env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5);
+        return tmp;
     }
 
     public boolean isDynamicSignature() {
@@ -201,9 +204,24 @@ public class MethodEntity extends AbstractFunctionEntity {
         }
     }
 
+    public boolean requiresReturnTypeCallScope() {
+        if (clazz.getModule() == null || clazz.getModule().getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return false;
+        if (returnTypeChecker instanceof php.runtime.reflection.support.PhpTypeDeclaration type)
+            return type.has("self") || type.has("parent") || type.has("static");
+        if (returnTypeChecker instanceof TypeChecker.Simple type)
+            return type.getType() == HintType.SELF || type.getType() == HintType.PARENT || type.getType() == HintType.STATIC;
+        return false;
+    }
+
     @Override
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
-        Memory result = getImmutableResult();
+        // Relative types require the current receiver/scope; never cache a checked value across calls.
+        if (requiresReturnTypeCallScope()) return null;
+        Memory result = getImmutableResultForTypeCheck(clazz.getModule());
+        if (result != null && clazz.getModule() != null
+                && clazz.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return InvokeHelper.checkReturnType(env, trace, result, this);
 
         if (result != null && !resultTypeChecked) {
             result = InvokeHelper.checkReturnType(env, trace, result, this);
@@ -233,7 +251,8 @@ public class MethodEntity extends AbstractFunctionEntity {
             }
 
             if (isEmpty) {
-                return Memory.UNDEFINED;
+                return clazz.getModule() != null && clazz.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                        ? InvokeHelper.checkReturnType(env, trace, Memory.UNDEFINED, this) : Memory.UNDEFINED;
             }
 
             Memory result = (Memory) nativeMethod.invoke(_this, env, arguments);
@@ -459,6 +478,15 @@ public class MethodEntity extends AbstractFunctionEntity {
 
     public int canAccess(Environment env) {
         return canAccess(env, null);
+    }
+
+    public int canAccessPhp8(Environment env) {
+        if (modifier == Modifier.PUBLIC) return 0;
+        ClassEntity scope = env.getLastClassOnStack();
+        if (scope == null) return modifier == Modifier.PRIVATE ? 2 : 1;
+        if (modifier == Modifier.PRIVATE) return scope.getId() == clazz.getId() ? 0 : 2;
+        // Visibility follows lexical scope, never the called class of a bound closure.
+        return canAccess(env, scope);
     }
 
     /**

@@ -1,5 +1,7 @@
 package php.runtime.reflection.support;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.Memory;
 import php.runtime.common.HintType;
 import php.runtime.common.StringUtils;
@@ -7,6 +9,7 @@ import php.runtime.env.Environment;
 import php.runtime.invoke.Invoker;
 import php.runtime.lang.BaseWrapper;
 import php.runtime.lang.IObject;
+import php.runtime.lang.Closure;
 import php.runtime.memory.*;
 import php.runtime.reflection.ClassEntity;
 
@@ -61,7 +64,7 @@ abstract public class TypeChecker {
 
         @Override
         public boolean isBuiltin() {
-            return type != HintType.SELF;
+            return type != HintType.SELF && type != HintType.PARENT && type != HintType.STATIC;
         }
 
         @Override
@@ -83,13 +86,28 @@ abstract public class TypeChecker {
 
             switch (type) {
                 case INT:
-                    return LongMemory.valueOf(value.toLong());
+                    Memory numeric = value.isString() ? StringMemory.toNumericStrict(value.toString())
+                            : value.isNumber() || value.getRealType() == Memory.Type.BOOL ? value.toValue() : null;
+                    if (numeric == null) return null;
+                    if (numeric.getRealType() == Memory.Type.DOUBLE) {
+                        double number = numeric.toDouble();
+                        if (!Double.isFinite(number) || number < -0x1p63 || number >= 0x1p63) return null;
+                    }
+                    return LongMemory.valueOf(numeric.toLong());
                 case STRING:
+                    if (!value.isString() && !value.isNumber() && value.getRealType() != Memory.Type.BOOL
+                            && !(value.isObject() && value.toValue(ObjectMemory.class).getReflection().methodMagicToString != null)) {
+                        return null;
+                    }
                     return StringMemory.valueOf(value.toString());
                 case BOOLEAN:
+                    if (!value.isString() && !value.isNumber() && value.getRealType() != Memory.Type.BOOL) return null;
                     return TrueMemory.valueOf(value.toBoolean());
                 case DOUBLE:
-                    return DoubleMemory.valueOf(value.toDouble());
+                    Memory number = value.isString() ? StringMemory.toNumericStrict(value.toString())
+                            : value.isNumber() || value.getRealType() == Memory.Type.BOOL ? value.toValue() : null;
+                    if (number == null) return null;
+                    return DoubleMemory.valueOf(number.toDouble());
             }
 
             return null;
@@ -106,6 +124,27 @@ abstract public class TypeChecker {
                 return true;
 
             switch (type){
+                case MIXED: return true;
+                case NEVER: return false;
+                case STATIC:
+                    ClassEntity calledClass = env.getLateStaticClass();
+                    return value.isObject() && calledClass != null
+                            && value.toValue(ObjectMemory.class).getReflection().isInstanceOf(calledClass);
+                case PARENT:
+                    if (!value.isObject()) return false;
+                    String ownerName = staticClassName;
+                    if (ownerName == null) {
+                        IObject lateObject = env.getLateObject();
+                        ownerName = lateObject instanceof Closure && ((Closure) lateObject).hasPhp8Binding()
+                                ? ((Closure) lateObject).getScope() : env.__getMacroClass().toString();
+                        if (lateObject instanceof Closure && ((Closure) lateObject).hasPhp8Binding() && ownerName == null)
+                            env.error(env.trace(), "Cannot access parent when no class scope is active");
+                    }
+                    ClassEntity owner = ownerName == null ? null : env.fetchClass(ownerName, false);
+                    if (ownerName != null && ownerName.isEmpty()) env.error(env.trace(), "Cannot access parent when no class scope is active");
+                    if (owner != null && owner.getParent() == null) env.error(env.trace(), "Cannot access parent when current class scope has no parent");
+                    return owner != null && owner.getParent() != null && value.isObject()
+                            && value.toValue(ObjectMemory.class).getReflection().isInstanceOf(owner.getParent());
                 /*case VOID:
                     return value.isUndefined();*/
                 case OBJECT: return value.isObject();
@@ -129,11 +168,18 @@ abstract public class TypeChecker {
                     }
 
                     if (staticClassName == null) {
-                        Memory memory = env.__getMacroClass();
-                        staticClassName = memory.isNull() ? null : memory.toString();
+                        IObject lateObject = env.getLateObject();
+                        if (lateObject instanceof Closure && ((Closure) lateObject).hasPhp8Binding()) {
+                            staticClassName = ((Closure) lateObject).getScope();
+                            if (staticClassName == null) env.error(env.trace(), "Cannot access self when no class scope is active");
+                        } else {
+                            Memory memory = env.__getMacroClass();
+                            staticClassName = memory.isNull() ? null : memory.toString();
+                        }
                     }
 
                     if (staticClassName != null) {
+                        if (staticClassName.isEmpty()) env.error(env.trace(), "Cannot access self when no class scope is active");
                         return value.toValue(ObjectMemory.class)
                                 .getReflection()
                                 .isInstanceOf(staticClassName);
@@ -184,7 +230,8 @@ abstract public class TypeChecker {
             ObjectMemory object = value.toValue(ObjectMemory.class);
             ClassEntity oEntity = object.getReflection();
 
-            return oEntity.isInstanceOfLower(typeClassLower);
+            return PhpClassNames.isModern(env) || PhpClassNames.isModern(oEntity)
+                    ? PhpClassNames.matches(oEntity, typeClass, env) : oEntity.isInstanceOfLower(typeClassLower);
         }
 
         @Override

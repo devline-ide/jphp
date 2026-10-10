@@ -7,6 +7,7 @@ import com.google.gson.JsonSyntaxException;
 import com.google.gson.stream.JsonWriter;
 import org.develnext.jphp.json.gson.MemoryDeserializer;
 import org.develnext.jphp.json.gson.MemorySerializer;
+import org.develnext.jphp.json.gson.MemoryStreamAdapterFactory;
 import php.runtime.Memory;
 import php.runtime.common.HintType;
 import php.runtime.env.Environment;
@@ -38,6 +39,7 @@ public class JsonProcessor extends WrapProcessor {
     protected Gson gson;
     protected MemorySerializer memorySerializer;
     protected MemoryDeserializer memoryDeserializer;
+    private final boolean suppliedBuilder;
 
     protected final static List<Class<? extends Memory>> memClasses = new ArrayList<Class<? extends Memory>>() {{
         add(Memory.class);
@@ -64,12 +66,14 @@ public class JsonProcessor extends WrapProcessor {
 
     public JsonProcessor(Environment env, GsonBuilder builder) {
         super(env);
+        this.suppliedBuilder = true;
         this.builder = builder;
         this.gson = builder.create();
     }
 
     public JsonProcessor(Environment env, ClassEntity clazz) {
         super(env, clazz);
+        suppliedBuilder = false;
         builder = new GsonBuilder();
 
         memorySerializer = new MemorySerializer();
@@ -83,6 +87,7 @@ public class JsonProcessor extends WrapProcessor {
         }
 
         builder.registerTypeAdapter(Memory.class, memoryDeserializer);
+        builder.registerTypeAdapterFactory(new MemoryStreamAdapterFactory(memorySerializer));
         builder.disableHtmlEscaping();
 
         gson = builder.create();
@@ -139,7 +144,7 @@ public class JsonProcessor extends WrapProcessor {
     @Signature
     public Memory format(Environment env, Memory... args) {
         try {
-            return StringMemory.valueOf(gson.toJson(args[0]));
+            return StringMemory.valueOf(suppliedBuilder ? gson.toJson(args[0]) : gson.toJson(args[0], Memory.class));
         } catch (JsonIOException e) {
             env.exception(ProcessorException.class, e.getMessage());
             return Memory.NULL;

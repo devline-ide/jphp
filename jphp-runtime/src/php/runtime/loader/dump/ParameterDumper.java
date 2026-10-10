@@ -1,6 +1,7 @@
 package php.runtime.loader.dump;
 
 import php.runtime.common.StringUtils;
+import php.runtime.common.HintType;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
 import php.runtime.loader.dump.io.DumpInputStream;
@@ -57,7 +58,21 @@ public class ParameterDumper extends Dumper<ParameterEntity> {
         print.writeName(entity.getDefaultValueConstName());
 
         // raw
-        print.writeRawData(null);
+        byte[] type = TypeDeclarationDumper.save(entity.getTypeChecker());
+        var initializer = entity.getDefaultInitializer();
+        if (initializer == null) print.writeRawData(type);
+        else {
+            var bytes = new java.io.ByteArrayOutputStream();
+            var metadata = new DumpOutputStream(bytes);
+            metadata.writeInt(0x5044494E); // PDIN: ABI8 executable parameter default descriptor.
+            metadata.writeInt(1);
+            metadata.writeRawData(type);
+            metadata.writeName(initializer.moduleName());
+            metadata.writeName(initializer.javaClass());
+            metadata.writeName(initializer.method());
+            metadata.writeName(initializer.declarationScope());
+            print.writeRawData(bytes.toByteArray());
+        }
     }
 
     @Override
@@ -65,7 +80,8 @@ public class ParameterDumper extends Dumper<ParameterEntity> {
         DumpInputStream data = new DumpInputStream(input);
         ParameterEntity entity = new ParameterEntity(context);
 
-        entity.setType(data.readHintType());
+        HintType hint = data.readHintType();
+        if (hint != HintType.ANY) entity.setType(hint);
         String typeClass = data.readName();
 
         if (typeClass != null && !typeClass.isEmpty()) {
@@ -85,7 +101,22 @@ public class ParameterDumper extends Dumper<ParameterEntity> {
         entity.setDefaultValue(data.readMemory());
         entity.setDefaultValueConstName(data.readName());
 
-        byte[] raw = data.readRawData();
+        byte[] metadata = data.readRawData();
+        var raw = new DumpInputStream(new java.io.ByteArrayInputStream(metadata));
+        ParameterEntity.DefaultInitializer initializer = null;
+        byte[] type = metadata;
+        if (metadata.length >= 4 && raw.readInt() == 0x5044494E) {
+            if (raw.readInt() != 1) throw new php.runtime.loader.dump.io.DumpException("Unsupported parameter initializer version");
+            type = raw.readRawData();
+            try { initializer = new ParameterEntity.DefaultInitializer(raw.readName(), raw.readName(), raw.readName(), raw.readName()); }
+            catch (IllegalArgumentException invalid) { throw new php.runtime.loader.dump.io.DumpException(invalid.getMessage()); }
+            if (raw.available() != 0) throw new php.runtime.loader.dump.io.DumpException("Invalid parameter initializer size");
+            if (entity.getDefaultValue() == null || !entity.getDefaultValue().isNull() || entity.getDefaultValueConstName() != null)
+                throw new php.runtime.loader.dump.io.DumpException("Invalid parameter initializer placeholder");
+        }
+        var declaration = TypeDeclarationDumper.load(type);
+        if (declaration != null) entity.setTypeChecker(declaration);
+        if (initializer != null) entity.setDefaultInitializer(initializer);
         return entity;
     }
 }

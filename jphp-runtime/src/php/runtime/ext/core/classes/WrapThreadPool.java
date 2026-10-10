@@ -3,8 +3,6 @@ package php.runtime.ext.core.classes;
 import php.runtime.Memory;
 import php.runtime.common.HintType;
 import php.runtime.env.Environment;
-import php.runtime.exceptions.CriticalException;
-import php.runtime.exceptions.CustomErrorException;
 import php.runtime.invoke.Invoker;
 import php.runtime.lang.BaseObject;
 import php.runtime.memory.ObjectMemory;
@@ -57,8 +55,7 @@ public class WrapThreadPool extends BaseObject {
         final Environment final_env = _env;
 
         service.execute(() -> {
-            Environment.addThreadSupport(final_env);
-            invoker.callNoThrow();
+            final_env.runInThread(invoker);
         });
 
         return Memory.NULL;
@@ -79,26 +76,15 @@ public class WrapThreadPool extends BaseObject {
 
     private Callable<Memory> makeCallable(Environment env, Invoker invoker) {
         return () -> {
-            try {
-                Environment.addThreadSupport(env);
-
-                return invoker.call();
-            } catch (Exception throwable) {
-                if (throwable instanceof CriticalException) {
-                    throwable.printStackTrace();
+            try (Environment.ThreadBinding binding = env.bindCurrentThread()) {
+                try { return invoker.call(); }
+                catch (Throwable failure) {
+                    try { if (env.reportThreadThrowable(failure)) return Memory.NULL; }
+                    catch (Throwable reportingFailure) { if (reportingFailure != failure) failure.addSuppressed(reportingFailure); }
+                    if (failure instanceof Exception) throw (Exception) failure;
+                    if (failure instanceof Error) throw (Error) failure;
+                    throw new RuntimeException(failure);
                 }
-
-                if (throwable instanceof CustomErrorException) {
-                    CustomErrorException error = (CustomErrorException) throwable;
-                    env.error(error.getType(), error.getMessage());
-                } else {
-                    env.catchUncaught(throwable);
-                }
-
-                return Memory.NULL;
-            } catch (Throwable throwable) {
-                env.wrapThrow(throwable);
-                return Memory.NULL;
             }
         };
     }
@@ -114,7 +100,7 @@ public class WrapThreadPool extends BaseObject {
 
         final Invoker invoker = Invoker.valueOf(_env, null, args[0]);
 
-        Future<Memory> future = service.submit(makeCallable(env, invoker));
+        Future<Memory> future = service.submit(makeCallable(_env, invoker));
 
         return new ObjectMemory(new WrapFuture(env, future));
     }
@@ -132,7 +118,7 @@ public class WrapThreadPool extends BaseObject {
         final Invoker invoker = Invoker.valueOf(_env, null, args[0]);
 
         ScheduledFuture<Memory> future = getScheduledExecutorService(env)
-                .schedule(makeCallable(env, invoker), args[1].toLong(), TimeUnit.MILLISECONDS);
+                .schedule(makeCallable(_env, invoker), args[1].toLong(), TimeUnit.MILLISECONDS);
 
         return new ObjectMemory(new WrapFuture(env, future));
     }

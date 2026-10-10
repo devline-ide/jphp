@@ -106,6 +106,7 @@ public class StackItem {
     public final Type type;
     public final int size;
     public boolean immutable;
+    public boolean capturedArrayAssignment;
 
     public final Memory memory;
     public final ValueExprToken token;

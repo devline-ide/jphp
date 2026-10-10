@@ -98,45 +98,52 @@ public class MemorySerializer implements JsonSerializer<Memory> {
                     return JsonNull.INSTANCE;
             }
             case OBJECT: {
-                if (used.add(src.getPointer())) {
-                    IObject object = src.toValue(ObjectMemory.class).value;
+                int pointer = src.getPointer();
+                if (used.add(pointer)) {
+                    try {
+                        IObject object = src.toValue(ObjectMemory.class).value;
 
-                    if (useHandlers) {
-                        Handler handler;
+                        if (useHandlers) {
+                            Handler handler;
 
-                        ClassEntity pr = object.getReflection();
-                        do {
-                            handler = classHandlers.get(pr.getLowerName());
-                            pr = pr.getParent();
-                            if (pr == null)
-                                break;
+                            ClassEntity pr = object.getReflection();
+                            do {
+                                handler = classHandlers.get(pr.getLowerName());
+                                pr = pr.getParent();
+                                if (pr == null)
+                                    break;
 
-                        } while (handler == null);
+                            } while (handler == null);
 
-                        if (handler != null) {
-                            return convert(handler.call(getEnv(), src), used, false);
+                            if (handler != null) {
+                                return convert(handler.call(getEnv(), src), used, false);
+                            }
                         }
-                    }
 
-                    if (object instanceof JsonSerializable) {
-                        Environment env = this.getEnv() == null ? Environment.current() : this.getEnv();
+                        if (object instanceof JsonSerializable) {
+                            Environment env = getEnv();
+                            if (env == null) env = Environment.current();
 
-                        env.pushCall(object, "jsonSerialize");
-                        try {
-                            Memory r = ((JsonSerializable) object).jsonSerialize(Environment.current());
-                            return convert(r, used, useHandlers);
-                        } finally {
-                            env.popCall();
+                            env.pushCall(object, "jsonSerialize");
+                            try {
+                                Memory r = ((JsonSerializable) object).jsonSerialize(env);
+                                return convert(r, used, useHandlers);
+                            } finally {
+                                env.popCall();
+                            }
+                        } else {
+                            ForeachIterator iterator = object.getProperties().foreachIterator(false, false);
+                            JsonObject r = new JsonObject();
+                            while (iterator.next()) {
+                                String key = iterator.getKey().toString();
+                                Memory property = iterator.getValue();
+                                if (!key.startsWith("\0") && !property.isUndefined())
+                                    r.add(iterator.getKey().toString(), convert(property, used, useHandlers));
+                            }
+                            return r;
                         }
-                    } else {
-                        ForeachIterator iterator = object.getProperties().foreachIterator(false, false);
-                        JsonObject r = new JsonObject();
-                        while (iterator.next()) {
-                            String key = iterator.getKey().toString();
-                            if (!key.startsWith("\0"))
-                                r.add(iterator.getKey().toString(), convert(iterator.getValue(), used, useHandlers));
-                        }
-                        return r;
+                    } finally {
+                        used.remove(pointer);
                     }
                 } else
                     return JsonNull.INSTANCE;

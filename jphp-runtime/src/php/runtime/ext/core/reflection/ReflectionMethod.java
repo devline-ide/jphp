@@ -35,6 +35,7 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
     public final static int IS_FINAL = 4 ;
 
     protected MethodEntity methodEntity;
+    private ClassEntity reflectedClass;
     protected ArrayMemory cachedParameters;
     protected boolean hackAccess = false;
 
@@ -49,6 +50,7 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
 
     public void setEntity(MethodEntity entity) {
         this.methodEntity = entity;
+        this.reflectedClass = entity.getClazz();
         getProperties().put("name", new StringMemory(entity.getName()));
         getProperties().put("class", new StringMemory(entity.getClazz().getName()));
     }
@@ -74,7 +76,12 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
         }
 
         setEntity(entity);
+        setReflectedClass(classEntity);
         return Memory.NULL;
+    }
+
+    void setReflectedClass(ClassEntity entity) {
+        this.reflectedClass = entity;
     }
 
     @Override
@@ -196,30 +203,47 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
         return Memory.NULL;
     }
 
-    @Signature({@Arg(value = "object", optional = @Optional, type = HintType.OBJECT)})
+    @Signature({@Arg(value = "object", optional = @Optional, type = HintType.OBJECT, nullable = true)})
     public Memory invoke(Environment env, Memory... args) throws Throwable {
         Memory self = args[0];
 
-        Memory[] arguments = args.length == 1 ? new Memory[0] : Arrays.copyOfRange(args, 1, args.length - 1);
-        Invoker invoker;
-
-        if (self.isNull()) {
-            invoker = new StaticMethodInvoker(env, env.trace(), methodEntity.getClazzName(), methodEntity);
-        } else {
-            invoker = new DynamicMethodInvoker(env, env.trace(), self.toObject(IObject.class), methodEntity);
-        }
-
-        return invoker.call(arguments);
+        Memory[] arguments = Arrays.copyOfRange(args, 1, args.length);
+        if (env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            arguments = php.runtime.invoke.InvokeArgumentHelper.argumentsByValue(arguments);
+        return invokeReflected(env, self, arguments);
     }
 
     @Signature({
-            @Arg(value = "object", optional = @Optional, type = HintType.OBJECT),
+            @Arg(value = "object", optional = @Optional, type = HintType.OBJECT, nullable = true),
             @Arg(value = "args", type = HintType.ARRAY)
     })
     public Memory invokeArgs(Environment env, Memory... args) throws Throwable {
         Memory self = args[0];
 
-        Memory[] arguments = args[1].toValue(ArrayMemory.class).values();
+        ArrayMemory values = args[1].toValue(ArrayMemory.class);
+        Memory[] arguments = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                ? values.valuesForCall() : values.values();
+        return invokeReflected(env, self, arguments);
+    }
+
+    private Memory invokeReflected(Environment env, Memory self, Memory[] arguments) throws Throwable {
+        boolean modern = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+        if (modern && !methodEntity.isStatic()) {
+            if (self.isNull())
+                exception(env, "Trying to invoke non static method %s::%s() without an object",
+                        methodEntity.getClazzName(), methodEntity.getName());
+            if (!self.toObject(IObject.class).getReflection().isInstanceOf(methodEntity.getClazz()))
+                exception(env, "Given object is not an instance of the class this method was declared in");
+        }
+        if (modern) {
+            arguments = php.runtime.invoke.InvokeArgumentHelper.prepareIndirectArguments(env, env.trace(), arguments,
+                    methodEntity.getParameters(), methodEntity.getClazzName() + "::" + methodEntity.getName());
+            if (methodEntity.isStatic())
+                return php.runtime.invoke.InvokeHelper.callStatic(env, env.trace(), methodEntity,
+                        reflectedClass.getName(), arguments, false, true);
+            return php.runtime.invoke.ObjectInvokeHelper.invokeMethod(self.toObject(IObject.class), methodEntity,
+                    env, env.trace(), arguments, false, true);
+        }
         Invoker invoker;
 
         if (self.isNull()) {
@@ -231,8 +255,30 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
         return invoker.call(arguments);
     }
 
-    @Signature(@Arg("object"))
+    @Signature(@Arg(value = "object", optional = @Optional("NULL")))
     public Memory getClosure(final Environment env, Memory... args) throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            Memory receiver = args.length == 0 ? Memory.NULL : args[0].toValue();
+            if (!receiver.isNull() && !receiver.isObject()) {
+                env.exception(env.trace(), php.runtime.lang.exception.BaseTypeError.class,
+                        "ReflectionMethod::getClosure(): Argument #1 ($object) must be of type ?object, %s given",
+                        php.runtime.reflection.support.PhpTypeDeclaration.valueType(receiver));
+                return Memory.NULL;
+            }
+            IObject object = receiver.isNull() ? null : receiver.toObject(IObject.class);
+            if (!methodEntity.isStatic()) {
+                if (object == null) {
+                    env.exception(env.trace(), php.runtime.lang.exception.BaseValueError.class,
+                            "ReflectionMethod::getClosure(): Argument #1 ($object) cannot be null for non-static methods");
+                    return Memory.NULL;
+                }
+                if (!object.getReflection().isInstanceOf(methodEntity.getClazz())) {
+                    exception(env, "Given object is not an instance of the class this method was declared in");
+                    return Memory.NULL;
+                }
+            }
+            return new ObjectMemory(methodEntity.getClosure(env, object));
+        }
         IObject object;
         if (args[0].isNull()){
             object = null;
@@ -246,7 +292,8 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
         if (object == null && !methodEntity.isStatic()){
             exception(env, "Cannot use method as static");
             return Memory.NULL;
-        } else if (object != null && methodEntity.isStatic()){
+        } else if (object != null && methodEntity.isStatic()
+                && env.getModuleManager().getPhpLanguageProfile(env.trace()) != php.runtime.common.PhpLanguageProfile.PHP_8_5){
             exception(env, "Cannot use method as non static");
             return Memory.NULL;
         }

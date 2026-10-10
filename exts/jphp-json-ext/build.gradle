@@ -4,6 +4,12 @@ dependencies {
     api 'com.google.code.gson:gson:2.7'
 
     testImplementation 'junit:junit:4.+'
+    testImplementation project(':jphp-core')
     testImplementation project(':exts:jphp-zend-ext')
     testImplementation project.project(':jphp-core').sourceSets.test.output
+}
+
+sourceSets {
+    test.java.srcDirs = ["src/main/tests"]
+    test.resources.srcDirs = ["src/main/tests"]
 }

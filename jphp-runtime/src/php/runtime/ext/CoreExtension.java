@@ -112,7 +112,8 @@ public class CoreExtension extends Extension implements ProgramShutdownHandler {
                 WrapThread.class, WrapSystem.class,
 
                 Reflector.class, Reflection.class, ReflectionException.class, ReflectionExtension.class,
-                ReflectionType.class, ReflectionFunctionAbstract.class, ReflectionFunction.class,
+                ReflectionType.class, ReflectionNamedType.class, ReflectionUnionType.class, ReflectionIntersectionType.class,
+                ReflectionFunctionAbstract.class, ReflectionFunction.class,
                 ReflectionParameter.class, ReflectionProperty.class, ReflectionMethod.class, ReflectionClass.class,
                 ReflectionObject.class, ReflectionClassConstant.class
         );

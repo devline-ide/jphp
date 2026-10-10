@@ -13,6 +13,64 @@ import php.runtime.Memory;
 public class LongMemoryTest {
 
     @Test
+    public void testOverflow() {
+        LongMemory max = new LongMemory(Long.MAX_VALUE);
+        LongMemory min = new LongMemory(Long.MIN_VALUE);
+        assertFloat((double) Long.MAX_VALUE + 1, max.plus(1L));
+        assertFloat((double) Long.MAX_VALUE + 1, max.plus(Memory.CONST_INT_1));
+        assertFloat((double) Long.MAX_VALUE + 1, max.plus(true));
+        assertFloat((double) Long.MIN_VALUE - 1, min.minus(1L));
+        assertFloat((double) Long.MIN_VALUE - 1, min.minus(Memory.CONST_INT_1));
+        assertFloat((double) Long.MIN_VALUE - 1, min.minus(true));
+        assertFloat((double) Long.MAX_VALUE * 2, max.mul(2L));
+        assertFloat((double) Long.MAX_VALUE * 2, max.mul(new LongMemory(2)));
+        assertFloat(-(double) Long.MIN_VALUE, min.mul(-1L));
+        assertFloat(-(double) Long.MIN_VALUE, min.negative());
+        assertFloat((double) Long.MAX_VALUE + 1, max.inc());
+        assertFloat((double) Long.MIN_VALUE - 1, min.dec());
+        assertFloat((double) Long.MAX_VALUE + 1, Memory.TRUE.plus(max));
+        assertFloat(-(double) Long.MIN_VALUE, Memory.FALSE.minus(min));
+        assertFloat(-(double) Long.MIN_VALUE, Memory.FALSE.minus(Long.MIN_VALUE));
+        Assert.assertEquals(Memory.Type.INT, max.plus(0L).type);
+        Assert.assertEquals(Memory.Type.INT, min.mul(1L).type);
+        Assert.assertEquals(Long.MIN_VALUE, min.mul(1L).toLong());
+        Assert.assertEquals(0L, max.mul(0L).toLong());
+        Assert.assertEquals(3037000499L * 3037000499L, new LongMemory(3037000499L).mul(3037000499L).toLong());
+        assertFloat((double) 3037000500L * 3037000500L, new LongMemory(3037000500L).mul(3037000500L));
+    }
+
+    private static void assertFloat(double expected, Memory actual) {
+        Assert.assertEquals(Memory.Type.DOUBLE, actual.type);
+        Assert.assertEquals(expected, actual.toDouble(), 0.0);
+    }
+
+    @Test
+    public void testArithmeticBoundariesAgainstBigInteger() {
+        java.util.Random random = new java.util.Random(20261007L);
+        long[] boundaries = {Long.MIN_VALUE, Long.MIN_VALUE + 1, -3037000500L, -1L, 0L,
+                1L, 3037000499L, 3037000500L, Long.MAX_VALUE - 1, Long.MAX_VALUE};
+        for (int i = 0; i < 2000; i++) {
+            long left = i < boundaries.length ? boundaries[i] : random.nextLong();
+            long right = i < boundaries.length ? boundaries[boundaries.length - i - 1] : random.nextLong();
+            java.math.BigInteger a = java.math.BigInteger.valueOf(left);
+            java.math.BigInteger b = java.math.BigInteger.valueOf(right);
+            LongMemory memory = new LongMemory(left);
+            assertIntegerRange(a.add(b), memory.plus(right));
+            assertIntegerRange(a.subtract(b), memory.minus(right));
+            assertIntegerRange(a.multiply(b), memory.mul(right));
+        }
+    }
+
+    private static void assertIntegerRange(java.math.BigInteger expected, Memory actual) {
+        if (expected.bitLength() <= 63) {
+            Assert.assertEquals(Memory.Type.INT, actual.type);
+            Assert.assertEquals(expected.longValueExact(), actual.toLong());
+        } else {
+            Assert.assertEquals(Memory.Type.DOUBLE, actual.type);
+        }
+    }
+
+    @Test
     public void testPlus(){
         LongMemory memory = new LongMemory(10);
         Assert.assertEquals(12, memory.plus(2).toLong());

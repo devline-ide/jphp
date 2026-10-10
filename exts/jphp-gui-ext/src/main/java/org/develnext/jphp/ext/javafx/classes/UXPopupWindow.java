@@ -17,6 +17,7 @@ public class UXPopupWindow<T extends PopupWindow> extends UXWindow<PopupWindow> 
         @Property boolean autoFix();
         @Property boolean autoHide();
         @Property boolean hideOnEscape();
+        @Property PopupWindow.AnchorLocation anchorLocation();
 
         void show(@Nullable Window owner);
         void show(@Nullable Window owner, double screenX, double screenY);

@@ -1,11 +1,12 @@
 package php.runtime.memory;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.Memory;
 import php.runtime.common.Messages;
 import php.runtime.common.Modifier;
 import php.runtime.env.Environment;
 import php.runtime.env.TraceInfo;
-import php.runtime.exceptions.CriticalException;
 import php.runtime.exceptions.support.ErrorType;
 import php.runtime.lang.*;
 import php.runtime.lang.spl.ArrayAccess;
@@ -14,12 +15,10 @@ import php.runtime.lang.spl.iterator.Iterator;
 import php.runtime.lang.spl.iterator.IteratorAggregate;
 import php.runtime.lang.support.ICloneableObject;
 import php.runtime.lang.support.IComparableObject;
-import php.runtime.lang.support.IManualDestructable;
 import php.runtime.memory.support.MemoryStringUtils;
 import php.runtime.reflection.ClassEntity;
 import php.runtime.reflection.PropertyEntity;
 
-import java.lang.reflect.InvocationTargetException;
 import java.nio.charset.Charset;
 import java.util.HashSet;
 import java.util.Set;
@@ -452,6 +451,11 @@ public class ObjectMemory extends Memory {
                         if (!child.next())
                             return false;
 
+                        if (child.getValue().isUndefined() && (value.getProperties() instanceof PhpObjectProperties
+                                && ((PhpObjectProperties) value.getProperties()).isExplicitlyUnset(child.getKey().toString())
+                                || reflection.getModule() != null
+                                && reflection.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                                || env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5)) continue;
                         Object key = child.getKey();
                         if (key instanceof String){
                             String keyS = (String)key;
@@ -487,6 +491,12 @@ public class ObjectMemory extends Memory {
     @Override
     public boolean instanceOf(String className, String lowerClassName) {
         ClassEntity origin = value.getReflection();
+        var frame = php.runtime.PhpPropertyWriteContext.current(null);
+        if (PhpClassNames.isModern(origin) || frame != null && PhpClassNames.isModern(frame.environment)) {
+            String original = className.startsWith("\\") ? className.substring(1) : className;
+            ClassEntity target = frame == null ? null : frame.environment.fetchClass(original, false);
+            return origin.isInstanceOfAsciiName(target == null ? original : target.getName());
+        }
         if (!lowerClassName.isEmpty() && lowerClassName.charAt(0) == '\\')
             return origin.isInstanceOf(lowerClassName.substring(1));
         else
@@ -505,6 +515,7 @@ public class ObjectMemory extends Memory {
 
     @Override
     public Memory clone(Environment env, TraceInfo trace) throws Throwable {
+        php.runtime.PhpOwnershipObjects.rejectUnmanagedClone(value);
         if (value instanceof ICloneableObject) {
             return new ObjectMemory(((ICloneableObject) value).__clone(env, trace));
         }
@@ -524,8 +535,24 @@ public class ObjectMemory extends Memory {
         }
 
         ClassEntity reflection = value.getReflection();
+        var context=php.runtime.PhpPropertyWriteContext.current(null);
+        boolean modern=reflection.getModule() != null
+                && reflection.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                || context != null && context.environment.getModuleManager().getPhpLanguageProfile(context.trace)
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                || value.getProperties() instanceof PhpObjectProperties && ((PhpObjectProperties) value.getProperties()).hasUnsetAnchors();
 
+        boolean convertNumericKeys = modern && value.getProperties().hasNumericStringKeys();
         while (iterator.next()){
+            if (modern) {
+                Memory stored=iterator.getValue();
+                if (stored.isUndefined()) continue;
+                // Existing references retain their canonical property constraint; ordinary values are copied.
+                Memory copied = stored.isReference() ? stored : stored.toImmutable();
+                if (convertNumericKeys) result.put(ArrayMemory.toKey(iterator.getMemoryKey()), copied);
+                else result.insertBucket(ArrayMemory.toKey(iterator.getMemoryKey()), copied);
+                continue;
+            }
             Object key = iterator.getKey();
             Memory value = iterator.getValue().toImmutable();
 
@@ -552,28 +579,7 @@ public class ObjectMemory extends Memory {
 
     @Override
     public void manualUnset(Environment env) {
-        ClassEntity entity = value.getReflection();
-        if (entity.methodDestruct != null) {
-            if (!value.isFinalized()) {
-                value.doFinalize();
-                env.pushCall(value, entity.methodDestruct.getName());
-                try {
-                    if (value instanceof IManualDestructable) {
-                        ((IManualDestructable) value).onManualDestruct(env);
-                    }
-
-                    entity.methodDestruct.invokeDynamic(value, env, env.trace());
-                } catch (InvocationTargetException e){
-                    env.__throwException(e);
-                } catch (RuntimeException e){
-                    throw e;
-                } catch (Throwable throwable) {
-                    throw new CriticalException(throwable);
-                } finally {
-                    env.popCall();
-                }
-            }
-        }
+        php.runtime.invoke.PhpObjectLifecycle.manualUnset(value, env);
     }
 
     private void invalidUseAsArray(TraceInfo trace){
@@ -1019,6 +1025,27 @@ public class ObjectMemory extends Memory {
                 @Override
                 public Memory toValue() {
                     return ObjectMemory.this.valueOfIndex(trace, index);
+                }
+
+                @Override
+                public Memory incrementArrayCarrier(Environment env, TraceInfo operationTrace) {
+                    Memory fetched = toValue();
+                    if (fetched instanceof ReferenceMemory) return fetched;
+                    env.error(operationTrace, ErrorType.E_NOTICE,
+                            "Indirect modification of overloaded element of %s has no effect", getReflection().getName());
+                    return new ReferenceMemory(fetched.toValue().toImmutable());
+                }
+
+                @Override
+                public Memory incrementTarget(boolean decrement, boolean post, Environment env, TraceInfo operationTrace) {
+                    Memory fetched = toValue();
+                    if (fetched instanceof ReferenceMemory)
+                        return php.runtime.PhpArithmetic.incrementTarget(fetched, decrement, post, env, operationTrace);
+                    env.error(operationTrace, ErrorType.E_NOTICE,
+                            "Indirect modification of overloaded element of %s has no effect", getReflection().getName());
+                    Memory before = fetched.toValue().toImmutable();
+                    Memory updated = php.runtime.PhpArithmetic.increment(before, decrement, env, operationTrace);
+                    return post ? before : updated;
                 }
 
                 @Override

@@ -52,7 +52,7 @@ public class PropertyDumper extends Dumper<PropertyEntity> {
         print.writeMemory(entity.getDefaultValue());
 
         // raw
-        print.writeRawData(null);
+        print.writeRawData(PropertyDeclarationDumper.save(entity));
     }
 
     @Override
@@ -74,6 +74,7 @@ public class PropertyDumper extends Dumper<PropertyEntity> {
         property.setDefaultValue(data.readMemory());
 
         byte[] raw = data.readRawData();
+        PropertyDeclarationDumper.load(property, raw);
         return property;
     }
 }

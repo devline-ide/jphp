@@ -1,0 +1,12 @@
+{"x":4,"x":1}
+{"x":4,"x":1}
+{"x":4,"x":1}
+[{"x":4,"x":1},{"x":4,"x":1}]
+{"o":{"x":4,"x":1},"a":{"x":4,"x":1}}
+{"nil":null}
+{"nil":null,"\u0000JDDeclared\u0000p":1,"\u0000*\u0000q":2}
+{"x":1}
+{"0":4,"0":1}
+[1]
+[[8192,"Creation of dynamic property JDWire::$x is deprecated"],[8192,"Creation of dynamic property JDWire::$x is deprecated"]]
+[[8192,"Creation of dynamic property JDWire::$0 is deprecated"],[8192,"Creation of dynamic property JDWire::$0 is deprecated"]]

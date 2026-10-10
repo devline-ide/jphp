@@ -8,6 +8,7 @@ import org.objectweb.asm.tree.JumpInsnNode;
 import php.runtime.Memory;
 import php.runtime.common.Function;
 import php.runtime.common.HintType;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.common.StringUtils;
 import php.runtime.env.Environment;
 import php.runtime.env.TraceInfo;
@@ -26,7 +27,28 @@ public class ReturnCompiler extends BaseStatementCompiler<ReturnStmtToken> {
 
     @Override
     public void write(ReturnStmtToken token) {
+        if (token.isImplicit() && methodStatement.isModuleChunk()) {
+            expr.writeGetStatic(php.runtime.PhpModuleContinuation.class, "CONTINUE", Memory.class);
+            add(new InsnNode(ARETURN)); expr.stackPop(); return;
+        }
         boolean isGeneratorReturn = false;
+        if (methodStatement.isReturnReference() && compiler.getModule().getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5
+                && org.develnext.jphp.core.compiler.common.NullsafeChain.isResult(token.getValue()))
+            env.error(token.toTraceInfo(compiler.getContext()),ErrorType.E_COMPILE_ERROR,
+                    "Cannot take reference of a nullsafe chain");
+
+        if (!token.isImplicit() && methodStatement.getReturnHintType() == HintType.NEVER) {
+            env.error(token.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
+                    "A never-returning function must not return");
+        }
+
+        if (!token.isImplicit() && token.getValue() == null && method.getGeneratorEntity() == null
+                && compiler.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5
+                && method.getEntity().getReturnTypeChecker() != null
+                && methodStatement.getReturnHintType() != HintType.VOID) {
+            env.error(token.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
+                    "A function with return type must return a value");
+        }
 
         if (token.getValue() != null && method.getGeneratorEntity() != null) {
             isGeneratorReturn = true;
@@ -89,14 +111,20 @@ public class ReturnCompiler extends BaseStatementCompiler<ReturnStmtToken> {
             expr.writePopBoxing(false);
         }
 
+        if (token.getValue() != null && method.getEntity().getReturnTypeChecker() != null
+                && compiler.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5) {
+            expr.writeSysStaticCall(InvokeHelper.class, "normalizeExplicitReturn", Memory.class, Memory.class);
+        }
+
         if (method.getEntity().isReturnReference()) {
-            expr.writePushDup();
+            boolean modern = compiler.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+            if (!modern) expr.writePushDup();
             expr.writePushEnv();
             expr.writePushTraceInfo(token);
             expr.writeSysStaticCall(
                     InvokeHelper.class,
-                    "checkReturnReference",
-                    void.class,
+                    modern ? "prepareReturnReference" : "checkReturnReference",
+                    modern ? Memory.class : void.class,
                     Memory.class, Environment.class, TraceInfo.class
             );
         } else {

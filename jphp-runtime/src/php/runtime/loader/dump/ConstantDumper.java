@@ -11,6 +11,9 @@ import php.runtime.reflection.ConstantEntity;
 import php.runtime.reflection.DocumentComment;
 
 import java.io.IOException;
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import php.runtime.loader.dump.io.DumpException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
@@ -43,7 +46,19 @@ public class ConstantDumper extends Dumper<ConstantEntity> {
         dump.writeTrace(debugInformation ? null : entity.getTrace());
         dump.writeMemory(entity.getValue());
 
-        dump.writeRawData(null);
+        ByteArrayOutputStream metadata = new ByteArrayOutputStream();
+        DumpOutputStream attributes = new DumpOutputStream(metadata);
+        attributes.writeInt(3);
+        attributes.writeBoolean(entity.isFinal());
+        attributes.writeName(entity.getTraitName());
+        attributes.writeName(entity.getInitializerClass());
+        attributes.writeName(entity.getInitializerMethod());
+        var type = entity.getDeclaredType();
+        attributes.writeInt(type == null ? 0 : type.getAlternatives().size());
+        if (type != null) for (var arm : type.getAlternatives()) {
+            attributes.writeInt(arm.size()); for (String name : arm) attributes.writeName(name);
+        }
+        dump.writeRawData(metadata.toByteArray());
     }
 
     @Override
@@ -67,7 +82,33 @@ public class ConstantDumper extends Dumper<ConstantEntity> {
             entity.setDocComment(new DocumentComment(docComment));
         }
 
-        dump.readRawData();
+        byte[] metadata = dump.readRawData();
+        if (metadata != null && metadata.length != 0) {
+            DumpInputStream attributes = new DumpInputStream(new ByteArrayInputStream(metadata));
+            int version = attributes.readInt();
+            if (version < 1 || version > 3) throw new DumpException("Unsupported class constant metadata version");
+            entity.setFinal(attributes.readBoolean());
+            entity.setTraitName(attributes.readName());
+            if (version >= 2) entity.setInitializer(attributes.readName(), attributes.readName());
+            if (version >= 3) {
+                int alternatives = attributes.readInt();
+                if (alternatives < 0 || alternatives > attributes.available() / 11) throw new DumpException("Invalid type alternatives");
+                java.util.List<java.util.List<String>> arms = new java.util.ArrayList<>();
+                for (int i=0; i<alternatives; i++) {
+                    int members = attributes.readInt();
+                    if (members < 1 || members > attributes.available() / 7) throw new DumpException("Invalid type members");
+                    java.util.List<String> arm = new java.util.ArrayList<>();
+                    for (int j=0; j<members; j++) {
+                        String memberName = attributes.readName(32768);
+                        if (memberName == null || memberName.isEmpty()) throw new DumpException("Invalid type name");
+                        arm.add(memberName);
+                    }
+                    arms.add(arm);
+                }
+                if (alternatives > 0) entity.setDeclaredType(new php.runtime.reflection.support.PhpTypeDeclaration(arms));
+            }
+            if (attributes.available() != 0) throw new DumpException("Invalid class constant metadata size");
+        }
         return entity;
     }
 }

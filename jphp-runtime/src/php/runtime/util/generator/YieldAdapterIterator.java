@@ -17,12 +17,11 @@ import java.util.Iterator;
 abstract public class YieldAdapterIterator<T> implements Iterator<T>, Closeable {
 
     /**
-     * Because the Yield Adapter starts a separate thread for duration of the collection, this can
-     * be left open if the calling code only reads part of the collection. If the iterator goes out
-     * of scope, when it is GCed its finalize() will close the collection thread. However garbage
-     * collection is sporadic and the VM will not trigger it simply because there is a lack of
-     * available threads. So, if a lot of partial reads are happening, it will be wise to manually
-     * close the iterator (which will clear the resources immediately).
+     * The collecting worker retains this iterator while suspended. Partial traversal must be
+     * closed explicitly; garbage collection cannot retire a live worker. Close interrupts the
+     * worker and waits for collector cleanup before clearing retained payloads. A collector must
+     * cooperate with interruption. Closing from the collector itself requests cancellation without
+     * waiting for its own termination. Fully consumed iterators finish their worker naturally.
      */
 
     protected Throwable throwable;

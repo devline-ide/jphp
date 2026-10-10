@@ -1,0 +1,4 @@
+once:1
+resurrection-count:1
+throw:Exception:destructor
+throw-count:1

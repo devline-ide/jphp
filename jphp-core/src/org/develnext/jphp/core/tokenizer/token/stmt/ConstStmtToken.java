@@ -14,6 +14,10 @@ public class ConstStmtToken extends StmtToken {
     private NamespaceStmtToken namespace;
     private CommentToken docComment;
     protected Modifier modifier = Modifier.PUBLIC;
+    private boolean isFinal;
+    private php.runtime.reflection.support.PhpTypeDeclaration declaredType;
+    public php.runtime.reflection.support.PhpTypeDeclaration getDeclaredType() {return declaredType;}
+    public void setDeclaredType(php.runtime.reflection.support.PhpTypeDeclaration type) {declaredType = type;}
 
     public final List<Item> items;
 
@@ -62,6 +66,10 @@ public class ConstStmtToken extends StmtToken {
     public void setModifier(Modifier modifier) {
         this.modifier = modifier;
     }
+
+    public boolean isFinal() { return isFinal; }
+
+    public void setFinal(boolean value) { isFinal = value; }
 
     public class Item {
         public final NameToken name;

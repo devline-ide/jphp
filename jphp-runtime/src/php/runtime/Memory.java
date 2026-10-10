@@ -311,21 +311,21 @@ abstract public class Memory implements Comparable<Memory> {
 
     // PLUS
     abstract public Memory plus(Memory memory);
-    public Memory plus(long value){ return new LongMemory(toLong() + value); }
+    public Memory plus(long value){ return OperatorUtils.plus(toLong(), value); }
     public Memory plus(double value){ return new DoubleMemory(toDouble() + value); }
-    public Memory plus(boolean value){ return new LongMemory(toLong() + (value ? 1 : 0)); }
+    public Memory plus(boolean value){ return plus(value ? 1L : 0L); }
     public Memory plus(String value){ return plus(StringMemory.toNumeric(value)); }
 
     // MINUS
     abstract public Memory minus(Memory memory);
-    public Memory minus(long value){ return new LongMemory(toLong() - value); }
+    public Memory minus(long value){ return OperatorUtils.minus(toLong(), value); }
     public Memory minus(double value){ return new DoubleMemory(toDouble() - value); }
-    public Memory minus(boolean value){ return new LongMemory(toLong() - (value ? 1 : 0)); }
+    public Memory minus(boolean value){ return minus(value ? 1L : 0L); }
     public Memory minus(String value){ return minus(StringMemory.toNumeric(value)); }
 
     // MUL
     abstract public Memory mul(Memory memory);
-    public Memory mul(long value){ return new LongMemory(toLong() * value); }
+    public Memory mul(long value){ return OperatorUtils.mul(toLong(), value); }
     public Memory mul(double value){ return new DoubleMemory(toDouble() * value); }
     public Memory mul(boolean value){ return LongMemory.valueOf(toLong() * (value ? 1 : 0));}
     public Memory mul(String value){ return mul(StringMemory.toNumeric(value)); }

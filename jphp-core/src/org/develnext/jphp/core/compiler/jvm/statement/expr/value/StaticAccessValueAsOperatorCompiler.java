@@ -22,6 +22,8 @@ public class StaticAccessValueAsOperatorCompiler extends BaseExprCompiler<Static
     @Override
     public void write(StaticAccessOperatorExprToken token, boolean returnValue) {
         StaticAccessExprToken origin = token.getOrigin();
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            expr.writePush(expr.stackPop());
 
         BaseExprCompiler<StaticAccessExprToken> compiler = (BaseExprCompiler<StaticAccessExprToken>) expr.getCompiler(StaticAccessExprToken.class);
         compiler.write(origin, returnValue);

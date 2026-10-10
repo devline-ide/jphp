@@ -52,9 +52,15 @@ public class OperatorUtils {
     }
 
     // PLUS
+    public static Memory plus(long o1, long o2) {
+        long result = o1 + o2;
+        return ((o1 ^ result) & (o2 ^ result)) < 0
+                ? DoubleMemory.valueOf((double) o1 + o2) : LongMemory.valueOf(result);
+    }
+
     public static Memory plus(long o1, Memory value) {
         switch (value.type){
-            case INT: return LongMemory.valueOf(o1 + value.toLong());
+            case INT: return plus(o1, value.toLong());
             case DOUBLE: return DoubleMemory.valueOf(o1 + value.toDouble());
         }
         return plus(o1, value.toNumeric());
@@ -65,9 +71,15 @@ public class OperatorUtils {
     }
 
     // MINUS
+    public static Memory minus(long o1, long o2) {
+        long result = o1 - o2;
+        return ((o1 ^ o2) & (o1 ^ result)) < 0
+                ? DoubleMemory.valueOf((double) o1 - o2) : LongMemory.valueOf(result);
+    }
+
     public static Memory minus(long o1, Memory value) {
         switch (value.type){
-            case INT: return LongMemory.valueOf(o1 - value.toLong());
+            case INT: return minus(o1, value.toLong());
             case DOUBLE: return DoubleMemory.valueOf(o1 - value.toDouble());
         }
         return minus(o1, value.toNumeric());
@@ -78,9 +90,15 @@ public class OperatorUtils {
     }
 
     // MUL
+    public static Memory mul(long o1, long o2) {
+        long result = o1 * o2;
+        return Math.multiplyHigh(o1, o2) != (result >> 63)
+                ? DoubleMemory.valueOf((double) o1 * o2) : LongMemory.valueOf(result);
+    }
+
     public static Memory mul(long o1, Memory value) {
         switch (value.type){
-            case INT: return LongMemory.valueOf(o1 * value.toLong());
+            case INT: return mul(o1, value.toLong());
             case DOUBLE: return DoubleMemory.valueOf(o1 * value.toDouble());
         }
         return mul(o1, value.toNumeric());

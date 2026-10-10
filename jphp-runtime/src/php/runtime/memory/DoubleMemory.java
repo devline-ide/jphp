@@ -160,8 +160,8 @@ public class DoubleMemory extends Memory {
     public Memory pow(Memory memory) {
         switch (memory.type){
             case INT: return new DoubleMemory(Math.pow(value, ((LongMemory)memory).value));
-            case DOUBLE: return new DoubleMemory(Math.pow(value, ((LongMemory)memory).value));
-            case REFERENCE: return mul(memory.toImmutable());
+            case DOUBLE: return new DoubleMemory(Math.pow(value, ((DoubleMemory)memory).value));
+            case REFERENCE: return pow(memory.toValue());
             default: return pow(memory.toNumeric());
         }
     }

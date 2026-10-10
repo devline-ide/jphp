@@ -1,9 +1,12 @@
 package php.runtime.reflection;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.Memory;
 import php.runtime.annotation.Reflection;
 import php.runtime.common.Messages;
 import php.runtime.common.Modifier;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.env.ConcurrentEnvironment;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
@@ -79,6 +82,98 @@ public class ClassEntity extends Entity implements Cloneable {
 
     protected final Map<String, ClassEntity> interfaces;
     protected final Map<String, ClassEntity> traits;
+    private final List<TraitConstantCheck> traitConstantChecks = new ArrayList<>();
+    private boolean deferredInitialization;
+    public boolean hasDeferredInitialization() { return deferredInitialization; }
+    public void setDeferredInitialization(boolean value) { deferredInitialization = value; }
+
+    public void initializeRuntimeState(Environment env) {
+        if (!deferredInitialization) return;
+        synchronized (env.getClassInitializationLock()) {
+            String key = "\0class-initialization:" + PhpClassNames.canonicalKey(getName());
+            if (env.getUserValue(key, Boolean.class) != null) return;
+            env.setUserValue(key, Boolean.FALSE);
+            try {
+                if (parent != null) parent.initializeRuntimeState(env);
+                for (ConstantEntity constant : getConstants()) constant.getValue(env);
+                initEnvironmentBody(env);
+                if (hasPhp8Signatures()) {
+                    for (PropertyEntity property : getProperties())
+                        if (property.getClazz() == this && property.getDeclaredType() != null && property.isDefault())
+                            property.getDefaultValue(env);
+                    for (PropertyEntity property : getStaticProperties())
+                        if (property.getClazz() == this && property.getDeclaredType() != null && property.isDefault())
+                            property.getDefaultValue(env);
+                }
+                env.setUserValue(key, Boolean.TRUE);
+            } catch (Throwable error) {
+                env.setUserValue(key, null);
+                env.forwardThrow(error);
+            }
+        }
+    }
+
+    public static final class TraitConstantCheck {
+        public final String name;
+        public final String trait;
+        public final Memory value;
+        public final String owner;
+        private TraitConstantCheck(String name, String trait, Memory value, String owner) {
+            this.name = name; this.trait = trait; this.value = value; this.owner = owner;
+        }
+    }
+
+    public List<TraitConstantCheck> getTraitConstantChecks() { return Collections.unmodifiableList(traitConstantChecks); }
+
+    public void addTraitConstantCheck(String name, String trait, Memory value) {
+        addTraitConstantCheck(name, trait, value, null);
+    }
+
+    public void addTraitConstantCheck(String name, String trait, Memory value, String owner) {
+        traitConstantChecks.add(new TraitConstantCheck(name, trait, value, owner));
+    }
+
+    public void traitConstantConflict(Environment env, String name, String trait) {
+        ConstantEntity constant = findConstant(name);
+        traitConstantConflict(env, name, trait, constant.getTraitName() == null ? getName() : constant.getTraitName());
+    }
+
+    private void traitConstantConflict(Environment env, String name, String trait, String owner) {
+        env.error(getTrace(), ErrorType.E_COMPILE_ERROR,
+                "%s and %s define the same constant (%s) in the composition of %s. However, the definition differs and is considered incompatible. Class was composed",
+                owner, trait, name, getName());
+    }
+
+    private void checkTraitConstant(Environment env, TraitConstantCheck check) {
+        try {
+            Memory value = check.value;
+            if (value == null && deferredInitialization) {
+                ConstantEntity candidate = env.fetchClass(check.trait).findConstant(check.name);
+                if (candidate.getInitializerMethod() != null) value = candidate.evaluateInitializer(env, this);
+            }
+            ConstantEntity origin = findConstant(check.name);
+            Memory original = origin.getInitializerMethod() == null ? origin.getValue(env) : origin.evaluateInitializer(env, this);
+            if (value == null || original.identical(value)) return;
+        } catch (php.runtime.lang.exception.BaseError error) {
+            // Composition compares initializer values before checking their declared types.
+        }
+        if (check.owner == null) traitConstantConflict(env, check.name, check.trait);
+        else traitConstantConflict(env, check.name, check.trait, check.owner);
+    }
+
+    public void addTraitDynamicConstant(Environment env, String name, Memory value) {
+        ConstantEntity constant = findConstant(name);
+        if (constant.getValue() != null || env.getStatic(constant.getInternalName()) != null) {
+            String trait = env.peekCall(0).function;
+            String owner = null;
+            for (TraitConstantCheck check : traitConstantChecks)
+                if (check.name.equals(name) && check.trait.equals(trait)) { owner = check.owner; break; }
+            if (!constant.getValue(env).identical(value)) {
+                if (owner == null) traitConstantConflict(env, name, trait);
+                else traitConstantConflict(env, name, trait, owner);
+            }
+        } else env.getOrCreateStatic(constant.getInternalName(), value);
+    }
 
     public final Map<String, ConstantEntity> constants;
     public final Map<String, PropertyEntity> properties;
@@ -93,6 +188,7 @@ public class ClassEntity extends Entity implements Cloneable {
     protected Type type = Type.CLASS;
 
     protected boolean isStatic;
+    private boolean nativeAsciiClassIdentity;
 
     protected static final ClassEntity magicSignatureClass =
             new ClassEntity(new ClassWrapper(null, MagicSignatureClass.class));
@@ -110,6 +206,7 @@ public class ClassEntity extends Entity implements Cloneable {
 
     public ClassEntity(ClassWrapper wrapper) {
         this((Context) null);
+        nativeAsciiClassIdentity = wrapper.getScope() != null && wrapper.getScope().isModernClassLookup();
         wrapper.onWrap(this);
     }
 
@@ -167,6 +264,12 @@ public class ClassEntity extends Entity implements Cloneable {
     }
 
     public void doneDeclare() {
+        if (hasPhp8Signatures()) {
+            Map<String, ConstantEntity> ordered = new LinkedHashMap<>();
+            for (ConstantEntity constant : constants.values()) if (constant.getClazz() == this) ordered.put(constant.getName(), constant);
+            for (ConstantEntity constant : constants.values()) if (constant.getClazz() != this) ordered.put(constant.getName(), constant);
+            constants.clear(); constants.putAll(ordered);
+        }
         switch (getType()) {
             case CLOSURE:
             case GENERATOR:
@@ -322,7 +425,7 @@ ClassReader classReader;
             this.methods.put(name, method);
         }
 
-        if (name.equals(lowerName) && !isTrait()) {
+        if (name.equals(lowerName) && !isTrait() && !hasPhp8Signatures()) {
             methods.put("__construct", method);
         }
 
@@ -363,27 +466,54 @@ ClassReader classReader;
     }
 
     public boolean isInstanceOf(ClassEntity what) {
-        return what != null && (id == what.id || instanceOfList.contains(what.lowerName));
+        if (what == null) return false;
+        if (usesAsciiClassNames() || PhpClassNames.isModern(what)) return isInstanceOfAsciiName(what.getName());
+        return id == what.id || instanceOfList.contains(what.lowerName);
     }
 
     public boolean isInstanceOf(String name) {
         if (name == null)
             throw new IllegalArgumentException();
 
+        if (usesAsciiClassNames()) return isInstanceOfAsciiName(name);
         String lowerName = name.toLowerCase();
         return instanceOfList.contains(lowerName) || this.lowerName.equals(lowerName);
+    }
+
+    /** Uses original names even when a modern class inherits legacy metadata. */
+    public boolean isInstanceOfAsciiName(String name) {
+        String key = PhpClassNames.canonicalKey(name);
+        if (PhpClassNames.canonicalKey(getName()).equals(key)) return true;
+        if (parent != null && parent.isInstanceOfAsciiName(name)) return true;
+        for (ClassEntity contract : interfaces.values()) {
+            if (contract.isInstanceOfAsciiName(name)) return true;
+        }
+        return false;
+    }
+
+    private void inheritClassIdentity(ClassEntity parent) {
+        if (!usesAsciiClassNames()) {
+            instanceOfList.add(parent.getLowerName());
+            instanceOfList.addAll(parent.instanceOfList);
+            interfaces.putAll(parent.interfaces);
+            return;
+        }
+        for (ClassEntity ancestor = parent; ancestor != null; ancestor = ancestor.parent)
+            instanceOfList.add(PhpClassNames.canonicalKey(ancestor.getName()));
+        for (ClassEntity contract : parent.interfaces.values()) {
+            String key = PhpClassNames.canonicalKey(contract.getName());
+            instanceOfList.add(key); interfaces.put(key, contract);
+        }
     }
 
     public boolean isInstanceOfLower(String lowerName) {
         if (lowerName == null)
             throw new IllegalArgumentException();
-
+        if (usesAsciiClassNames()) return isInstanceOfAsciiName(lowerName);
         return instanceOfList.contains(lowerName) || this.lowerName.equals(lowerName);
     }
 
-    public SignatureResult updateParentBody() {
-        SignatureResult result = new SignatureResult();
-
+    private void collectConstantOverrides(SignatureResult result) {
         if (parent != null) {
             for (ConstantEntity constant : parent.getConstants()) {
                 ConstantEntity implConstant = findConstant(constant.getName());
@@ -391,14 +521,33 @@ ClassReader classReader;
                 if (implConstant == constant) continue;
 
                 if (implConstant != null) {
-                    if (constant.isPublic() && !implConstant.isPublic()) {
-                        result.addConstant(InvalidConstant.error(InvalidConstant.Kind.MUST_BE_PUBLIC, implConstant, constant));
+                    if (constant.isFinal()) {
+                        result.addConstant(InvalidConstant.compile(InvalidConstant.Kind.FINAL, implConstant, constant));
+                    } else if (constant.isPublic() && !implConstant.isPublic()) {
+                        result.addConstant(hasPhp8Signatures()
+                                ? InvalidConstant.compile(InvalidConstant.Kind.MUST_BE_PUBLIC, implConstant, constant)
+                                : InvalidConstant.error(InvalidConstant.Kind.MUST_BE_PUBLIC, implConstant, constant));
                     } else if (constant.isProtected() && implConstant.isPrivate()) {
-                        result.addConstant(InvalidConstant.error(InvalidConstant.Kind.MUST_BE_PROTECTED, implConstant, constant));
+                        result.addConstant(hasPhp8Signatures()
+                                ? InvalidConstant.compile(InvalidConstant.Kind.MUST_BE_PROTECTED, implConstant, constant)
+                                : InvalidConstant.error(InvalidConstant.Kind.MUST_BE_PROTECTED, implConstant, constant));
                     }
                 }
             }
+        }
+    }
 
+    public void validateConstantInheritance(Environment env) {
+        SignatureResult result = new SignatureResult();
+        collectConstantOverrides(result);
+        result.check(env);
+    }
+
+    public SignatureResult updateParentBody() {
+        SignatureResult result = new SignatureResult();
+        collectConstantOverrides(result);
+
+        if (parent != null) {
             for (Map.Entry<String, MethodEntity> entry : parent.getMethods().entrySet()) {
                 MethodEntity implMethod = findMethod(entry.getKey());
                 MethodEntity method = entry.getValue();
@@ -406,7 +555,8 @@ ClassReader classReader;
 
                 if (implMethod == null) {
                     SignatureResult addResult = addMethod(method, entry.getKey());
-                    if (methodConstruct == null && !isTrait() && method.getName().equalsIgnoreCase(parent.getName())) {
+                    if (methodConstruct == null && !isTrait() && !hasPhp8Signatures()
+                            && method.getName().equalsIgnoreCase(parent.getName())) {
                         if (!method.isAbstractable() && !methods.containsKey("__construct")) {
                             method.setDynamicSignature(true);
                             methods.put("__construct", method);
@@ -415,6 +565,7 @@ ClassReader classReader;
 
                     result.methods.addAll(addResult.methods);
                 } else {
+                    if (hasPhp8Signatures() && method.isPrivate()) continue;
                     implMethod.setPrototype(method);
                     if (method.isFinal)
                         result.add(InvalidMethod.error(InvalidMethod.Kind.FINAL, implMethod));
@@ -422,7 +573,7 @@ ClassReader classReader;
                     if (!isAbstract && method.isAbstract && implMethod.isAbstract)
                         result.add(InvalidMethod.error(InvalidMethod.Kind.NON_EXISTS, implMethod));
 
-                    if (!implMethod.equalsBySignature(method)) {
+                    if (!hasPhp8Signatures() && !implMethod.equalsBySignature(method)) {
                         if (!method.isDynamicSignature() || method.isAbstractable()) {
                             boolean isWarning = true;
                             MethodEntity pr = method;
@@ -432,7 +583,7 @@ ClassReader classReader;
                                     isWarning = false;
                                     break;
                                 }
-                                pr = method.getPrototype();
+                                pr = pr.getPrototype();
                             }
 
                             if (isWarning) {
@@ -492,9 +643,7 @@ ClassReader classReader;
 
             this.methodCounts = parent.methodCounts + this.methods.size();
 
-            this.instanceOfList.add(parent.getLowerName());
-            this.instanceOfList.addAll(parent.instanceOfList);
-            this.interfaces.putAll(parent.interfaces);
+            inheritClassIdentity(parent);
 
             this.properties.putAll(parent.properties);
             this.staticProperties.putAll(parent.staticProperties);
@@ -528,9 +677,7 @@ ClassReader classReader;
 
             this.methodCounts = parent.methodCounts;
 
-            this.instanceOfList.add(parent.getLowerName());
-            this.instanceOfList.addAll(parent.instanceOfList);
-            this.interfaces.putAll(parent.interfaces);
+            inheritClassIdentity(parent);
 
             this.properties.putAll(parent.properties);
             this.staticProperties.putAll(parent.staticProperties);
@@ -560,15 +707,26 @@ ClassReader classReader;
 
         for (ConstantEntity e : _interface.constants.values()) {
             ConstantEntity origin = constants.get(e.getName());
-            if (origin != null && e.getClazz().getId() == _interface.getId() &&
+            if (hasPhp8Signatures()) {
+                if (origin == null) constants.put(e.getName(), e);
+                else if (origin != e) {
+                    if (e.isFinal())
+                        result.signature.addConstant(InvalidConstant.compile(InvalidConstant.Kind.FINAL, origin, e));
+                    else if (origin.getClazz() != this)
+                        result.signature.addConstant(InvalidConstant.compile(InvalidConstant.Kind.AMBIGUOUS, origin, e));
+                    else if (!origin.isPublic())
+                        result.signature.addConstant(InvalidConstant.compile(InvalidConstant.Kind.MUST_BE_PUBLIC, origin, e));
+                }
+            } else if (origin != null && e.getClazz().getId() == _interface.getId() &&
                     (parent == null || parent.constants.get(e.getName()) == null))
                 result.signature.addConstant(InvalidConstant.error(InvalidConstant.Kind.INVALID_OVERRIDE, origin, e));
         }
 
-        this.constants.putAll(_interface.constants);
+        if (!hasPhp8Signatures()) this.constants.putAll(_interface.constants);
 
-        this.interfaces.put(_interface.getLowerName(), _interface);
-        this.instanceOfList.add(_interface.getLowerName());
+        String key = usesAsciiClassNames() ? PhpClassNames.canonicalKey(_interface.getName()) : _interface.getLowerName();
+        this.interfaces.put(key, _interface);
+        this.instanceOfList.add(key);
         this.instanceOfList.addAll(_interface.instanceOfList);
 
         for (MethodEntity method : _interface.getMethods().values()) {
@@ -582,7 +740,7 @@ ClassReader classReader;
             } else {
                 implMethod.setPrototype(method);
 
-                if (/*!method.isDynamicSignature() &&*/ !implMethod.equalsBySignature(method)) { // checking dynamic for only extends
+                if (!hasPhp8Signatures() && !implMethod.equalsBySignature(method)) {
                     result.signature.add(InvalidMethod.error(InvalidMethod.Kind.INVALID_SIGNATURE, implMethod));
                 } else if (implMethod.isStatic() && !method.isStatic()) {
                     result.signature.add(InvalidMethod.error(InvalidMethod.Kind.MUST_NON_STATIC, implMethod));
@@ -602,7 +760,7 @@ ClassReader classReader;
         if (!trait.isTrait())
             throw new IllegalArgumentException("'" + trait.getName() + "' is not a trait");
 
-        this.traits.put(trait.getLowerName(), trait);
+        this.traits.put(usesAsciiClassNames() ? PhpClassNames.canonicalKey(trait.getName()) : trait.getLowerName(), trait);
     }
 
     public boolean hasTrait(String traitLowerName) {
@@ -626,13 +784,18 @@ ClassReader classReader;
     }
 
     public SignatureResult addConstant(ConstantEntity constant) {
+        if (hasPhp8Signatures()) constants.remove(constant.getName());
         constants.put(constant.getName(), constant);
         constant.setClazz(this);
 
         SignatureResult result = new SignatureResult();
 
+        if (constant.isFinal() && constant.isPrivate())
+            result.addConstant(InvalidConstant.compile(InvalidConstant.Kind.PRIVATE_FINAL, constant, null));
         if (isInterface() && !constant.isPublic()) {
-            result.addConstant(InvalidConstant.error(InvalidConstant.Kind.MUST_BE_PUBLIC_FOR_INTERFACE, constant, null));
+            result.addConstant(hasPhp8Signatures()
+                    ? InvalidConstant.compile(InvalidConstant.Kind.MUST_BE_PUBLIC_FOR_INTERFACE, constant, null)
+                    : InvalidConstant.error(InvalidConstant.Kind.MUST_BE_PUBLIC_FOR_INTERFACE, constant, null));
         }
 
         return result;
@@ -645,7 +808,7 @@ ClassReader classReader;
 
     public void addDynamicStaticProperty(Environment env, String name, Memory value) {
         PropertyEntity prop = staticProperties.get(name);
-        env.getOrCreateStatic(prop.specificName, value);
+        env.getOrCreateStatic(prop.getDynamicDefaultName(), value);
     }
 
     public void addDynamicProperty(Environment env, String name, Memory value) {
@@ -761,6 +924,15 @@ ClassReader classReader;
         }
     }
 
+    private void errorInvalidPropertyAccess(Environment env, TraceInfo trace, PropertyEntity entity, int accessFlag) {
+        if ((accessFlag == 1 || accessFlag == 2) && usesModernPropertyPolicy(env, trace)) {
+            String message = (accessFlag == 1 ? Messages.ERR_ACCESS_TO_PROTECTED_PROPERTY : Messages.ERR_ACCESS_TO_PRIVATE_PROPERTY)
+                    .fetch(accessFlag == 1 || entity.isStatic() ? getName() : entity.getClazz().getName(), entity.getName());
+            env.exception(trace, php.runtime.lang.exception.BaseError.class, message);
+        }
+        invalidAccessToProperty(env, trace, entity, accessFlag);
+    }
+
     public void setNativeClazz(Class<?> nativeClazz) {
         this.nativeClazz = nativeClazz;
 
@@ -801,29 +973,61 @@ ClassReader classReader;
         return module;
     }
 
+    public boolean usesAsciiClassNames() {
+        return nativeAsciiClassIdentity || hasPhp8Signatures();
+    }
+
+    private boolean hasPhp8Signatures() {
+        return module != null && module.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+    }
+
+    @Override
+    public void setName(String name) {
+        super.setName(name);
+        if (name != null && usesAsciiClassNames()) lowerName = PhpClassNames.canonicalKey(name);
+    }
+
     public void setModule(ModuleEntity module) {
         this.module = module;
+        if (name != null && usesAsciiClassNames()) lowerName = PhpClassNames.canonicalKey(name);
     }
 
     public void initEnvironment(Environment env) {
+        if (deferredInitialization) {
+            if (!isTrait()) for (TraitConstantCheck check : traitConstantChecks) checkTraitConstant(env, check);
+            return;
+        }
+        initEnvironmentBody(env);
+    }
+
+    private void initEnvironmentBody(Environment env) {
+        if (isTrait() && hasPhp8Signatures()) return; // Relative trait values belong to the composing class.
         if (isClass() && nativeInitEnvironment != null) {
+            boolean scoped = hasPhp8Signatures();
+            if (scoped) env.pushCall(getTrace(), null, null, "{constant-expression}", getName(), getName());
             try {
                 nativeInitEnvironment.invoke(null, env);
             } catch (InvocationTargetException e) {
                 env.__throwException(e);
             } catch (IllegalAccessException e) {
                 throw new CriticalException(e);
+            } finally {
+                if (scoped) env.popCall();
             }
         }
 
         if (!traits.isEmpty()) {
-            Set<ClassEntity> used = new HashSet<ClassEntity>();
+            Set<ClassEntity> used = usesAsciiClassNames() ? Collections.newSetFromMap(new IdentityHashMap<>())
+                    : new HashSet<ClassEntity>();
             try {
                 for (ClassEntity trait : traits.values()) {
                     trait.initTraitEnvironment(env, this, used);
+                    for (TraitConstantCheck check : traitConstantChecks)
+                        if (check.trait.equals(trait.getName())) checkTraitConstant(env, check);
                 }
             } catch (Exception e) {
-                env.catchUncaught(e);
+                if (hasPhp8Signatures()) env.forwardThrow(e);
+                else env.catchUncaught(e);
             } catch (Throwable e) {
                 throw new CriticalException(e);
             }
@@ -831,21 +1035,39 @@ ClassReader classReader;
     }
 
     protected void initTraitEnvironment(Environment env, ClassEntity originClass, Set<ClassEntity> used) throws Throwable {
+        initTraitEnvironment(env, originClass, used, getName());
+    }
+
+    private void initTraitEnvironment(Environment env, ClassEntity originClass, Set<ClassEntity> used, String composingTrait) throws Throwable {
         if (nativeInitEnvironment != null) {
+            boolean scoped = hasPhp8Signatures();
+            if (scoped) env.pushCall(getTrace(), null, null, composingTrait, originClass.getName(), originClass.getName());
             try {
                 nativeInitEnvironment.invoke(null, env, originClass.getName());
             } catch (InvocationTargetException e) {
                 env.__throwException(e);
+            } finally {
+                if (scoped) env.popCall();
             }
         }
         for (ClassEntity trait : traits.values()) {
             if (used.add(trait)) {
-                trait.initTraitEnvironment(env, originClass, used);
+                trait.initTraitEnvironment(env, originClass, used, composingTrait);
             }
         }
+        for (TraitConstantCheck check : traitConstantChecks)
+            originClass.checkTraitConstant(env, check);
+    }
+
+    /** Explicit complete-provider route: no implicit class initialization or default evaluation. */
+    public IObject createOwnershipShell(php.runtime.PhpOwnershipObjects.AllocationWitness witness, Environment env) throws Throwable {
+        witness.consumeFactory(this,nativeClazz,nativeConstructor,env);
+        try {return (IObject)nativeConstructor.newInstance(env,this);}
+        catch (InvocationTargetException failure) {env.__throwException(failure);return null;}
     }
 
     public <T extends IObject> T newObjectWithoutConstruct(Environment env) {
+        initializeRuntimeState(env);
         IObject object = null;
         try {
             if (nativeConstructor != null)
@@ -859,6 +1081,7 @@ ClassReader classReader;
             throw new CriticalException(e);
         }
 
+        if (object != null && hasPhp8Signatures()) initializeInstanceProperties(env, object);
         return (T) object;
     }
 
@@ -886,6 +1109,19 @@ ClassReader classReader;
         }
     }
 
+    public void checkCanInstance(Environment env, TraceInfo callTrace) {
+        if (env.getModuleManager().getPhpLanguageProfile(callTrace) != PhpLanguageProfile.PHP_8_5) {
+            checkCanInstance(env);
+            return;
+        }
+        if (type == Type.INTERFACE) env.exception(callTrace, php.runtime.lang.exception.BaseError.class,
+                "Cannot instantiate interface %s", name);
+        else if (type == Type.TRAIT) env.exception(callTrace, php.runtime.lang.exception.BaseError.class,
+                "Cannot instantiate trait %s", name);
+        else if (isAbstract) env.exception(callTrace, php.runtime.lang.exception.BaseError.class,
+                "Cannot instantiate abstract class %s", name);
+    }
+
     public <T extends IObject> T newObject(Environment env, TraceInfo trace, boolean doConstruct, Memory... args)
             throws Throwable {
         return newObject(env, trace, doConstruct, true, args);
@@ -895,9 +1131,10 @@ ClassReader classReader;
             throws Throwable {
 
         if (checks) {
-            checkCanInstance(env);
+            checkCanInstance(env, trace);
         }
 
+        initializeRuntimeState(env);
         IObject object;
         try {
             if (nativeConstructor == null) {
@@ -910,14 +1147,47 @@ ClassReader classReader;
             return null;
         }
 
+        initializeInstanceProperties(env, object);
+
+        if (doConstruct && methodConstruct != null) {
+            ObjectInvokeHelper.invokeMethod(object, methodConstruct, env, trace, args, true);
+        }
+
+        return (T) object;
+    }
+
+    private void initializeInstanceProperties(Environment env, IObject object) {
         ArrayMemory props = object.getProperties();
+        if (hasPhp8Signatures() && props instanceof php.runtime.memory.PhpObjectProperties) {
+            for (ClassEntity owner = this; owner != null; owner = owner.parent)
+                for (PropertyEntity property : owner.getProperties())
+                    if (property.getGetter() == null)
+                        ((php.runtime.memory.PhpObjectProperties) props).declare(property);
+        }
+        if (hasPhp8Signatures()) {
+            // PHP retains inherited slot order, including slots overridden by a child.
+            Deque<ClassEntity> lineage = new ArrayDeque<>();
+            for (ClassEntity owner = this; owner != null; owner = owner.parent) lineage.push(owner);
+            Set<String> initialized = new HashSet<>();
+            while (!lineage.isEmpty()) {
+                ClassEntity owner = lineage.pop();
+                for (PropertyEntity declared : owner.getProperties()) {
+                    if (declared.getClazz().getId() != owner.getId() || declared.getGetter() != null) continue;
+                    PropertyEntity property = declared.isPrivate() ? declared : findProperty(declared.getName());
+                    if (property == null || property.getGetter() != null || !initialized.add(property.getSpecificName())) continue;
+                    props.putAsKeyString(property.getSpecificName(), property.getDefaultValue(env).toImmutable())
+                            .attachPropertySource(env, property);
+                }
+            }
+            return;
+        }
 
         for (PropertyEntity property : getProperties()) {
             if (id == property.clazz.getId() && property.getGetter() == null) {
                 props.putAsKeyString(
                         property.getSpecificName(),
                         property.getDefaultValue(env).toImmutable()
-                );
+                ).attachPropertySource(env, property);
             }
         }
 
@@ -930,25 +1200,67 @@ ClassReader classReader;
                         props.getByScalarOrCreate(
                                 property.getSpecificName(),
                                 property.getDefaultValue(env).toImmutable()
-                        );
+                        ).attachPropertySource(env, property);
                 }
             }
             tmp = tmp.parent;
         }
 
-        if (doConstruct && methodConstruct != null) {
-            ObjectInvokeHelper.invokeMethod(object, methodConstruct, env, trace, args, true);
-        }
-
-        return (T) object;
     }
 
     public <T extends IObject> T cloneObject(T value, Environment env, TraceInfo trace) throws Throwable {
+        php.runtime.PhpOwnershipObjects.rejectUnmanagedClone(value);
+        // Keep virtual factory dispatch: specialized entities can reject cloning.
         IObject copy = this.newObjectWithoutConstruct(env);
-        ForeachIterator iterator = value.getProperties().foreachIterator(false, false);
+        boolean modernStorage = hasPhp8Signatures()
+                || env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                || value.getProperties() instanceof php.runtime.memory.PhpObjectProperties
+                && ((php.runtime.memory.PhpObjectProperties) value.getProperties()).hasUnsetAnchors();
+        if (modernStorage) {
+            value.getProperties().enableBucketLayout();
+            ArrayMemory defaults = copy.getProperties();
+            ForeachIterator fresh = defaults.foreachIterator(false, false);
+            while (fresh.next()) {
+                ReferenceMemory cell = defaults.getByScalar(fresh.getKey());
+                if (cell != null) cell.detachPropertySource();
+            }
+            // Copy the actual storage, including explicitly unset fields, rather than fresh defaults.
+            defaults.clear();
+        }
         ArrayMemory props = copy.getProperties();
-        while (iterator.next()) {
+        if (modernStorage && value.getProperties().hasBucketLayout()) {
+            // Copy buckets, not keys: an older duplicate can carry a different canonical alias.
+            for (int ordinal = 0; ordinal < value.getProperties().bucketLimit(); ordinal++) {
+                ReferenceMemory source = value.getProperties().bucketAt(ordinal);
+                if (source == null) { props.appendBucketHole(); continue; }
+                Object key = value.getProperties().bucketKey(ordinal);
+                ReferenceMemory target = props.insertBucket(key, source.getValue().isReference()
+                        ? source.getValue() : source.getValue().toImmutable());
+                if (value.getProperties() instanceof php.runtime.memory.PhpObjectProperties && key instanceof String) {
+                    PropertyEntity declared = ((php.runtime.memory.PhpObjectProperties) value.getProperties()).declaration((String) key);
+                    if (declared != null && !((php.runtime.memory.PhpObjectProperties) value.getProperties()).isExplicitlyUnset((String) key))
+                        target.attachPropertySource(env, declared);
+                }
+            }
+            if (props instanceof php.runtime.memory.PhpObjectProperties && value.getProperties() instanceof php.runtime.memory.PhpObjectProperties)
+                ((php.runtime.memory.PhpObjectProperties) props).copyMetadataFrom((php.runtime.memory.PhpObjectProperties) value.getProperties());
+        }
+        ForeachIterator iterator = value.getProperties().foreachIterator(false, false);
+        while (!(modernStorage && value.getProperties().hasBucketLayout()) && iterator.next()) {
             Object key = iterator.getKey();
+            if (key instanceof String && (hasPhp8Signatures()
+                    || env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)) {
+                ReferenceMemory source=value.getProperties().getByScalar((String)key);
+                ReferenceMemory target=(ReferenceMemory)props.refOfIndex((String)key);
+                if (source.getValue().isReference()) target.assignRef(source.getValue());
+                else target.assign(source.getValue().toImmutable());
+                PropertyEntity stored=null;
+                for (ClassEntity owner=this;owner != null && stored == null;owner=owner.parent)
+                    for (PropertyEntity candidate : owner.properties.values())
+                        if (candidate.getSpecificName().equals(key)) {stored=candidate;break;}
+                if (stored != null) target.attachPropertySource(env,stored);
+                continue;
+            }
             if (key instanceof String) {
                 String name = (String) key;
                 if (name.indexOf('\0') > -1)
@@ -969,6 +1281,67 @@ ClassReader classReader;
         }
 
         return (T) copy;
+    }
+
+    /** Keep checked modern arithmetic inside the property's access and creation transaction. */
+    public Memory assignArithmeticProperty(Environment env, TraceInfo trace, IObject object, String property,
+                                           Memory right, String operator, PropertyCallCache callCache, int cacheIndex)
+            throws Throwable {
+        return setProperty(env, trace, object, property, right, new SetterCallback() {
+            @Override
+            public Memory invoke(Memory left, Memory value) {
+                return php.runtime.PhpArithmetic.binary(left, value, operator, env, trace);
+            }
+        }, callCache, cacheIndex);
+    }
+
+    public Memory incrementProperty(Environment env, TraceInfo trace, IObject object, String property,
+                                    boolean decrement, boolean post, PropertyCallCache callCache, int cacheIndex) throws Throwable {
+        PropertyEntity nativeField = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
+        if (nativeField instanceof CompilePropertyEntity) {
+            ReferenceMemory target = new ReferenceMemory(getProperty(env, trace, object, property, callCache, cacheIndex).toImmutable());
+            return php.runtime.PhpArithmetic.incrementReference(target, decrement, post, env, trace,
+                    updated -> nativeField.assignValue(env, trace, object, property, updated));
+        }
+        final Memory[] result = {Memory.NULL};
+        setProperty(env, trace, object, property, Memory.NULL, new SetterCallback() {
+            @Override public boolean assignsTarget() { return true; }
+            @Override public boolean incrementDecrement() { return true; }
+            @Override public Memory invoke(Memory left, Memory ignored) {
+                Memory before = left.toValue().toImmutable();
+                Memory updated = php.runtime.PhpArithmetic.increment(before, decrement, env, trace);
+                result[0] = post ? before : updated;
+                return updated;
+            }
+            @Override public Memory invokeTarget(ReferenceMemory target, Memory ignored) {
+                boolean shared = target.isSharedIncrementCell();
+                PropertyEntity declared = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
+                String key = declared != null && object.getProperties().getByScalar(declared.getSpecificName()) == target
+                        ? declared.getSpecificName() : property;
+                result[0] = php.runtime.PhpArithmetic.incrementReference(target, decrement, post, env, trace, value -> {
+                    if (!shared && object.getProperties().getByScalar(key) != target) {
+                        target.detachPropertySource();
+                        ReferenceMemory replacement;
+                        if (declared != null && key.equals(declared.getSpecificName())
+                                && object.getProperties() instanceof php.runtime.memory.PhpObjectProperties) {
+                            replacement = ((php.runtime.memory.PhpObjectProperties) object.getProperties()).republishDeclared(key, value);
+                        } else {
+                            object.getProperties().removeByScalar(key);
+                            replacement = object.getProperties().putAsKeyString(key, value);
+                        }
+                        if (declared != null && key.equals(declared.getSpecificName())) replacement.attachPropertySource(env, declared);
+                    }
+                });
+                return target.toValue();
+            }
+            @Override public Memory afterWarningFailure(ReferenceMemory target, Memory ignored) {
+                // A fresh writable fetch still commits, but does not issue further operator diagnostics.
+                Memory updated = decrement ? Memory.NULL : Memory.CONST_INT_1;
+                target.assign(updated); result[0] = post ? Memory.NULL : updated;
+                return updated;
+            }
+        }, callCache, cacheIndex);
+        return result[0];
     }
 
     public Memory concatProperty(Environment env, TraceInfo trace,
@@ -1098,6 +1471,95 @@ ClassReader classReader;
         }, callCache, cacheIndex);
     }
 
+    /** Check a real object-storage insertion, after magic dispatch and key normalization. */
+    public void checkDynamicPropertyCreation(Environment env, TraceInfo trace, ArrayMemory props, String storageKey) {
+        if (requiresDynamicPropertyNotice(env, trace, props, storageKey)) {
+            dynamicPropertyNotice(env, trace, storageKey);
+        }
+    }
+
+    /** Serialized declared static names are restored as instance slots without a creation notice. */
+    public void checkDynamicPropertyRestoration(Environment env, TraceInfo trace, ArrayMemory props, String storageKey) {
+        if (findStaticProperty(storageKey) == null) checkDynamicPropertyCreation(env, trace, props, storageKey);
+    }
+
+    private boolean usesModernPropertyPolicy(Environment env, TraceInfo trace) {
+        var caller = php.runtime.PhpPropertyWriteContext.current(env);
+        return hasPhp8Signatures() || env.getModuleManager().getPhpLanguageProfile(caller == null ? trace : caller.trace)
+                == PhpLanguageProfile.PHP_8_5;
+    }
+
+    private boolean requiresDynamicPropertyNotice(Environment env, TraceInfo trace, ArrayMemory props, String storageKey) {
+        if (props == null || props.getByScalar(storageKey) != null) return false;
+        if (!usesModernPropertyPolicy(env, trace)) return false;
+        String basename = dynamicPropertyLabel(storageKey);
+        for (ClassEntity owner = this; owner != null; owner = owner.parent) {
+            PropertyEntity property = owner.properties.get(basename);
+            if (property != null && !property.isStatic() && property.getSpecificName().equals(storageKey)) return false;
+        }
+        checkProhibitedDynamicProperty(env, trace, storageKey);
+        return !isInstanceOfAsciiName("stdClass");
+    }
+
+    private void checkProhibitedDynamicProperty(Environment env, TraceInfo trace, String storageKey) {
+        if (usesModernPropertyPolicy(env, trace) && (type == Type.CLOSURE || type == Type.GENERATOR
+                || isInstanceOfAsciiName("Closure") || isInstanceOfAsciiName("Generator"))) {
+            env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                    "Cannot create dynamic property %s::$%s", getName(), dynamicPropertyLabel(storageKey));
+        }
+    }
+
+    private static String dynamicPropertyLabel(String storageKey) {
+        if (storageKey.startsWith("\0")) {
+            int scopeEnd = storageKey.indexOf('\0', 1);
+            if (scopeEnd >= 0) return storageKey.substring(scopeEnd + 1);
+        }
+        return storageKey;
+    }
+
+    private void dynamicPropertyNotice(Environment env, TraceInfo trace, String storageKey) {
+        env.error(trace, ErrorType.E_DEPRECATED, "Creation of dynamic property %s::$%s is deprecated",
+                getName(), dynamicPropertyLabel(storageKey));
+    }
+
+    private Memory createDynamicProperty(Environment env, TraceInfo trace, ArrayMemory props, String storageKey,
+                                         Memory initial, boolean referencePreparation, SetterCallback operation) throws Throwable {
+        // Prohibitions must fail before mutation; a thrown deprecation handler has different semantics.
+        boolean notice = requiresDynamicPropertyNotice(env, trace, props, storageKey);
+        if (!notice && (operation == null || !usesModernPropertyPolicy(env, trace))) {
+            if (operation != null) initial = operation.invoke(Memory.NULL, initial);
+            if (usesModernPropertyPolicy(env, trace)) {
+                ReferenceMemory created = props.getByScalarOrCreate(storageKey, Memory.NULL);
+                return referencePreparation ? created : created.assign(initial);
+            }
+            return referencePreparation ? props.refOfIndex(storageKey) : props.refOfIndex(storageKey).assign(initial);
+        }
+        Throwable warningFailure = null;
+        try {
+            if (notice) dynamicPropertyNotice(env, trace, storageKey);
+            if (operation != null) env.error(trace, ErrorType.E_WARNING, Messages.ERR_UNDEFINED_PROPERTY, getName(), storageKey);
+        } catch (Throwable failure) {
+            warningFailure = failure;
+        }
+        ReferenceMemory created = props.getByScalar(storageKey);
+        if (warningFailure != null && created != null && operation != null && operation.incrementDecrement())
+            throw warningFailure;
+        if (created == null || !referencePreparation && operation == null) {
+            // A reentrant plain setter appends a second physical bucket. Older aliases and
+            // warmed property offsets keep the older bucket; a cold hash lookup sees this one.
+            created = created != null ? props.insertBucket(storageKey, initial)
+                    : props.putAsKeyString(storageKey, operation == null ? initial : Memory.NULL);
+        }
+        if (operation != null) {
+            // A failed compound operator leaves the newly created NULL slot in place.
+            initial = warningFailure != null && operation.incrementDecrement()
+                    ? operation.afterWarningFailure(created, initial) : operation.invokeTarget(created, initial);
+            if (!operation.assignsTarget()) created.assign(initial);
+        }
+        if (warningFailure != null) throw warningFailure;
+        return referencePreparation ? created : initial;
+    }
+
     public void appendProperty(IObject object, String property, Memory value) {
         object.getProperties().put(property, value);
     }
@@ -1113,22 +1575,15 @@ ClassReader classReader;
             throws Throwable {
         ReferenceMemory value;
 
-        PropertyEntity entity = callCache == null ? null : callCache.get(env, cacheIndex);
+        PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
 
-        if (entity == null) {
-            ClassEntity context = env.getLastClassOnStack();
-            entity = isInstanceOf(context) ? context.properties.get(property) : properties.get(property);
-
-            if (callCache != null && entity != null) {
-                callCache.put(env, cacheIndex, entity);
-            }
-        }
+        if (entity == null) checkProhibitedDynamicProperty(env, trace, property);
 
         if (entity == null) {
             PropertyEntity staticEntity = staticProperties.get(property);
             if (staticEntity != null) {
-                invalidAccessToProperty(env, trace, staticEntity, staticEntity.canAccess(env));
-                env.error(trace, ErrorType.E_STRICT,
+                errorInvalidPropertyAccess(env, trace, staticEntity, staticEntity.canAccess(env));
+                env.error(trace, usesModernPropertyPolicy(env, trace) ? ErrorType.E_NOTICE : ErrorType.E_STRICT,
                         Messages.ERR_ACCESSING_STATIC_PROPERTY_AS_NON_STATIC,
                         staticEntity.getClazz().getName(),
                         staticEntity.getName()
@@ -1160,7 +1615,8 @@ ClassReader classReader;
             }
         }
 
-        value = props == null || accessFlag != 0 ? null : props.getByScalar(entity == null ? property : entity.specificName);
+        value = props == null || accessFlag != 0 ? null : entity == null
+                ? findDynamicSlot(env, trace, props, property, callCache, cacheIndex) : props.getByScalar(entity.specificName);
 
         if (value == null) {
             boolean recursive = false;
@@ -1172,6 +1628,8 @@ ClassReader classReader;
             }
 
             if (methodMagicSet != null && !recursive) {
+                if (accessFlag != 0 && callback != null && methodMagicGet == null && usesModernPropertyPolicy(env, trace))
+                    errorInvalidPropertyAccess(env, trace, entity, accessFlag);
                 StringMemory memoryProperty = new StringMemory(property);
 
                 if (callback != null) {
@@ -1204,13 +1662,23 @@ ClassReader classReader;
                     env.popCall();
                 }
             } else {
+                if (accessFlag != 0 && usesModernPropertyPolicy(env, trace)) {
+                    // A getter-only compound reads and computes before its forbidden write.
+                    if (callback != null && methodMagicGet != null)
+                        memory = callback.invoke(getProperty(env, trace, object, property, callCache, cacheIndex), memory);
+                    errorInvalidPropertyAccess(env, trace, entity, accessFlag);
+                }
                 /*if (accessFlag != 0) {
-                    invalidAccessToProperty(env, trace, entity, accessFlag);
+                    errorInvalidPropertyAccess(env, trace, entity, accessFlag);
                     return Memory.NULL;
                 }*/
 
-                if (callback != null)
+                // Preserve the legacy callback/access ordering; modern creation owns its callback timing.
+                if (callback != null && !usesModernPropertyPolicy(env, trace)) {
+                    if (entity != null) entity.readInitialized(env, trace, null);
                     memory = callback.invoke(Memory.NULL, memory);
+                    callback = null;
+                }
 
                 String name = property;
                 if (entity != null) {
@@ -1218,12 +1686,12 @@ ClassReader classReader;
                         switch (accessFlag) {
                             case 2:
                                 if (object.getReflection().getId() == entity.getClazz().getId()) {
-                                    invalidAccessToProperty(env, trace, entity, accessFlag);
+                                    errorInvalidPropertyAccess(env, trace, entity, accessFlag);
                                     return Memory.NULL;
                                 }
                                 break;
                             case 1:
-                                invalidAccessToProperty(env, trace, entity, accessFlag);
+                                errorInvalidPropertyAccess(env, trace, entity, accessFlag);
                                 return Memory.NULL;
                         }
                     }
@@ -1241,13 +1709,25 @@ ClassReader classReader;
                     }
                 }
 
-                return props == null
-                        ? Memory.NULL
-                        : (entity == null ? props.refOfIndex(name).assign(memory) : entity.assignValue(env, trace, object, name, memory));
+                if (callback != null && methodMagicGet != null && usesModernPropertyPolicy(env, trace)) {
+                    memory = callback.invoke(getProperty(env, trace, object, property, callCache, cacheIndex), memory);
+                    callback = null;
+                }
+                if (props != null && (entity == null || usesModernPropertyPolicy(env, trace) && !name.equals(entity.getSpecificName()))) {
+                    return createDynamicProperty(env, trace, props, name, memory, false, callback);
+                }
+                if (callback != null) {
+                    if (entity != null) entity.readInitialized(env, trace, null);
+                    memory = callback.invoke(Memory.NULL, memory);
+                }
+                return props == null ? Memory.NULL : entity.assignValue(env, trace, object, name, memory);
             }
         } else {
-            if (callback != null)
-                memory = callback.invoke(value, memory);
+            if (callback != null) {
+                if (entity != null) entity.readInitialized(env,trace,value);
+                memory = callback.invokeTarget(value, memory);
+                if (callback.assignsTarget()) return memory;
+            }
 
             if (entity instanceof CompilePropertyEntity) {
                 return entity.assignValue(env, trace, object, property, memory);
@@ -1262,21 +1742,30 @@ ClassReader classReader;
                                 PropertyCallCache callCache, int index)
             throws Throwable {
         ClassEntity context = env.getLastClassOnStack();
-        PropertyEntity entity = isInstanceOf(context) ? context.properties.get(property) : properties.get(property);
+        PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, index);
 
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
 
         if (entity == null) {
             PropertyEntity staticEntity = staticProperties.get(property);
             if (staticEntity != null) {
-                invalidAccessToProperty(env, trace, staticEntity, staticEntity.canAccess(env));
+                errorInvalidPropertyAccess(env, trace, staticEntity, staticEntity.canAccess(env));
             }
         }
 
         ArrayMemory props = object.getProperties();
-        if (props == null
-                || accessFlag != 0
-                || props.removeByScalar(entity == null ? property : entity.specificName) == null) {
+        Memory removed=null;
+        if (props != null && accessFlag == 0) {
+            if (entity != null && usesModernPropertyPolicy(env, trace)
+                    && props instanceof php.runtime.memory.PhpObjectProperties) {
+                ((php.runtime.memory.PhpObjectProperties) props).declare(entity);
+                if (((php.runtime.memory.PhpObjectProperties) props).unsetDeclared(entity.specificName)) removed = Memory.TRUE;
+            } else {
+                removed=props.removeByScalar(entity == null ? property : entity.specificName);
+                if (removed instanceof ReferenceMemory) ((ReferenceMemory)removed).detachPropertySource();
+            }
+        }
+        if (props == null || accessFlag != 0 || removed == null) {
             if (methodMagicUnset != null) {
                 if (context != null && context.getId() == methodMagicUnset.getClazz().getId()) {
                     if (env.peekCall(0).flags == FLAG_UNSET) {
@@ -1299,7 +1788,7 @@ ClassReader classReader;
         }
 
         if (accessFlag != 0)
-            invalidAccessToProperty(env, trace, entity, accessFlag);
+            errorInvalidPropertyAccess(env, trace, entity, accessFlag);
 
         entity = staticProperties.get(property);
         if (entity != null) {
@@ -1316,16 +1805,18 @@ ClassReader classReader;
     public Memory emptyProperty(Environment env, TraceInfo trace, IObject object, String property)
             throws Throwable {
         ClassEntity contex = env.getLastClassOnStack();
-        PropertyEntity entity = isInstanceOf(contex) ? contex.properties.get(property) : properties.get(property);
+        PropertyEntity entity = findCachedInstanceProperty(env, trace, property, null, 0);
 
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
 
         ArrayMemory props = object.getProperties();
         if (props != null && accessFlag == 0) {
-            Memory tmp = entity == null ? props.getByScalar(property) : entity.getValue(env, trace, object);
+            Memory tmp = entity == null ? props.getByScalar(property) : getInstanceValue(env, trace, object, entity);
             if (tmp != null) {
                 return tmp.toBoolean() ? Memory.TRUE : Memory.NULL;
-            } else
+            } else if (!usesModernPropertyPolicy(env, trace)
+                    && (!(props instanceof php.runtime.memory.PhpObjectProperties)
+                    || !((php.runtime.memory.PhpObjectProperties) props).hasUnsetAnchors()))
                 return Memory.NULL;
         }
 
@@ -1349,6 +1840,8 @@ ClassReader classReader;
             } finally {
                 env.popCall();
             }
+            if (result.toBoolean() && methodMagicGet != null && usesModernPropertyPolicy(env, trace))
+                return getProperty(env, trace, object, property, null, 0).toBoolean() ? Memory.TRUE : Memory.NULL;
             return result;
         }
         return Memory.NULL;
@@ -1357,16 +1850,7 @@ ClassReader classReader;
     public Memory issetProperty(Environment env, TraceInfo trace, IObject object, String property,
                                 PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
-        PropertyEntity entity = callCache == null || env instanceof ConcurrentEnvironment ? null : callCache.get(env, cacheIndex);
-
-        if (entity == null) {
-            ClassEntity contex = env.getLastClassOnStack();
-            entity = isInstanceOf(contex) ? contex.properties.get(property) : properties.get(property);
-
-            if (entity != null && callCache != null) {
-                callCache.put(env, cacheIndex, entity);
-            }
-        }
+        PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
 
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
 
@@ -1374,39 +1858,41 @@ ClassReader classReader;
         Memory tmp = null;
 
         if (props != null && accessFlag == 0) {
-            tmp = entity == null ? props.getByScalar(property) : entity.getValue(env, trace, object);
+            tmp = entity == null ? props.getByScalar(property) : getInstanceValue(env, trace, object, entity);
         }
 
         if (tmp != null) {
             return tmp.isNull() ? tmp : Memory.TRUE;
         }
 
-        if (methodMagicIsset != null) {
-            Memory result;
-
-            ClassEntity context = env.getLastClassOnStack();
-
-            if (context != null && context.getId() == methodMagicIsset.getClazz().getId())
-                if (env.peekCall(0).flags == FLAG_ISSET) {
-                    return object.getProperties().getByScalar(property) != null ? Memory.TRUE : Memory.NULL;
-                }
-
-            try {
-                Memory[] args = new Memory[]{ new StringMemory(property) };
-
-                env.pushCall(trace, object, args, methodMagicIsset.getName(), methodMagicIsset.getClazz().getName(), name);
-                env.peekCall(0).flags = FLAG_ISSET;
-
-                args = InvokeArgumentHelper.checkType(env, trace, methodMagicIsset, args);
-                result = methodMagicIsset.invokeDynamic(object, env, trace, args)
-                        .toBoolean() ? Memory.TRUE : Memory.NULL;
-            } finally {
-                env.popCall();
-            }
-            return result;
-        }
+        if (methodMagicIsset != null) return invokeMagicIsset(env, trace, object, property);
 
         return Memory.NULL;
+    }
+
+    private Memory invokeMagicIsset(Environment env, TraceInfo trace, IObject object, String property) throws Throwable {
+        Memory result;
+
+        ClassEntity context = env.getLastClassOnStack();
+
+        if (context != null && context.getId() == methodMagicIsset.getClazz().getId())
+            if (env.peekCall(0).flags == FLAG_ISSET) {
+                return object.getProperties().getByScalar(property) != null ? Memory.TRUE : Memory.NULL;
+            }
+
+        try {
+            Memory[] args = new Memory[]{ new StringMemory(property) };
+
+            env.pushCall(trace, object, args, methodMagicIsset.getName(), methodMagicIsset.getClazz().getName(), name);
+            env.peekCall(0).flags = FLAG_ISSET;
+
+            args = InvokeArgumentHelper.checkType(env, trace, methodMagicIsset, args);
+            result = methodMagicIsset.invokeDynamic(object, env, trace, args)
+                    .toBoolean() ? Memory.TRUE : Memory.NULL;
+        } finally {
+            env.popCall();
+        }
+        return result;
     }
 
     public Memory getStaticProperty(Environment env, TraceInfo trace, String property, boolean errorIfNotExists,
@@ -1435,11 +1921,13 @@ ClassReader classReader;
         if (checkAccess) {
             int accessFlag = entity.canAccess(env, lateStaticCall ? context : null);
             if (accessFlag != 0) {
-                invalidAccessToProperty(env, trace, entity, accessFlag);
+                if (!errorIfNotExists && usesModernPropertyPolicy(env, trace)) return Memory.NULL;
+                errorInvalidPropertyAccess(env, trace, entity, accessFlag);
                 return Memory.NULL;
             }
         }
 
+        initializeRuntimeState(env);
         return entity.getStaticValue(env, trace);
     }
 
@@ -1448,22 +1936,15 @@ ClassReader classReader;
             throws Throwable {
         Memory value;
 
-        PropertyEntity entity = callCache == null || env instanceof ConcurrentEnvironment ? null : callCache.get(env, cacheIndex);
+        PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
 
-        if (entity == null) {
-            ClassEntity context = env.getLastClassOnStack();
-            entity = isInstanceOf(context) ? context.properties.get(property) : properties.get(property);
-
-            if (callCache != null) {
-                callCache.put(env, cacheIndex, entity);
-            }
-        }
+        if (entity == null) checkProhibitedDynamicProperty(env, trace, property);
 
         if (entity == null) {
             PropertyEntity staticEntity = staticProperties.get(property);
             if (staticEntity != null) {
-                invalidAccessToProperty(env, trace, staticEntity, staticEntity.canAccess(env));
-                env.error(trace, ErrorType.E_STRICT,
+                errorInvalidPropertyAccess(env, trace, staticEntity, staticEntity.canAccess(env));
+                env.error(trace, usesModernPropertyPolicy(env, trace) ? ErrorType.E_NOTICE : ErrorType.E_STRICT,
                         Messages.ERR_ACCESSING_STATIC_PROPERTY_AS_NON_STATIC,
                         staticEntity.getClazz().getName(),
                         staticEntity.getName()
@@ -1474,22 +1955,40 @@ ClassReader classReader;
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
 
         ArrayMemory props = object.getProperties();
-        value = props == null || accessFlag != 0 ? null : props.getByScalar(entity == null ? property : entity.specificName);
+        value = props == null || accessFlag != 0 ? null : entity == null
+                ? findDynamicSlot(env, trace, props, property, callCache, cacheIndex) : props.getByScalar(entity.specificName);
 
-        if (accessFlag != 0) {
-            invalidAccessToProperty(env, trace, entity, accessFlag);
+        if (accessFlag != 0 && (methodMagicGet == null
+                || !usesModernPropertyPolicy(env, trace))) {
+            errorInvalidPropertyAccess(env, trace, entity, accessFlag);
         }
+        if (value instanceof ReferenceMemory && entity != null)
+            ((ReferenceMemory)value).attachPropertySource(env, entity);
 
         if (value == null) {
             if (methodMagicGet != null) {
-                Memory altResult = getProperty(env, trace, object, property, callCache, cacheIndex);
+                Memory altResult = getProperty(env, trace, object, property, callCache, cacheIndex, true);
 
+                if (methodMagicGet.isReturnReference() && altResult.isReference()
+                        && usesModernPropertyPolicy(env, trace))
+                    return altResult;
                 if (altResult.isObject()) {
                     return altResult;
                 }
+                if (usesModernPropertyPolicy(env, trace)) {
+                    if (entity == null || accessFlag != 0 || entity.getDeclaredType() == null)
+                        env.error(trace, ErrorType.E_NOTICE, Messages.ERR_INDIRECT_MODIFICATION_OVERLOADED_PROPERTY, name, property);
+                    return new ReferenceMemory(altResult.toImmutable());
+                }
             }
 
-            value = props == null ? new ReferenceMemory() : object.getProperties().refOfIndex(property);
+            value = props == null ? new ReferenceMemory() : entity == null
+                    ? createDynamicProperty(env, trace, props, property, Memory.NULL, true, null)
+                    : props.refOfIndex(entity.getSpecificName());
+            if (entity != null && entity.getDeclaredType() != null && value instanceof ReferenceMemory) {
+                ((ReferenceMemory)value).unset();
+                ((ReferenceMemory)value).attachPropertySource(env, entity);
+            }
 
             if (methodMagicGet != null || methodMagicSet != null) {
                 env.error(trace,
@@ -1502,27 +2001,45 @@ ClassReader classReader;
     }
 
     public Memory getProperty(Environment env, TraceInfo trace, IObject object, String property,
-                              PropertyCallCache callCache, int cacheIndex)
-            throws Throwable {
+                              PropertyCallCache callCache, int cacheIndex) throws Throwable {
+        return getProperty(env,trace,object,property,callCache,cacheIndex,false);
+    }
+
+    /** Quiet read used by coalescing; unlike isset, a getter without __isset may supply a value. */
+    public Memory getQuietProperty(Environment env, TraceInfo trace, IObject object, String property,
+                                   PropertyCallCache callCache, int cacheIndex) throws Throwable {
+        if (!usesModernPropertyPolicy(env, trace))
+            return issetProperty(env, trace, object, property, callCache, cacheIndex).isNull() ? Memory.NULL
+                    : getProperty(env, trace, object, property, callCache, cacheIndex);
+        return getProperty(env, trace, object, property, callCache, cacheIndex, false, null, true);
+    }
+
+    public Memory getReflectedProperty(Environment env, TraceInfo trace, IObject object, PropertyEntity property) throws Throwable {
+        return getProperty(env, trace, object, property.getName(), null, 0, false, property);
+    }
+
+    private Memory getProperty(Environment env, TraceInfo trace, IObject object, String property,
+                               PropertyCallCache callCache, int cacheIndex, boolean referenceRead) throws Throwable {
+        return getProperty(env, trace, object, property, callCache, cacheIndex, referenceRead, null);
+    }
+
+    private Memory getProperty(Environment env, TraceInfo trace, IObject object, String property,
+                               PropertyCallCache callCache, int cacheIndex, boolean referenceRead, PropertyEntity reflected) throws Throwable {
+        return getProperty(env, trace, object, property, callCache, cacheIndex, referenceRead, reflected, false);
+    }
+
+    private Memory getProperty(Environment env, TraceInfo trace, IObject object, String property,
+                               PropertyCallCache callCache, int cacheIndex, boolean referenceRead, PropertyEntity reflected, boolean quietRead) throws Throwable {
         Memory value;
 
-        PropertyEntity entity = callCache == null || env instanceof ConcurrentEnvironment ? null : callCache.get(env, cacheIndex);
-
-        if (entity == null) {
-            ClassEntity context = env.getLastClassOnStack();
-            entity = isInstanceOf(context) ? context.properties.get(property) : properties.get(property);
-
-            if (callCache != null && entity != null) {
-                callCache.put(env, cacheIndex, entity);
-            }
-        }
+        PropertyEntity entity = reflected == null ? findCachedInstanceProperty(env, trace, property, callCache, cacheIndex) : reflected;
 
         if (entity == null) {
             PropertyEntity staticEntity = staticProperties.get(property);
 
-            if (staticEntity != null) {
-                invalidAccessToProperty(env, trace, staticEntity, staticEntity.canAccess(env));
-                env.error(trace, ErrorType.E_STRICT,
+            if (staticEntity != null && !quietRead) {
+                errorInvalidPropertyAccess(env, trace, staticEntity, staticEntity.canAccess(env));
+                env.error(trace, usesModernPropertyPolicy(env, trace) ? ErrorType.E_NOTICE : ErrorType.E_STRICT,
                         Messages.ERR_ACCESSING_STATIC_PROPERTY_AS_NON_STATIC,
                         staticEntity.getClazz().getName(),
                         staticEntity.getName()
@@ -1530,21 +2047,27 @@ ClassReader classReader;
             }
         }
 
-        int accessFlag = entity == null ? 0 : entity.canAccess(env);
+        int accessFlag = reflected != null || entity == null ? 0 : entity.canAccess(env);
 
         if (entity != null && accessFlag != 0) {
             value = null;
         } else {
             if (entity != null) {
-                value = entity.getValue(env, trace, object);
+                value = getInstanceValue(env, trace, object, entity);
             } else {
                 ArrayMemory props = object.getProperties();
-                value = props == null ? null : props.getByScalar(property);
+                value = findDynamicSlot(env, trace, props, property, callCache, cacheIndex);
             }
         }
 
-        if (value != null)
+        if (value != null) {
+            if (quietRead && value.isUndefined()) return Memory.NULL;
+            if (entity != null) entity.readInitialized(env, trace, value);
             return value;
+        }
+
+        if (quietRead && methodMagicIsset != null && invokeMagicIsset(env, trace, object, property).isNull())
+            return Memory.NULL;
 
         if (methodMagicGet != null) {
             Memory result;
@@ -1553,7 +2076,8 @@ ClassReader classReader;
 
             if (context != null && context.getId() == methodMagicGet.getClazz().getId()) {
                 if (env.peekCall(0).flags == FLAG_GET) {
-                    env.error(trace, ErrorType.E_NOTICE, Messages.ERR_UNDEFINED_PROPERTY, name, property);
+                    if (!quietRead) env.error(trace, usesModernPropertyPolicy(env, trace) ? ErrorType.E_WARNING : ErrorType.E_NOTICE,
+                            Messages.ERR_UNDEFINED_PROPERTY, getName(), property);
                     return Memory.NULL;
                 }
             }
@@ -1565,16 +2089,37 @@ ClassReader classReader;
 
                 InvokeArgumentHelper.checkType(env, trace, methodMagicGet, args);
                 result = methodMagicGet.invokeDynamic(object, env, trace, args);
+                if (entity != null && accessFlag == 0 && entity.getDeclaredType() != null) {
+                    if (referenceRead && !methodMagicGet.isReturnReference())
+                        env.error(trace,ErrorType.E_NOTICE,Messages.ERR_INDIRECT_MODIFICATION_OVERLOADED_PROPERTY,name,property);
+                    var module=methodMagicGet.getClazz().getModule();
+                    var writeContext=php.runtime.PhpPropertyWriteContext.enter(env,trace,module != null && module.isStrictTypes());
+                    try {
+                        var source=new php.runtime.memory.helper.PhpPropertyGuard.Source(env,entity);
+                        Memory checked=source.rawCoerce(result.toValue());
+                        if (checked == null) env.exception(trace,php.runtime.lang.exception.BaseTypeError.class,
+                                "Value of type %s returned from %s::__get() must be compatible with unset property %s of type %s",
+                                php.runtime.reflection.support.PhpTypeDeclaration.valueType(result),methodMagicGet.getClazz().getName(),
+                                source.label(),source.type().getErrorSignature());
+                        if (methodMagicGet.isReturnReference() && result instanceof ReferenceMemory) {
+                            checked=((ReferenceMemory)result).checkPropertyReference(env,entity);
+                            result.assign(checked);
+                        } else result=source.finishCoercion(result.toValue(),checked);
+                    } finally {php.runtime.PhpPropertyWriteContext.leave(writeContext);}
+                }
             } finally {
                 env.popCall();
             }
             return result;
         }
 
+        if (quietRead) return Memory.NULL;
         if (accessFlag != 0)
-            invalidAccessToProperty(env, trace, entity, accessFlag);
+            errorInvalidPropertyAccess(env, trace, entity, accessFlag);
 
-        env.error(trace, ErrorType.E_NOTICE, Messages.ERR_UNDEFINED_PROPERTY, name, property);
+        if (entity != null && entity.getDeclaredType() != null) entity.readInitialized(env, trace, null);
+        env.error(trace, usesModernPropertyPolicy(env, trace) ? ErrorType.E_WARNING : ErrorType.E_NOTICE,
+                Messages.ERR_UNDEFINED_PROPERTY, getName(), property);
         return Memory.NULL;
     }
 
@@ -1586,8 +2131,60 @@ ClassReader classReader;
         object.getProperties().put(prop.specificName, value == null ? Memory.NULL : value);
     }
 
+    private Memory getInstanceValue(Environment env, TraceInfo trace, IObject object, PropertyEntity property) throws Throwable {
+        ArrayMemory props = object.getProperties();
+        if (props instanceof php.runtime.memory.PhpObjectProperties
+                && ((php.runtime.memory.PhpObjectProperties) props).isExplicitlyUnset(property.getSpecificName())) return null;
+        return property.getValue(env, trace, object);
+    }
+
+    private ReferenceMemory findDynamicSlot(Environment env, TraceInfo trace, ArrayMemory props, String name,
+                                             PropertyCallCache cache, int index) {
+        if (props == null) return null;
+        boolean cacheable = cache != null && !(env instanceof ConcurrentEnvironment)
+                && usesModernPropertyPolicy(env, trace);
+        if (cacheable) props.enableBucketLayout();
+        ClassEntity scope = env.getLastClassOnStack();
+        if (cacheable) {
+            int ordinal = cache.getDynamicOffset(env, index, this, scope, name);
+            ReferenceMemory cell = props.bucketAt(ordinal);
+            if (cell != null && name.equals(props.bucketKey(ordinal))) return cell;
+        }
+        ReferenceMemory cell = props.getByScalar(name);
+        if (cacheable && cell != null) cache.putDynamicOffset(env, index, this, scope, name, props.bucketOrdinal(cell));
+        return cell;
+    }
+
+    private PropertyEntity findCachedInstanceProperty(Environment env, TraceInfo trace, String property, PropertyCallCache callCache, int cacheIndex) {
+        ClassEntity context = env.getLastClassOnStack();
+        boolean cacheable = callCache != null && !(env instanceof ConcurrentEnvironment);
+        boolean modern = usesModernPropertyPolicy(env, trace);
+        PropertyEntity entity = cacheable ? callCache.get(env, cacheIndex, this, context) : null;
+        if (entity != null && (!entity.getName().equals(property) || modern && isHiddenInheritedPrivate(entity, context)))
+            entity = null;
+        if (entity == null) {
+            entity = isInstanceOf(context) ? context.properties.get(property) : properties.get(property);
+            if (modern && isHiddenInheritedPrivate(entity, context)) {
+                // A parent's private slot is separate from the child's plain dynamic slot.
+                // The declaring scope still resolves its private slot, including through a child.
+                entity = properties.get(property);
+                if (isHiddenInheritedPrivate(entity, context)) entity = null;
+            }
+            if (cacheable && entity != null) callCache.put(env, cacheIndex, entity, this, context);
+        }
+        return entity;
+    }
+
+    private boolean isHiddenInheritedPrivate(PropertyEntity entity, ClassEntity context) {
+        return entity != null && entity.isPrivate() && entity.getClazz() != this && entity.getClazz() != context;
+    }
+
     private static interface SetterCallback {
         Memory invoke(Memory o1, Memory o2);
+        default Memory invokeTarget(ReferenceMemory target, Memory right) { return invoke(target, right); }
+        default boolean assignsTarget() { return false; }
+        default boolean incrementDecrement() { return false; }
+        default Memory afterWarningFailure(ReferenceMemory target, Memory right) { return invokeTarget(target, right); }
     }
 
     @Override
@@ -1612,7 +2209,7 @@ ClassReader classReader;
 
 
     public static class InvalidConstant {
-        public enum Kind { INVALID_OVERRIDE, MUST_BE_PUBLIC, MUST_BE_PUBLIC_FOR_INTERFACE, MUST_BE_PROTECTED }
+        public enum Kind { INVALID_OVERRIDE, MUST_BE_PUBLIC, MUST_BE_PUBLIC_FOR_INTERFACE, MUST_BE_PROTECTED, FINAL, PRIVATE_FINAL, AMBIGUOUS }
 
         public final Kind kind;
         public final ConstantEntity constant;
@@ -1624,6 +2221,10 @@ ClassReader classReader;
             this.constant = constant;
             this.errorType = errorType;
             this.prototype = prototype;
+        }
+
+        public static InvalidConstant compile(Kind kind, ConstantEntity constant, ConstantEntity prototype) {
+            return new InvalidConstant(kind, constant, prototype, ErrorType.E_COMPILE_ERROR);
         }
 
         public static InvalidConstant error(Kind kind, ConstantEntity constant, ConstantEntity prototype) {
@@ -1937,6 +2538,19 @@ ClassReader classReader;
                     ErrorException e = null;
 
                     switch (el.kind) {
+                        case FINAL:
+                            e = new FatalException(el.constant.getClazz().getName() + "::" + el.constant.getName()
+                                    + " cannot override final constant " + el.prototype.getClazz().getName() + "::" + el.prototype.getName(), getTrace());
+                            break;
+                        case PRIVATE_FINAL:
+                            e = new FatalException("Private constant " + el.constant.getClazz().getName() + "::" + el.constant.getName()
+                                    + " cannot be final as it is not visible to other classes", getTrace());
+                            break;
+                        case AMBIGUOUS:
+                            e = new FatalException((isInterface() ? "Interface " : "Class ") + getName() + " inherits both "
+                                    + el.constant.getClazz().getName() + "::" + el.constant.getName() + " and "
+                                    + el.prototype.getClazz().getName() + "::" + el.prototype.getName() + ", which is ambiguous", getTrace());
+                            break;
                         case INVALID_OVERRIDE:
                             e = new FatalException(Messages.ERR_CANNOT_INHERIT_OVERRIDE_CONSTANT.fetch(
                                             el.constant.getName(), el.prototype.getClazz().getName()
@@ -1947,7 +2561,7 @@ ClassReader classReader;
                             e = new FatalException(Messages.ERR_ACCESS_LEVEL_CONSTANT_MUST_BE_PUBLIC.fetch(
                                     el.constant.getClazz().getName(),
                                     el.constant.getName(), el.prototype.getClazz().getName()
-                            ), getTrace());
+                            ).replace("(as in class ", el.prototype.getClazz().isInterface() ? "(as in interface " : "(as in class "), getTrace());
                             break;
 
                         case MUST_BE_PUBLIC_FOR_INTERFACE:
@@ -1961,7 +2575,7 @@ ClassReader classReader;
                             e = new FatalException(Messages.ERR_ACCESS_LEVEL_CONSTANT_MUST_BE_PROTECTED.fetch(
                                     el.constant.getClazz().getName(),
                                     el.constant.getName(), el.prototype.getClazz().getName()
-                            ), getTrace());
+                            ) + (hasPhp8Signatures() ? " or weaker" : ""), getTrace());
                             break;
                     }
 

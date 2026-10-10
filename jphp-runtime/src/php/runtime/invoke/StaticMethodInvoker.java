@@ -56,7 +56,10 @@ public class StaticMethodInvoker extends Invoker {
 
     @Override
     protected Memory invoke(Memory... args) throws Throwable {
-        return InvokeHelper.callStatic(env, trace == null ? TraceInfo.UNKNOWN : trace, method, null, args, false);
+        TraceInfo callTrace = trace == null ? TraceInfo.UNKNOWN : trace;
+        String staticClass = env.getModuleManager().getPhpLanguageProfile(callTrace)
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5 ? calledClass : null;
+        return InvokeHelper.callStatic(env, callTrace, method, staticClass, args, false);
     }
 
     @Override

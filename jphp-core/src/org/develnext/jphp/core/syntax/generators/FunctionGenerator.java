@@ -6,6 +6,7 @@ import org.develnext.jphp.core.tokenizer.token.expr.operator.ArgumentUnpackExprT
 import org.develnext.jphp.core.tokenizer.token.expr.operator.ValueIfElseToken;
 import org.develnext.jphp.core.tokenizer.token.expr.value.*;
 import php.runtime.common.HintType;
+import php.runtime.common.PhpLanguageProfile;
 import org.develnext.jphp.core.syntax.SyntaxAnalyzer;
 import org.develnext.jphp.core.syntax.generators.manually.BodyGenerator;
 import org.develnext.jphp.core.syntax.generators.manually.SimpleExprGenerator;
@@ -23,6 +24,22 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
 
     public FunctionGenerator(SyntaxAnalyzer analyzer) {
         super(analyzer);
+    }
+
+    private boolean isPhp8() {
+        return analyzer.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+    }
+
+    private HintType legacyHint(String word) {
+        if (word.equals("never") || word.equals("parent") || word.equals("static")) return null;
+        return jphp_scalarTypeHints.contains(word) ? null : HintType.of(word);
+    }
+
+    private NameToken parentType(Token token) {
+        if (analyzer.getClazz() == null || analyzer.getClazz().getExtend() == null) {
+            unexpectedToken(token, "parent requires a class with a parent");
+        }
+        return analyzer.getClazz().getExtend().getName();
     }
 
     protected final static Set<String> scalarTypeHints = new HashSet<String>(){{
@@ -68,6 +85,29 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
         NameToken hintTypeClass = null;
         HintType hintType = null;
         boolean optional = false;
+        php.runtime.reflection.support.PhpTypeDeclaration declaredType = null;
+        if (isPhp8() && !(next instanceof VariableExprToken) && !(next instanceof AmpersandRefToken)
+                && !(next instanceof ArgumentUnpackExprToken)) {
+            List<Token> prefix = new ArrayList<>();
+            while (!(next instanceof VariableExprToken) && !(next instanceof ArgumentUnpackExprToken)) {
+                if (next instanceof AmpersandRefToken) {
+                    Token following = nextTokenAndPrev(iterator);
+                    if (following instanceof VariableExprToken || following instanceof ArgumentUnpackExprToken) break;
+                }
+                prefix.add(next); next = nextToken(iterator);
+            }
+            declaredType = PhpTypeDeclarationParser.parseFunction(analyzer, prefix, false);
+            optional = declaredType.allowsNull();
+            String named = declaredType.getNamedType();
+            if (named != null && !Set.of("null", "true", "false").contains(named)) {
+                hintType = HintType.of(named);
+                if (hintType == null || !php.runtime.reflection.support.PhpTypeDeclaration.BUILTINS.contains(named)
+                        && !Set.of("self", "parent").contains(named)) {
+                    hintType = null; hintTypeClass = NameToken.valueOf(named);
+                }
+                declaredType = null;
+            }
+        }
 
         if (next instanceof ValueIfElseToken) {
             optional = true;
@@ -75,11 +115,11 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
         }
 
         if (next instanceof SelfExprToken) {
-            if (analyzer.getClazz() == null) {
+            if (analyzer.getClazz() == null && !(isPhp8() && analyzer.peekClosure() != null)) {
                 unexpectedToken(next);
             }
 
-            if ( !analyzer.getClazz().isTrait() ) {
+            if (analyzer.getClazz() != null && !analyzer.getClazz().isTrait() && !(isPhp8() && analyzer.peekClosure() != null)) {
                 next = analyzer.getClazz().getName();
                 hintTypeClass = analyzer.getRealName((NameToken) next);
             } else {
@@ -87,14 +127,29 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
             }
 
             next = nextToken(iterator);
+        } else if (isPhp8() && next instanceof ParentExprToken) {
+            if (analyzer.peekClosure() != null || analyzer.getClazz() != null && analyzer.getClazz().isTrait()) {
+                hintType = HintType.PARENT;
+            }
+            else hintTypeClass = parentType(next);
+            next = nextToken(iterator);
         } else if (next instanceof NameToken){
-            String word = ((NameToken) next).getName().toLowerCase();
-            if (scalarTypeHints.contains(word)) {
+            String word = ((NameToken) next).getName().toLowerCase(Locale.ROOT);
+            if (isPhp8() && word.equals("never")) unexpectedToken(next, "never is a return-only type");
+            if (word.equals("mixed")) {
+                if (isPhp8()) {
+                    if (optional) unexpectedToken(next, "mixed cannot be nullable");
+                    hintType = HintType.MIXED;
+                    optional = true;
+                } else {
+                    hintTypeClass = analyzer.getRealName((NameToken) next);
+                }
+            } else if (scalarTypeHints.contains(word)) {
                 hintType = HintType.of(word);
             } else if (disallowScalarTypeHints.contains(word)) {
                 unexpectedToken(next, "valid type");
             } else {
-                hintType = jphp_scalarTypeHints.contains(word) ? null : HintType.of(word);
+                hintType = isPhp8() ? null : legacyHint(word);
 
                 if (hintType == null)
                     hintTypeClass = analyzer.getRealName((NameToken)next);
@@ -142,6 +197,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
 
         ArgumentStmtToken argument = new ArgumentStmtToken(variable.getMeta());
         argument.setName(variable);
+        argument.setDeclaredType(declaredType);
         argument.setHintType(hintType);
         argument.setHintTypeClass(hintTypeClass);
         argument.setReference(isReference);
@@ -173,6 +229,24 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
         if (token instanceof ColonToken) {
             nextToken(iterator);
             Token next = nextToken(iterator);
+            if (isPhp8()) {
+                List<Token> prefix = new ArrayList<>();
+                while (!isOpenedBrace(next, BraceExprToken.Kind.BLOCK) && !(next instanceof SemicolonToken)
+                        && !next.getWord().equals("=>")) {
+                    prefix.add(next); next = nextToken(iterator);
+                }
+                iterator.previous();
+                var declaration = PhpTypeDeclarationParser.parseFunction(analyzer, prefix, true);
+                result.setReturnOptional(declaration.allowsNull());
+                String named = declaration.getNamedType();
+                if (named != null && !Set.of("null", "true", "false").contains(named)) {
+                    HintType hint = HintType.of(named);
+                    if (hint != null && (php.runtime.reflection.support.PhpTypeDeclaration.BUILTINS.contains(named)
+                            || Set.of("self", "parent", "static").contains(named))) result.setReturnHintType(hint);
+                    else result.setReturnHintTypeClass(NameToken.valueOf(named));
+                } else result.setDeclaredReturnType(declaration);
+                return;
+            }
 
             if (next instanceof ValueIfElseToken) {
                 result.setReturnOptional(true);
@@ -184,9 +258,10 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
 
             if (next instanceof SelfExprToken) {
                 if (analyzer.getClazz() == null) {
+                    if (isPhp8() && analyzer.peekClosure() == null) unexpectedToken(next, "self requires class scope");
                     result.setReturnHintType(HintType.SELF);
                 } else {
-                    if (analyzer.getClazz().isTrait()) {
+                    if (analyzer.getClazz().isTrait() || (isPhp8() && analyzer.peekClosure() != null)) {
                         result.setReturnHintType(HintType.SELF);
                     } else {
                         result.setReturnHintTypeClass(new FulledNameToken(next.getMeta(), new ArrayList<Token>() {{
@@ -198,12 +273,32 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                         }}));
                     }
                 }
+            } else if (isPhp8() && next instanceof ParentExprToken) {
+                if (analyzer.peekClosure() != null || analyzer.getClazz() != null && analyzer.getClazz().isTrait()) {
+                    result.setReturnHintType(HintType.PARENT);
+                }
+                else result.setReturnHintTypeClass(parentType(next));
+            } else if (isPhp8() && next instanceof StaticExprToken) {
+                if (analyzer.getClazz() == null && analyzer.peekClosure() == null) unexpectedToken(next, "static requires class scope");
+                result.setReturnHintType(HintType.STATIC);
             } else if (next instanceof NameToken){
-                String word = ((NameToken) next).getName().toLowerCase();
-                if (scalarTypeHints.contains(word)) {
+                String word = ((NameToken) next).getName().toLowerCase(Locale.ROOT);
+                if (word.equals("mixed")) {
+                    if (isPhp8()) {
+                        if (result.isReturnOptional()) unexpectedToken(next, "mixed cannot be nullable");
+                        hintType = HintType.MIXED;
+                        result.setReturnOptional(true);
+                    } else {
+                        hintType = null;
+                        hintTypeClass = analyzer.getRealName((NameToken) next);
+                    }
+                } else if (isPhp8() && word.equals("never")) {
+                    if (result.isReturnOptional()) unexpectedToken(next, "never cannot be nullable");
+                    hintType = HintType.NEVER;
+                } else if (scalarTypeHints.contains(word) || word.equals("void")) {
                     hintType = HintType.of(word);
                 } else {
-                    hintType = jphp_scalarTypeHints.contains(word) ? null : HintType.of(word);
+                    hintType = isPhp8() ? null : legacyHint(word);
 
                     if (hintType == null) {
                         hintTypeClass = analyzer.getRealName((NameToken) next);
@@ -212,6 +307,9 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
 
                 result.setReturnHintType(hintType);
                 result.setReturnHintTypeClass(hintTypeClass);
+                if (isPhp8() && hintType == HintType.VOID && result.isReturnOptional()) {
+                    unexpectedToken(next, "void cannot be nullable");
+                }
             } else {
                 unexpectedToken(next, "name");
             }
@@ -322,6 +420,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
 
                 analyzer.addScope(true);
                 FunctionStmtToken oldFunction = analyzer.getFunction();
+                FunctionStmtToken oldAbsoluteFunction = analyzer.getFunction(true);
                 analyzer.setFunction(result);
 
                 BraceExprToken brace = nextAndExpected(iterator, BraceExprToken.class);
@@ -332,8 +431,21 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                 result.setName((NameToken) next);
                 result.setDocComment(commentToken);
 
-                processArguments(result, iterator);
-                processBody(result, iterator);
+                ClassStmtToken oldClass = analyzer.getClazz();
+                boolean nestedGlobal = isPhp8() && oldFunction != null;
+                List<FunctionStmtToken> outerClosures = new ArrayList<>();
+                if (nestedGlobal) {
+                    while (analyzer.peekClosure() != null) outerClosures.add(analyzer.popClosure());
+                }
+                if (nestedGlobal) analyzer.setClazz(null);
+                try {
+                    processArguments(result, iterator);
+                    processBody(result, iterator);
+                } finally {
+                    if (nestedGlobal) analyzer.setClazz(oldClass);
+                    for (int i = outerClosures.size() - 1; i >= 0; i--) analyzer.pushClosure(outerClosures.get(i));
+                    if (isPhp8()) analyzer.setFunction(oldAbsoluteFunction);
+                }
 
                 result.setTypeInfo(analyzer.getScope().getTypeInfo());
                 result.setLabels(analyzer.getScope().getLabels());
@@ -344,7 +456,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                 result.getMeta().setEndPosition(previous.getMeta().getStartPosition());
                 iterator.next();
 
-                analyzer.setFunction(oldFunction);
+                if (!isPhp8()) analyzer.setFunction(oldFunction);
                 return result;
             } else if (next instanceof BraceExprToken){
                 // xClosure

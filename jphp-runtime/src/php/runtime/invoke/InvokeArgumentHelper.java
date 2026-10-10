@@ -28,9 +28,51 @@ import java.util.List;
 public class InvokeArgumentHelper {
     private static final String INVALID_TYPE_MESSAGE = "Only arrays and Traversables can be unpacked";
 
-    private static Memory[] argsToPassed(Environment env, TraceInfo trace, Memory[] args, ParameterEntity[] parameters) {
-        args = unpackArgs(env, trace, args, parameters);
+    public static String closureCallName(php.runtime.lang.Closure closure) {
+        if (closure instanceof PhpCallableFactory.CapturedClosure)
+            return ((PhpCallableFactory.CapturedClosure) closure).getCallName();
+        TraceInfo declaration = closure.getReflection().getTrace();
+        return declaration == null || declaration.isUnknown() ? "{closure}"
+                : "{closure:" + declaration.getFileName() + ":" + (declaration.getStartLine() + 1) + "}";
+    }
 
+    public static Memory[] argumentsByValue(Memory[] args) {
+        if (args == null || args.length == 0) return args;
+        Memory[] values = new Memory[args.length];
+        for (int i = 0; i < args.length; i++) values[i] = args[i].toImmutable();
+        return values;
+    }
+
+    // Internal indirect calls warn and use a temporary for a non-reference argument.
+    // Direct user calls keep their own validation; this never changes caller storage.
+    public static Memory[] prepareIndirectArguments(Environment env, TraceInfo trace, Memory[] args,
+                                                    ParameterEntity[] parameters, String name) {
+        if (args == null || parameters == null || parameters.length == 0
+                || env.getModuleManager().getPhpLanguageProfile(trace) != php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            return args;
+        }
+        Memory[] passed = args;
+        for (int i = 0; i < args.length; i++) {
+            ParameterEntity parameter;
+            if (i < parameters.length) parameter = parameters[i];
+            else {
+                parameter = parameters[parameters.length - 1];
+                if (!parameter.isVariadic()) break;
+            }
+            if (parameter.isReference() && !args[i].isReference()) {
+                if (parameter.isVariadic())
+                    env.warning(trace, "%s(): Argument #%d must be passed by reference, value given", name, i + 1);
+                else
+                    env.warning(trace, "%s(): Argument #%d ($%s) must be passed by reference, value given",
+                            name, i + 1, parameter.getName());
+                if (passed == args) passed = args.clone();
+                passed[i] = new ReferenceMemory(args[i].toImmutable());
+            }
+        }
+        return passed;
+    }
+
+    private static Memory[] argsToPassed(Environment env, TraceInfo trace, Memory[] args, ParameterEntity[] parameters) {
         Memory[] passed = args;
 
         if ((args == null && parameters.length > 0) || (args != null && args.length < parameters.length)) {
@@ -41,29 +83,65 @@ public class InvokeArgumentHelper {
             }
         }
 
-        return passed;
+        // Argument slots may be cached by a compiled call site. Only Memory references,
+        // not the caller's array itself, may be shared with parameter preparation.
+        return passed == args && args != null ? args.clone() : passed;
     }
 
     private static Memory makeArg(Environment env, TraceInfo trace, ParameterEntity param,
-                                  Memory arg, int i, String originClassName, String originMethodName, String staticClassName) {
+                                  Memory arg, int i, String originClassName, String originMethodName, String staticClassName,
+                                  boolean internalCall, int suppliedCount, ParameterEntity[] parameters) {
         if (arg == null) {
+            if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && i < requiredCount(parameters)) {
+                int required = requiredCount(parameters);
+                int fixedCount = parameters.length - (parameters[parameters.length - 1].isVariadic() ? 1 : 0);
+                boolean minimum = required < fixedCount;
+                String location = internalCall || trace == null ? ""
+                        : " in " + trace.getFileName() + " on line " + (trace.getStartLine() + 1);
+                env.exception(trace, php.runtime.lang.exception.BaseArgumentCountError.class,
+                        "Too few arguments to function %s(), %d passed%s and %s %d expected",
+                        callName(originClassName, originMethodName), suppliedCount, location,
+                        minimum ? "at least" : "exactly", required);
+            }
             arg = makeDefaultArg(env, trace, param, i, originClassName, originMethodName);
         } else {
-            arg = makeNormalArg(env, trace, param, arg);
+            arg = makeNormalArg(env, trace, param, arg, i, originClassName, originMethodName);
         }
 
-        return typeHintArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName);
+        return typeHintArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName, internalCall);
     }
 
-    private static Memory makeNormalArg(Environment env, TraceInfo trace, ParameterEntity param, Memory arg) {
+    private static int requiredCount(ParameterEntity[] parameters) {
+        int required = 0;
+        for (int i = 0; i < parameters.length; i++)
+            if (!parameters[i].isOptional() && !parameters[i].isVariadic()) required = i + 1;
+        return required;
+    }
+
+    private static String callName(String originClassName, String originMethodName) {
+        return originMethodName == null ? originClassName : originClassName + "::" + originMethodName;
+    }
+
+    private static Memory makeNormalArg(Environment env, TraceInfo trace, ParameterEntity param, Memory arg,
+                                        int index, String originClassName, String originMethodName) {
 
         if (param.isReference()) {
-            if (!arg.isReference() && !arg.isObject()) {
+            if (!arg.isReference()
+                    && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                if (arg.isObject()) {
+                    env.error(trace, ErrorType.E_NOTICE, "Only variables should be passed by reference");
+                    arg = new ReferenceMemory(arg);
+                } else {
+                    referenceArgumentError(env, trace, param, index, originClassName, originMethodName);
+                }
+            } else if (!arg.isReference() && !arg.isObject()) {
                 env.error(trace, ErrorType.E_ERROR, "Only variables can be passed by reference");
                 return new ReferenceMemory(arg);
             }
 
-            return arg;
+            return env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    ? ReferenceMemory.exportReference(arg) : arg;
         } else {
             return param.isMutable() ? arg.toImmutable() : arg.toValue();
         }
@@ -71,7 +149,7 @@ public class InvokeArgumentHelper {
 
     private static Memory makeDefaultArg(Environment env, TraceInfo trace, ParameterEntity param,
                                          int i, String originClassName, String originMethodName) {
-        Memory def = param.getDefaultValue();
+        Memory def = param.evaluateDefault(env);
 
         if (def != null) {
             if (!param.isReference()) {
@@ -95,15 +173,46 @@ public class InvokeArgumentHelper {
 
     private static Memory typeHintArg(Environment env, TraceInfo trace, ParameterEntity param,
                                       Memory arg, int i, String originClassName, String originMethodName, String staticClassName) {
+        return typeHintArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName, false);
+    }
+
+    private static Memory typeHintArg(Environment env, TraceInfo trace, ParameterEntity param,
+                                      Memory arg, int i, String originClassName, String originMethodName, String staticClassName,
+                                      boolean internalCall) {
+        if (i == 0 && "Closure".equals(originClassName) && "fromCallable".equals(originMethodName)
+                && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && (arg.isArray() || arg.isString() || arg.isObject())) return arg;
         if (!param.checkTypeHinting(env, arg, staticClassName)) {
             ModuleEntity module = env.getModuleManager().findModule(trace);
 
-            Memory memory = param.applyTypeHinting(env, arg, module != null && module.isStrictTypes());
+            boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+            boolean strict = !internalCall && module != null && module.isStrictTypes();
+            if (modern && param.isReference() && arg instanceof ReferenceMemory
+                    && ((ReferenceMemory)arg).hasPropertySources()) {
+                // A by-reference parameter may not implicitly convert a typed property's cell.
+                invalidType(env, trace, param, i + 1, arg, originClassName, originMethodName, internalCall);
+                return arg;
+            }
+            Memory memory = modern && param.getTypeChecker() != null
+                    ? param.getTypeChecker().apply(env, arg, param.isNullableOrDefaultNull(), strict)
+                    : param.applyTypeHinting(env, arg, strict);
 
             if (memory != null) {
+                if (modern) memory = php.runtime.PhpNumericConversions.checkedScalarCoercion(arg, memory, env, trace);
+                if (modern && memory.getRealType() == Memory.Type.INT && (param.getType() == HintType.INT
+                        || param.getTypeChecker() instanceof php.runtime.reflection.support.PhpTypeDeclaration
+                        && ((php.runtime.reflection.support.PhpTypeDeclaration) param.getTypeChecker()).has("int"))) {
+                    Memory number = arg.isString() ? php.runtime.PhpNumericString.parseStrict(arg.toString()) : arg;
+                    if (number != null) php.runtime.PhpNumericConversions.warnIntegerPrecisionLoss(arg, number, env, trace);
+                }
+                if (param.isReference() && arg.isReference()
+                        && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    arg.assign(memory);
+                    return arg;
+                }
                 return memory;
             } else {
-                invalidType(env, trace, param, i + 1, arg, originClassName, originMethodName);
+                invalidType(env, trace, param, i + 1, arg, originClassName, originMethodName, internalCall);
             }
         }
 
@@ -114,10 +223,18 @@ public class InvokeArgumentHelper {
                                          ParameterEntity[] parameters,
                                          String originClassName, String originMethodName, String staticClassName,
                                          TraceInfo trace) {
+        return makeArguments(env, args, parameters, originClassName, originMethodName, staticClassName, trace, false);
+    }
+
+    public static Memory[] makeArguments(Environment env, Memory[] args, ParameterEntity[] parameters,
+                                         String originClassName, String originMethodName, String staticClassName,
+                                         TraceInfo trace, boolean internalCall) {
         if (parameters == null) {
             return args;
         }
 
+        args = unpackArgs(env, trace, args, parameters);
+        int suppliedCount = args == null ? 0 : args.length;
         Memory[] passed = argsToPassed(env, trace, args, parameters);
 
         int i = 0;
@@ -149,7 +266,12 @@ public class InvokeArgumentHelper {
                                 env.error(trace, "Cannot use positional argument after argument unpacking");
                             }
 
-                            arg = typeHintArg(env, trace, param, arg, _i + 1, originClassName, originMethodName, staticClassName);
+                            if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                                arg = makeNormalArg(env, trace, param, arg, i, originClassName, originMethodName);
+                                arg = typeHintArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName, internalCall);
+                            } else {
+                                arg = typeHintArg(env, trace, param, arg, _i + 1, originClassName, originMethodName, staticClassName);
+                            }
 
                             variadicArgs.add(makeValue(param, arg, env, trace));
                         }
@@ -167,7 +289,8 @@ public class InvokeArgumentHelper {
                     break;
                 }
 
-                passed[i] = makeArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName);
+                passed[i] = makeArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName,
+                        internalCall, suppliedCount, parameters);
                 i++;
             }
 
@@ -285,6 +408,30 @@ public class InvokeArgumentHelper {
 
     public static void invalidType(Environment env, TraceInfo trace, ParameterEntity param, int index, Memory passed,
                                    String originClassName, String originMethodName) {
+        invalidType(env, trace, param, index, passed, originClassName, originMethodName, false);
+    }
+
+    private static void invalidType(Environment env, TraceInfo trace, ParameterEntity param, int index, Memory passed,
+                                    String originClassName, String originMethodName, boolean internalCall) {
+        if (passed != null && param.getTypeChecker() != null && param.getTypeEnum() == null
+                && param.getTypeHintingChecker() == null
+                && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            String needed = param.getTypeChecker() instanceof php.runtime.reflection.support.PhpTypeDeclaration
+                    ? php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(param.getTypeChecker(), param.isNullableOrDefaultNull()).getRuntimeErrorSignature(env, originMethodName == null ? null : originClassName)
+                    : param.getType() == HintType.ITERABLE
+                    ? "Traversable|array" + (param.isNullableOrDefaultNull() ? "|null" : "")
+                    : (param.isNullableOrDefaultNull() ? "?" : "") + param.getTypeChecker().getSignature();
+            String given = passed.isObject() ? passed.toValue(ObjectMemory.class).getReflection().getName()
+                    : passed.isResource() ? "resource" : passed.isNull() ? "null"
+                    : passed.getRealType() == Memory.Type.INT ? "int"
+                    : passed.getRealType() == Memory.Type.BOOL ? (passed.toBoolean() ? "true" : "false") : passed.getRealType().toString();
+            String location = internalCall || trace == null ? ""
+                    : ", called in " + trace.getFileName() + " on line " + (trace.getStartLine() + 1);
+            env.exception(trace, BaseTypeError.class, "%s(): Argument #%d%s must be of type %s, %s given%s",
+                    callName(originClassName, originMethodName), index,
+                    param.isVariadic() ? "" : " ($" + param.getName() + ")", needed, given, location);
+            return;
+        }
         String given;
         if (passed == null) {
             given = "none";
@@ -371,12 +518,21 @@ public class InvokeArgumentHelper {
         }
     }
 
+    static void referenceArgumentError(Environment env, TraceInfo trace, ParameterEntity param, int index,
+                                                String originClassName, String originMethodName) {
+        env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                "%s(): Argument #%d%s could not be passed by reference", callName(originClassName, originMethodName),
+                index + 1, param.isVariadic() ? "" : " ($" + param.getName() + ")");
+    }
+
     public static Memory makeValue(ParameterEntity param, Memory arg, Environment env, TraceInfo trace) {
         if (param.isReference()) {
             if (!arg.isReference() && !arg.isObject()) {
                 env.error(trace, ErrorType.E_ERROR, "Only variables can be passed by reference");
                 arg = new ReferenceMemory(arg);
             }
+            if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                arg = ReferenceMemory.exportReference(arg);
         } else {
             arg = param.isMutable() ? arg.toImmutable() : arg.toValue();
         }

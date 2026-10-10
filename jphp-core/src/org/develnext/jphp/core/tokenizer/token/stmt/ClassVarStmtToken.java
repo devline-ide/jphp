@@ -8,6 +8,12 @@ import org.develnext.jphp.core.tokenizer.token.expr.value.VariableExprToken;
 
 public class ClassVarStmtToken extends StmtToken {
     private boolean isStatic;
+    private boolean isFinal;
+    private php.runtime.reflection.support.PhpTypeDeclaration declaredType;
+    public boolean isFinal() {return isFinal;}
+    public void setFinal(boolean value) {isFinal = value;}
+    public php.runtime.reflection.support.PhpTypeDeclaration getDeclaredType() {return declaredType;}
+    public void setDeclaredType(php.runtime.reflection.support.PhpTypeDeclaration type) {declaredType = type;}
     private Modifier modifier;
 
     private VariableExprToken variable;

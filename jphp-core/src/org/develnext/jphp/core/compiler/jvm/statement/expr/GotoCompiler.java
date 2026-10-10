@@ -25,13 +25,15 @@ public class GotoCompiler extends BaseStatementCompiler<GotoStmtToken> {
             return;
         }
 
-        if (labelStmtToken.getLevel() > token.getLevel()) {
+        LabelNode destination = method.routeGoto(token, labelStmtToken, labelNode);
+        if (compiler.getModule().getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && labelStmtToken.getLevel() > token.getLevel()) {
             compiler.getEnvironment().error(
                     token.toTraceInfo(compiler.getContext()),
                     "'goto' into loop, switch or finally statement is disallowed"
             );
         }
 
-        add(new JumpInsnNode(GOTO, labelNode));
+        add(new JumpInsnNode(GOTO, destination));
     }
 }

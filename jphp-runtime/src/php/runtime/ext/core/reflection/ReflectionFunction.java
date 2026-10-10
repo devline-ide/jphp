@@ -60,7 +60,9 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
 
     @Override
     protected AbstractFunctionEntity getEntity() {
-        return functionEntity;
+        return closure instanceof php.runtime.invoke.PhpCallableFactory.CapturedClosure
+                ? ((php.runtime.invoke.PhpCallableFactory.CapturedClosure) closure).getTarget()
+                : closure == null ? functionEntity : closure.getReflection().methodMagicInvoke;
     }
 
     @Override
@@ -100,6 +102,11 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
     }
 
     @Signature
+    public Memory isStatic(Environment env, Memory... args) {
+        return closure != null && closure.isStaticClosure() ? Memory.TRUE : Memory.FALSE;
+    }
+
+    @Signature
     public Memory getClosure(final Environment env, Memory... args) throws Throwable {
         if (closure != null)
             return new ObjectMemory(closure);
@@ -109,12 +116,22 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
 
     @Signature
     public Memory invoke(Environment env, Memory... args) throws Throwable {
+        if (env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            args = php.runtime.invoke.InvokeArgumentHelper.argumentsByValue(args);
+        return invokeReflected(env, args);
+    }
+
+    private Memory invokeReflected(Environment env, Memory[] args) throws Throwable {
+        args = php.runtime.invoke.InvokeArgumentHelper.prepareIndirectArguments(env, env.trace(), args,
+                closure == null ? functionEntity.getParameters() : closureEntity.parameters,
+                closure == null ? functionEntity.getName() : php.runtime.invoke.InvokeArgumentHelper.closureCallName(closure));
+        boolean modern = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         if (closure != null)
             return ObjectInvokeHelper.invokeMethod(
-                    closure, closureEntity.methodMagicInvoke, env, env.peekCall(0).trace, args, true
+                    closure, closureEntity.methodMagicInvoke, env, env.peekCall(0).trace, args, true, modern
             );
         else {
-            return InvokeHelper.call(env, env.peekCall(0).trace, functionEntity, args);
+            return InvokeHelper.call(env, env.peekCall(0).trace, functionEntity, args, modern);
         }
     }
 
@@ -122,8 +139,9 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
     public Memory invokeArgs(Environment env, Memory... args) throws Throwable {
         ArrayMemory value = args[0].toValue(ArrayMemory.class);
 
-        Memory[] passed = value.values();
-        return invoke(env, passed);
+        Memory[] passed = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                ? value.valuesForCall() : value.values();
+        return invokeReflected(env, passed);
     }
 
     @Override
@@ -144,7 +162,7 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
         for(ParameterEntity param : parameters){
             ReflectionParameter e = new ReflectionParameter(env, entity);
             e.setEntity(param);
-            e.setFunctionEntity(functionEntity);
+            e.setFunctionEntity(getEntity());
             e.setPosition(i);
             i++;
 

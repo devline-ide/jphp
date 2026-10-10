@@ -27,6 +27,36 @@ public class ParameterEntity extends Entity {
     protected ClassEntity clazz;
     protected Memory defaultValue;
     protected String defaultValueConstName;
+    private DefaultInitializer defaultInitializer;
+
+    /** An executable declaration-owned default, never a serialized Closure or PHP constant name. */
+    public record DefaultInitializer(String moduleName, String javaClass, String method, String declarationScope) {
+        public DefaultInitializer {
+            if (moduleName == null || moduleName.isEmpty() || javaClass == null || javaClass.isEmpty()
+                    || method == null || !method.startsWith("__$parameterDefault"))
+                throw new IllegalArgumentException("Invalid parameter default initializer");
+        }
+    }
+
+    public DefaultInitializer getDefaultInitializer() { return defaultInitializer; }
+    public void setDefaultInitializer(DefaultInitializer initializer) {
+        defaultInitializer = initializer;
+        // A transport placeholder keeps old optional-parameter APIs truthful; execution uses the descriptor.
+        if (initializer != null) defaultValue = Memory.NULL;
+    }
+    public Memory evaluateDefault(Environment env) {
+        if (defaultInitializer == null) return defaultValue;
+        DefaultInitializer init = defaultInitializer;
+        ModuleEntity module = env.getScope().getClassLoader().getModule(init.moduleName());
+        if (module == null) throw new CriticalException("Parameter default module is not loaded");
+        env.pushCall(trace, null, null, "{parameter-default}", init.declarationScope(), init.declarationScope());
+        try {
+            Class<?> source = env.getScope().getClassLoader().loadClass(init.javaClass());
+            return (Memory) source.getDeclaredMethod(init.method(), Environment.class).invoke(null, env);
+        } catch (java.lang.reflect.InvocationTargetException failure) { return env.__throwException(failure); }
+        catch (ReflectiveOperationException failure) { throw new CriticalException(failure); }
+        finally { env.popCall(); }
+    }
 
     protected boolean isReference;
     protected TypeChecker typeChecker;
@@ -103,7 +133,7 @@ public class ParameterEntity extends Entity {
     }
 
     public boolean isNullableOrDefaultNull() {
-        return isNullable() || (getDefaultValue() != null && getDefaultValue().isNull());
+        return isNullable() || (defaultInitializer == null && getDefaultValue() != null && getDefaultValue().isNull());
     }
 
     public void setNullable(boolean nullable) {
@@ -213,7 +243,7 @@ public class ParameterEntity extends Entity {
     public boolean checkTypeHinting(Environment env, Memory value, String staticClassName) {
         if (typeChecker != null) {
             return typeChecker.check(
-                    env, value, nullable || (defaultValue != null && defaultValue.isNull()), staticClassName
+                    env, value, nullable || (defaultInitializer == null && defaultValue != null && defaultValue.isNull()), staticClassName
             );
         }
 
@@ -223,7 +253,7 @@ public class ParameterEntity extends Entity {
     public Memory applyTypeHinting(Environment env, Memory value, boolean strict) {
         if (typeChecker != null) {
             return typeChecker.apply(
-                    env, value, nullable || (defaultValue != null && defaultValue.isNotNull()), strict
+                    env, value, nullable || (defaultInitializer == null && defaultValue != null && defaultValue.isNotNull()), strict
             );
         }
 

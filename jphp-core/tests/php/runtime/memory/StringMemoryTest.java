@@ -13,6 +13,23 @@ import php.runtime.Memory;
 public class StringMemoryTest {
 
     @Test
+    public void testStrictNumericStrings() {
+        for (String invalid : new String[]{"", " ", "+", "-", ".", "1e", "1e+", "1e-", "1.e",
+                "1.2.3", "123abc", "0x10", "0b10", "1_000", "NaN", "Infinity", "\u00001", "1\u0000", "\u00a01", "١"}) {
+            Assert.assertNull(invalid, StringMemory.toNumericStrict(invalid));
+        }
+        Assert.assertEquals(12L, StringMemory.toNumericStrict("\t\n\r\f\u000b +12 \t").toLong());
+        Assert.assertEquals(Long.MAX_VALUE, StringMemory.toNumericStrict("9223372036854775807").toLong());
+        Assert.assertEquals(Long.MIN_VALUE, StringMemory.toNumericStrict("-9223372036854775808").toLong());
+        Assert.assertEquals(Memory.Type.DOUBLE, StringMemory.toNumericStrict("9223372036854775808").type);
+        Assert.assertEquals(100.0, StringMemory.toNumericStrict("1.e+2").toDouble(), 0.0);
+        Assert.assertEquals(5.0, StringMemory.toNumericStrict(".5e1").toDouble(), 0.0);
+        Assert.assertEquals(Memory.Type.DOUBLE, StringMemory.toNumericStrict("12.").type);
+        Assert.assertEquals(Double.POSITIVE_INFINITY, StringMemory.toNumericStrict("1e1000").toDouble(), 0.0);
+        Assert.assertEquals(123L, StringMemory.toNumeric("123abc").toLong());
+    }
+
+    @Test
     public void testToNumeric(){
         Memory memory = StringMemory.toNumeric("123");
         Assert.assertEquals(Memory.Type.INT, memory.type);

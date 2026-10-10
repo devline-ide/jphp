@@ -1,0 +1,9 @@
+clone-static:1,2,2,3,3
+bind-static:1,2,2,3,3
+clone-ref-static:9,9
+bind-ref-static:9,9
+clone-array:1|1,2|1,2|1,2,3|1,2,3
+clone-object:1,2,3
+call-warm:1,2,3,4,5
+call-cold:1,2,3
+static-rebind:10,1,1

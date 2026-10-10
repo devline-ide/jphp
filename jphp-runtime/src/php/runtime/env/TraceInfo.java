@@ -1,6 +1,7 @@
 package php.runtime.env;
 
 import java.io.File;
+import php.runtime.common.PhpLanguageProfile;
 
 public class TraceInfo {
     public final static TraceInfo UNKNOWN = new TraceInfo("Unknown", -1, -1);
@@ -14,6 +15,8 @@ public class TraceInfo {
     private int endPosition;
 
     private String fileName;
+    private String moduleInternalName;
+    private PhpLanguageProfile phpLanguageProfile;
 
     public TraceInfo(StackTraceElement element) {
         this.fileName = element.getFileName();
@@ -41,11 +44,29 @@ public class TraceInfo {
     }
 
     public static TraceInfo valueOf(String fileName, int startLine, int startPosition){
-        return new TraceInfo(fileName, startLine, startPosition);
+        TraceInfo trace = new TraceInfo(fileName, startLine, startPosition);
+        trace.phpLanguageProfile = PhpLanguageProfile.JPHP_LEGACY;
+        return trace;
     }
 
     public static TraceInfo valueOf(String fileName, long startLine, long startPosition){
-        return new TraceInfo(fileName, (int) startLine, (int) startPosition);
+        return valueOf(fileName, (int) startLine, (int) startPosition);
+    }
+
+    public static TraceInfo valueOf(String fileName, long startLine, long startPosition, String moduleInternalName) {
+        TraceInfo trace = valueOf(fileName, startLine, startPosition);
+        trace.moduleInternalName = moduleInternalName;
+        trace.phpLanguageProfile = null;
+        return trace;
+    }
+
+    public String getModuleInternalName() {
+        return moduleInternalName;
+    }
+
+    public PhpLanguageProfile getPhpLanguageProfile(CompileScope scope) {
+        if (context != null) return context.getPhpLanguageProfile(scope);
+        return phpLanguageProfile == null ? scope.getPhpLanguageProfile() : phpLanguageProfile;
     }
 
     public Context getContext() {

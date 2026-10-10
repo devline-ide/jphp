@@ -1,0 +1,180 @@
+self/self::missing()/named-global	reject	ZnVuY3Rpb24gZigpe3NlbGY6Om1pc3NpbmcoKTt9	Cannot use "self" when no class scope is active
+self/self::missing()/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3NlbGY6Om1pc3NpbmcoKTt9fX0=	Cannot use "self" when no class scope is active
+self/self::missing()/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3NlbGY6Om1pc3NpbmcoKTt9fQ==	
+self/self::missing()/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3NlbGY6Om1pc3NpbmcoKTt9fQ==	
+self/self::missing()/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3NlbGY6Om1pc3NpbmcoKTt9O319	
+self/self::missing()/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzZWxmOjptaXNzaW5nKCk7fTs=	
+self/self::missing()/top-level-dead	accept	aWYoZmFsc2Upe3NlbGY6Om1pc3NpbmcoKTt9	
+self/self::missing()/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6Om1pc3NpbmcoKTt9fQ==	
+self/self::missing()/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6Om1pc3NpbmcoKTt9fSBjbGFzcyBDIHt1c2UgVDt9	
+self/self::missing()/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6Om1pc3NpbmcoKTt9fSBjbGFzcyBQIHt9IGNsYXNzIEMgZXh0ZW5kcyBQIHt1c2UgVDt9	
+self/self::{"missing"}()/named-global	reject	ZnVuY3Rpb24gZigpe3NlbGY6OnsibWlzc2luZyJ9KCk7fQ==	Cannot use "self" when no class scope is active
+self/self::{"missing"}()/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3NlbGY6OnsibWlzc2luZyJ9KCk7fX19	Cannot use "self" when no class scope is active
+self/self::{"missing"}()/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3NlbGY6OnsibWlzc2luZyJ9KCk7fX0=	
+self/self::{"missing"}()/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3NlbGY6OnsibWlzc2luZyJ9KCk7fX0=	
+self/self::{"missing"}()/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3NlbGY6OnsibWlzc2luZyJ9KCk7fTt9fQ==	
+self/self::{"missing"}()/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzZWxmOjp7Im1pc3NpbmcifSgpO307	
+self/self::{"missing"}()/top-level-dead	accept	aWYoZmFsc2Upe3NlbGY6OnsibWlzc2luZyJ9KCk7fQ==	
+self/self::{"missing"}()/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OnsibWlzc2luZyJ9KCk7fX0=	
+self/self::{"missing"}()/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OnsibWlzc2luZyJ9KCk7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+self/self::{"missing"}()/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OnsibWlzc2luZyJ9KCk7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	
+self/self::$p/named-global	reject	ZnVuY3Rpb24gZigpe3NlbGY6OiRwO30=	Cannot use "self" when no class scope is active
+self/self::$p/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3NlbGY6OiRwO319fQ==	Cannot use "self" when no class scope is active
+self/self::$p/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3NlbGY6OiRwO319	
+self/self::$p/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3NlbGY6OiRwO319	
+self/self::$p/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3NlbGY6OiRwO307fX0=	
+self/self::$p/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzZWxmOjokcDt9Ow==	
+self/self::$p/top-level-dead	accept	aWYoZmFsc2Upe3NlbGY6OiRwO30=	
+self/self::$p/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OiRwO319	
+self/self::$p/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OiRwO319IGNsYXNzIEMge3VzZSBUO30=	
+self/self::$p/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OiRwO319IGNsYXNzIFAge30gY2xhc3MgQyBleHRlbmRzIFAge3VzZSBUO30=	
+self/self::P/named-global	reject	ZnVuY3Rpb24gZigpe3NlbGY6OlA7fQ==	Cannot use "self" when no class scope is active
+self/self::P/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3NlbGY6OlA7fX19	Cannot use "self" when no class scope is active
+self/self::P/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3NlbGY6OlA7fX0=	
+self/self::P/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3NlbGY6OlA7fX0=	
+self/self::P/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3NlbGY6OlA7fTt9fQ==	
+self/self::P/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzZWxmOjpQO307	
+self/self::P/top-level-dead	accept	aWYoZmFsc2Upe3NlbGY6OlA7fQ==	
+self/self::P/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OlA7fX0=	
+self/self::P/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OlA7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+self/self::P/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OlA7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	
+self/self::class/named-global	reject	ZnVuY3Rpb24gZigpe3NlbGY6OmNsYXNzO30=	Cannot use "self" when no class scope is active
+self/self::class/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3NlbGY6OmNsYXNzO319fQ==	Cannot use "self" when no class scope is active
+self/self::class/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3NlbGY6OmNsYXNzO319	
+self/self::class/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3NlbGY6OmNsYXNzO319	
+self/self::class/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3NlbGY6OmNsYXNzO307fX0=	
+self/self::class/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzZWxmOjpjbGFzczt9Ow==	
+self/self::class/top-level-dead	accept	aWYoZmFsc2Upe3NlbGY6OmNsYXNzO30=	
+self/self::class/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OmNsYXNzO319	
+self/self::class/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OmNsYXNzO319IGNsYXNzIEMge3VzZSBUO30=	
+self/self::class/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3NlbGY6OmNsYXNzO319IGNsYXNzIFAge30gY2xhc3MgQyBleHRlbmRzIFAge3VzZSBUO30=	
+self/new self/named-global	reject	ZnVuY3Rpb24gZigpe25ldyBzZWxmO30=	Cannot use "self" when no class scope is active
+self/new self/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe25ldyBzZWxmO319fQ==	Cannot use "self" when no class scope is active
+self/new self/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe25ldyBzZWxmO319	
+self/new self/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe25ldyBzZWxmO319	
+self/new self/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe25ldyBzZWxmO307fX0=	
+self/new self/closure-global	accept	JGY9ZnVuY3Rpb24oKXtuZXcgc2VsZjt9Ow==	
+self/new self/top-level-dead	accept	aWYoZmFsc2Upe25ldyBzZWxmO30=	
+self/new self/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBzZWxmO319	
+self/new self/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBzZWxmO319IGNsYXNzIEMge3VzZSBUO30=	
+self/new self/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBzZWxmO319IGNsYXNzIFAge30gY2xhc3MgQyBleHRlbmRzIFAge3VzZSBUO30=	
+parent/parent::missing()/named-global	reject	ZnVuY3Rpb24gZigpe3BhcmVudDo6bWlzc2luZygpO30=	Cannot use "parent" when no class scope is active
+parent/parent::missing()/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3BhcmVudDo6bWlzc2luZygpO319fQ==	Cannot use "parent" when no class scope is active
+parent/parent::missing()/method-no-parent	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3BhcmVudDo6bWlzc2luZygpO319	Cannot use "parent" when current class scope has no parent
+parent/parent::missing()/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6bWlzc2luZygpO319	
+parent/parent::missing()/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3BhcmVudDo6bWlzc2luZygpO307fX0=	
+parent/parent::missing()/closure-global	accept	JGY9ZnVuY3Rpb24oKXtwYXJlbnQ6Om1pc3NpbmcoKTt9Ow==	
+parent/parent::missing()/top-level-dead	accept	aWYoZmFsc2Upe3BhcmVudDo6bWlzc2luZygpO30=	
+parent/parent::missing()/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6bWlzc2luZygpO319	
+parent/parent::missing()/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6bWlzc2luZygpO319IGNsYXNzIEMge3VzZSBUO30=	
+parent/parent::missing()/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6bWlzc2luZygpO319IGNsYXNzIFAge30gY2xhc3MgQyBleHRlbmRzIFAge3VzZSBUO30=	
+parent/parent::{"missing"}()/named-global	reject	ZnVuY3Rpb24gZigpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9	Cannot use "parent" when no class scope is active
+parent/parent::{"missing"}()/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9fX0=	Cannot use "parent" when no class scope is active
+parent/parent::{"missing"}()/method-no-parent	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9fQ==	Cannot use "parent" when current class scope has no parent
+parent/parent::{"missing"}()/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9fQ==	
+parent/parent::{"missing"}()/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9O319	
+parent/parent::{"missing"}()/closure-global	accept	JGY9ZnVuY3Rpb24oKXtwYXJlbnQ6OnsibWlzc2luZyJ9KCk7fTs=	
+parent/parent::{"missing"}()/top-level-dead	accept	aWYoZmFsc2Upe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9	
+parent/parent::{"missing"}()/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9fQ==	
+parent/parent::{"missing"}()/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9fSBjbGFzcyBDIHt1c2UgVDt9	
+parent/parent::{"missing"}()/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6eyJtaXNzaW5nIn0oKTt9fSBjbGFzcyBQIHt9IGNsYXNzIEMgZXh0ZW5kcyBQIHt1c2UgVDt9	
+parent/parent::$p/named-global	reject	ZnVuY3Rpb24gZigpe3BhcmVudDo6JHA7fQ==	Cannot use "parent" when no class scope is active
+parent/parent::$p/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3BhcmVudDo6JHA7fX19	Cannot use "parent" when no class scope is active
+parent/parent::$p/method-no-parent	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3BhcmVudDo6JHA7fX0=	Cannot use "parent" when current class scope has no parent
+parent/parent::$p/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6JHA7fX0=	
+parent/parent::$p/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3BhcmVudDo6JHA7fTt9fQ==	
+parent/parent::$p/closure-global	accept	JGY9ZnVuY3Rpb24oKXtwYXJlbnQ6OiRwO307	
+parent/parent::$p/top-level-dead	accept	aWYoZmFsc2Upe3BhcmVudDo6JHA7fQ==	
+parent/parent::$p/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6JHA7fX0=	
+parent/parent::$p/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6JHA7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+parent/parent::$p/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6JHA7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	
+parent/parent::P/named-global	reject	ZnVuY3Rpb24gZigpe3BhcmVudDo6UDt9	Cannot use "parent" when no class scope is active
+parent/parent::P/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3BhcmVudDo6UDt9fX0=	Cannot use "parent" when no class scope is active
+parent/parent::P/method-no-parent	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3BhcmVudDo6UDt9fQ==	Cannot use "parent" when current class scope has no parent
+parent/parent::P/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6UDt9fQ==	
+parent/parent::P/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3BhcmVudDo6UDt9O319	
+parent/parent::P/closure-global	accept	JGY9ZnVuY3Rpb24oKXtwYXJlbnQ6OlA7fTs=	
+parent/parent::P/top-level-dead	accept	aWYoZmFsc2Upe3BhcmVudDo6UDt9	
+parent/parent::P/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6UDt9fQ==	
+parent/parent::P/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6UDt9fSBjbGFzcyBDIHt1c2UgVDt9	
+parent/parent::P/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6UDt9fSBjbGFzcyBQIHt9IGNsYXNzIEMgZXh0ZW5kcyBQIHt1c2UgVDt9	
+parent/parent::class/named-global	reject	ZnVuY3Rpb24gZigpe3BhcmVudDo6Y2xhc3M7fQ==	Cannot use "parent" when no class scope is active
+parent/parent::class/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3BhcmVudDo6Y2xhc3M7fX19	Cannot use "parent" when no class scope is active
+parent/parent::class/method-no-parent	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3BhcmVudDo6Y2xhc3M7fX0=	Cannot use "parent" when current class scope has no parent
+parent/parent::class/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6Y2xhc3M7fX0=	
+parent/parent::class/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3BhcmVudDo6Y2xhc3M7fTt9fQ==	
+parent/parent::class/closure-global	accept	JGY9ZnVuY3Rpb24oKXtwYXJlbnQ6OmNsYXNzO307	
+parent/parent::class/top-level-dead	accept	aWYoZmFsc2Upe3BhcmVudDo6Y2xhc3M7fQ==	
+parent/parent::class/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6Y2xhc3M7fX0=	
+parent/parent::class/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6Y2xhc3M7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+parent/parent::class/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3BhcmVudDo6Y2xhc3M7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	
+parent/new parent/named-global	reject	ZnVuY3Rpb24gZigpe25ldyBwYXJlbnQ7fQ==	Cannot use "parent" when no class scope is active
+parent/new parent/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe25ldyBwYXJlbnQ7fX19	Cannot use "parent" when no class scope is active
+parent/new parent/method-no-parent	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe25ldyBwYXJlbnQ7fX0=	Cannot use "parent" when current class scope has no parent
+parent/new parent/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe25ldyBwYXJlbnQ7fX0=	
+parent/new parent/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe25ldyBwYXJlbnQ7fTt9fQ==	
+parent/new parent/closure-global	accept	JGY9ZnVuY3Rpb24oKXtuZXcgcGFyZW50O307	
+parent/new parent/top-level-dead	accept	aWYoZmFsc2Upe25ldyBwYXJlbnQ7fQ==	
+parent/new parent/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBwYXJlbnQ7fX0=	
+parent/new parent/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBwYXJlbnQ7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+parent/new parent/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBwYXJlbnQ7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	
+static/static::missing()/named-global	reject	ZnVuY3Rpb24gZigpe3N0YXRpYzo6bWlzc2luZygpO30=	Cannot use "static" when no class scope is active
+static/static::missing()/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3N0YXRpYzo6bWlzc2luZygpO319fQ==	Cannot use "static" when no class scope is active
+static/static::missing()/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6bWlzc2luZygpO319	
+static/static::missing()/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6bWlzc2luZygpO319	
+static/static::missing()/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3N0YXRpYzo6bWlzc2luZygpO307fX0=	
+static/static::missing()/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzdGF0aWM6Om1pc3NpbmcoKTt9Ow==	
+static/static::missing()/top-level-dead	accept	aWYoZmFsc2Upe3N0YXRpYzo6bWlzc2luZygpO30=	
+static/static::missing()/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6bWlzc2luZygpO319	
+static/static::missing()/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6bWlzc2luZygpO319IGNsYXNzIEMge3VzZSBUO30=	
+static/static::missing()/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6bWlzc2luZygpO319IGNsYXNzIFAge30gY2xhc3MgQyBleHRlbmRzIFAge3VzZSBUO30=	
+static/static::{"missing"}()/named-global	reject	ZnVuY3Rpb24gZigpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9	Cannot use "static" when no class scope is active
+static/static::{"missing"}()/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9fX0=	Cannot use "static" when no class scope is active
+static/static::{"missing"}()/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9fQ==	
+static/static::{"missing"}()/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9fQ==	
+static/static::{"missing"}()/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9O319	
+static/static::{"missing"}()/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzdGF0aWM6OnsibWlzc2luZyJ9KCk7fTs=	
+static/static::{"missing"}()/top-level-dead	accept	aWYoZmFsc2Upe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9	
+static/static::{"missing"}()/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9fQ==	
+static/static::{"missing"}()/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9fSBjbGFzcyBDIHt1c2UgVDt9	
+static/static::{"missing"}()/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6eyJtaXNzaW5nIn0oKTt9fSBjbGFzcyBQIHt9IGNsYXNzIEMgZXh0ZW5kcyBQIHt1c2UgVDt9	
+static/static::$p/named-global	reject	ZnVuY3Rpb24gZigpe3N0YXRpYzo6JHA7fQ==	Cannot use "static" when no class scope is active
+static/static::$p/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3N0YXRpYzo6JHA7fX19	Cannot use "static" when no class scope is active
+static/static::$p/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6JHA7fX0=	
+static/static::$p/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6JHA7fX0=	
+static/static::$p/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3N0YXRpYzo6JHA7fTt9fQ==	
+static/static::$p/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzdGF0aWM6OiRwO307	
+static/static::$p/top-level-dead	accept	aWYoZmFsc2Upe3N0YXRpYzo6JHA7fQ==	
+static/static::$p/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6JHA7fX0=	
+static/static::$p/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6JHA7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+static/static::$p/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6JHA7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	
+static/static::P/named-global	reject	ZnVuY3Rpb24gZigpe3N0YXRpYzo6UDt9	Cannot use "static" when no class scope is active
+static/static::P/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3N0YXRpYzo6UDt9fX0=	Cannot use "static" when no class scope is active
+static/static::P/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6UDt9fQ==	
+static/static::P/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6UDt9fQ==	
+static/static::P/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3N0YXRpYzo6UDt9O319	
+static/static::P/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzdGF0aWM6OlA7fTs=	
+static/static::P/top-level-dead	accept	aWYoZmFsc2Upe3N0YXRpYzo6UDt9	
+static/static::P/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6UDt9fQ==	
+static/static::P/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6UDt9fSBjbGFzcyBDIHt1c2UgVDt9	
+static/static::P/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6UDt9fSBjbGFzcyBQIHt9IGNsYXNzIEMgZXh0ZW5kcyBQIHt1c2UgVDt9	
+static/static::class/named-global	reject	ZnVuY3Rpb24gZigpe3N0YXRpYzo6Y2xhc3M7fQ==	Cannot use "static" when no class scope is active
+static/static::class/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe3N0YXRpYzo6Y2xhc3M7fX19	Cannot use "static" when no class scope is active
+static/static::class/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6Y2xhc3M7fX0=	
+static/static::class/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6Y2xhc3M7fX0=	
+static/static::class/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe3N0YXRpYzo6Y2xhc3M7fTt9fQ==	
+static/static::class/closure-global	accept	JGY9ZnVuY3Rpb24oKXtzdGF0aWM6OmNsYXNzO307	
+static/static::class/top-level-dead	accept	aWYoZmFsc2Upe3N0YXRpYzo6Y2xhc3M7fQ==	
+static/static::class/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6Y2xhc3M7fX0=	
+static/static::class/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6Y2xhc3M7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+static/static::class/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe3N0YXRpYzo6Y2xhc3M7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	
+static/new static/named-global	reject	ZnVuY3Rpb24gZigpe25ldyBzdGF0aWM7fQ==	Cannot use "static" when no class scope is active
+static/new static/nested-global	reject	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe2Z1bmN0aW9uIG5lc3RlZCgpe25ldyBzdGF0aWM7fX19	Cannot use "static" when no class scope is active
+static/new static/method-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe25ldyBzdGF0aWM7fX0=	
+static/new static/method-parent	accept	Y2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7ZnVuY3Rpb24gZigpe25ldyBzdGF0aWM7fX0=	
+static/new static/closure-no-parent	accept	Y2xhc3MgQyB7ZnVuY3Rpb24gZigpe3JldHVybiBmdW5jdGlvbigpe25ldyBzdGF0aWM7fTt9fQ==	
+static/new static/closure-global	accept	JGY9ZnVuY3Rpb24oKXtuZXcgc3RhdGljO307	
+static/new static/top-level-dead	accept	aWYoZmFsc2Upe25ldyBzdGF0aWM7fQ==	
+static/new static/trait	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBzdGF0aWM7fX0=	
+static/new static/trait-consumer-no-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBzdGF0aWM7fX0gY2xhc3MgQyB7dXNlIFQ7fQ==	
+static/new static/trait-consumer-parent	accept	dHJhaXQgVCB7ZnVuY3Rpb24gZigpe25ldyBzdGF0aWM7fX0gY2xhc3MgUCB7fSBjbGFzcyBDIGV4dGVuZHMgUCB7dXNlIFQ7fQ==	

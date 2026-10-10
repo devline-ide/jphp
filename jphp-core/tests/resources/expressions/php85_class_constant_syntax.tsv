@@ -1,0 +1,114 @@
+C::X	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WDt9	
+C::X[0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WFswXTt9	
+C::X[0][0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WFswXVswXTt9	
+C::X=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WD0xO30=	syntax error, unexpected token "="
+C::X+=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WCs9MTt9	syntax error, unexpected token "+="
+C::X++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WCsrO30=	syntax error, unexpected token "++"
+C::X ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WCA/Pz0gMTt9	syntax error, unexpected token "??="
+C::X[0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WFswXT0xO30=	Cannot use temporary expression
+C::X[0]++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WFswXSsrO30=	Cannot use temporary expression
+C::X[0] ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WFswXSA/Pz0gMTt9	Cannot use temporary expression
+C::X[0][0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6WFswXVswXT0xO30=	Cannot use temporary expression
+isset(C::X)	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoQzo6WCk7fQ==	Cannot use isset() on the result of an expression (you can use "null !== expression" instead)
+isset(C::X[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoQzo6WFswXSk7fQ==	
+unset(C::X)	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoQzo6WCk7fQ==	syntax error, unexpected token ")", expecting "->" or "?->" or "["
+unset(C::X[0])	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoQzo6WFswXSk7fQ==	Cannot use temporary expression
+empty(C::X)	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoQzo6WCk7fQ==	
+empty(C::X[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoQzo6WFswXSk7fQ==	
+$x =& C::X	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgQzo6WDt9	syntax error, unexpected token ";", expecting "->" or "?->" or "["
+$x =& C::X[0]	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgQzo6WFswXTt9	Cannot use temporary expression
+C::{$n}	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufTt9	
+C::{$n}[0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufVswXTt9	
+C::{$n}[0][0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufVswXVswXTt9	
+C::{$n}=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufT0xO30=	syntax error, unexpected token "="
+C::{$n}+=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufSs9MTt9	syntax error, unexpected token "+="
+C::{$n}++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufSsrO30=	syntax error, unexpected token "++"
+C::{$n} ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufSA/Pz0gMTt9	syntax error, unexpected token "??="
+C::{$n}[0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufVswXT0xO30=	Cannot use temporary expression
+C::{$n}[0]++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufVswXSsrO30=	Cannot use temporary expression
+C::{$n}[0] ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufVswXSA/Pz0gMTt9	Cannot use temporary expression
+C::{$n}[0][0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7Qzo6eyRufVswXVswXT0xO30=	Cannot use temporary expression
+isset(C::{$n})	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoQzo6eyRufSk7fQ==	Cannot use isset() on the result of an expression (you can use "null !== expression" instead)
+isset(C::{$n}[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoQzo6eyRufVswXSk7fQ==	
+unset(C::{$n})	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoQzo6eyRufSk7fQ==	syntax error, unexpected token ")", expecting "->" or "?->" or "["
+unset(C::{$n}[0])	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoQzo6eyRufVswXSk7fQ==	Cannot use temporary expression
+empty(C::{$n})	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoQzo6eyRufSk7fQ==	
+empty(C::{$n}[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoQzo6eyRufVswXSk7fQ==	
+$x =& C::{$n}	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgQzo6eyRufTt9	syntax error, unexpected token ";", expecting "->" or "?->" or "["
+$x =& C::{$n}[0]	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgQzo6eyRufVswXTt9	Cannot use temporary expression
+$c::X	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Olg7fQ==	
+$c::X[0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlhbMF07fQ==	
+$c::X[0][0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlhbMF1bMF07fQ==	
+$c::X=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Olg9MTt9	syntax error, unexpected token "="
+$c::X+=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlgrPTE7fQ==	syntax error, unexpected token "+="
+$c::X++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlgrKzt9	syntax error, unexpected token "++"
+$c::X ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlggPz89IDE7fQ==	syntax error, unexpected token "??="
+$c::X[0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlhbMF09MTt9	Cannot use temporary expression
+$c::X[0]++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlhbMF0rKzt9	Cannot use temporary expression
+$c::X[0] ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlhbMF0gPz89IDE7fQ==	Cannot use temporary expression
+$c::X[0][0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6OlhbMF1bMF09MTt9	Cannot use temporary expression
+isset($c::X)	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoJGM6OlgpO30=	Cannot use isset() on the result of an expression (you can use "null !== expression" instead)
+isset($c::X[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoJGM6OlhbMF0pO30=	
+unset($c::X)	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoJGM6OlgpO30=	syntax error, unexpected token ")", expecting "->" or "?->" or "["
+unset($c::X[0])	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoJGM6OlhbMF0pO30=	Cannot use temporary expression
+empty($c::X)	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoJGM6OlgpO30=	
+empty($c::X[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoJGM6OlhbMF0pO30=	
+$x =& $c::X	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgJGM6Olg7fQ==	syntax error, unexpected token ";", expecting "->" or "?->" or "["
+$x =& $c::X[0]	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgJGM6OlhbMF07fQ==	Cannot use temporary expression
+$c::{$n}	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn07fQ==	
+$c::{$n}[0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn1bMF07fQ==	
+$c::{$n}[0][0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn1bMF1bMF07fQ==	
+$c::{$n}=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn09MTt9	syntax error, unexpected token "="
+$c::{$n}+=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn0rPTE7fQ==	syntax error, unexpected token "+="
+$c::{$n}++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn0rKzt9	syntax error, unexpected token "++"
+$c::{$n} ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn0gPz89IDE7fQ==	syntax error, unexpected token "??="
+$c::{$n}[0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn1bMF09MTt9	Cannot use temporary expression
+$c::{$n}[0]++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn1bMF0rKzt9	Cannot use temporary expression
+$c::{$n}[0] ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn1bMF0gPz89IDE7fQ==	Cannot use temporary expression
+$c::{$n}[0][0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JGM6Onskbn1bMF1bMF09MTt9	Cannot use temporary expression
+isset($c::{$n})	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoJGM6Onskbn0pO30=	Cannot use isset() on the result of an expression (you can use "null !== expression" instead)
+isset($c::{$n}[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQoJGM6Onskbn1bMF0pO30=	
+unset($c::{$n})	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoJGM6Onskbn0pO30=	syntax error, unexpected token ")", expecting "->" or "?->" or "["
+unset($c::{$n}[0])	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQoJGM6Onskbn1bMF0pO30=	Cannot use temporary expression
+empty($c::{$n})	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoJGM6Onskbn0pO30=	
+empty($c::{$n}[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkoJGM6Onskbn1bMF0pO30=	
+$x =& $c::{$n}	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgJGM6Onskbn07fQ==	syntax error, unexpected token ";", expecting "->" or "?->" or "["
+$x =& $c::{$n}[0]	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgJGM6Onskbn1bMF07fQ==	Cannot use temporary expression
+recv()::X	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYO30=	
+recv()::X[0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYWzBdO30=	
+recv()::X[0][0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYWzBdWzBdO30=	
+recv()::X=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYPTE7fQ==	syntax error, unexpected token "="
+recv()::X+=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYKz0xO30=	syntax error, unexpected token "+="
+recv()::X++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYKys7fQ==	syntax error, unexpected token "++"
+recv()::X ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYID8/PSAxO30=	syntax error, unexpected token "??="
+recv()::X[0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYWzBdPTE7fQ==	Cannot use temporary expression
+recv()::X[0]++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYWzBdKys7fQ==	Cannot use temporary expression
+recv()::X[0] ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYWzBdID8/PSAxO30=	Cannot use temporary expression
+recv()::X[0][0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjpYWzBdWzBdPTE7fQ==	Cannot use temporary expression
+isset(recv()::X)	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQocmVjdigpOjpYKTt9	Cannot use isset() on the result of an expression (you can use "null !== expression" instead)
+isset(recv()::X[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQocmVjdigpOjpYWzBdKTt9	
+unset(recv()::X)	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQocmVjdigpOjpYKTt9	syntax error, unexpected token ")", expecting "->" or "?->" or "["
+unset(recv()::X[0])	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQocmVjdigpOjpYWzBdKTt9	Cannot use temporary expression
+empty(recv()::X)	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkocmVjdigpOjpYKTt9	
+empty(recv()::X[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkocmVjdigpOjpYWzBdKTt9	
+$x =& recv()::X	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgcmVjdigpOjpYO30=	syntax error, unexpected token ";", expecting "->" or "?->" or "["
+$x =& recv()::X[0]	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgcmVjdigpOjpYWzBdO30=	Cannot use temporary expression
+recv()::{$n}	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59O30=	
+recv()::{$n}[0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59WzBdO30=	
+recv()::{$n}[0][0]	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59WzBdWzBdO30=	
+recv()::{$n}=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59PTE7fQ==	syntax error, unexpected token "="
+recv()::{$n}+=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59Kz0xO30=	syntax error, unexpected token "+="
+recv()::{$n}++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59Kys7fQ==	syntax error, unexpected token "++"
+recv()::{$n} ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59ID8/PSAxO30=	syntax error, unexpected token "??="
+recv()::{$n}[0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59WzBdPTE7fQ==	Cannot use temporary expression
+recv()::{$n}[0]++	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59WzBdKys7fQ==	Cannot use temporary expression
+recv()::{$n}[0] ??= 1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59WzBdID8/PSAxO30=	Cannot use temporary expression
+recv()::{$n}[0][0]=1	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7cmVjdigpOjp7JG59WzBdWzBdPTE7fQ==	Cannot use temporary expression
+isset(recv()::{$n})	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQocmVjdigpOjp7JG59KTt9	Cannot use isset() on the result of an expression (you can use "null !== expression" instead)
+isset(recv()::{$n}[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7aXNzZXQocmVjdigpOjp7JG59WzBdKTt9	
+unset(recv()::{$n})	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQocmVjdigpOjp7JG59KTt9	syntax error, unexpected token ")", expecting "->" or "?->" or "["
+unset(recv()::{$n}[0])	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7dW5zZXQocmVjdigpOjp7JG59WzBdKTt9	Cannot use temporary expression
+empty(recv()::{$n})	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkocmVjdigpOjp7JG59KTt9	
+empty(recv()::{$n}[0])	accept	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7ZW1wdHkocmVjdigpOjp7JG59WzBdKTt9	
+$x =& recv()::{$n}	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgcmVjdigpOjp7JG59O30=	syntax error, unexpected token ";", expecting "->" or "?->" or "["
+$x =& recv()::{$n}[0]	reject	Y2xhc3MgQ3tjb25zdCBYPVsyLFszXV07c3RhdGljICRwPVsyXTt9ZnVuY3Rpb24gcmVjdigpe3JldHVybiBuZXcgQzt9ZnVuY3Rpb24gZigkYywkbil7JHggPSYgcmVjdigpOjp7JG59WzBdO30=	Cannot use temporary expression

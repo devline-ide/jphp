@@ -1,5 +1,7 @@
 package php.runtime.ext.core;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.Memory;
 import php.runtime.annotation.Reflection;
 import php.runtime.annotation.Runtime;
@@ -18,6 +20,7 @@ import php.runtime.exceptions.support.ErrorException;
 import php.runtime.exceptions.support.ErrorType;
 import php.runtime.ext.core.classes.util.WrapFlow;
 import php.runtime.ext.support.compile.FunctionsContainer;
+import php.runtime.ext.support.compile.CompileFunctionSpec;
 import php.runtime.invoke.InvokeHelper;
 import php.runtime.invoke.Invoker;
 import php.runtime.lang.Closure;
@@ -34,8 +37,31 @@ import php.runtime.util.StackTracer;
 
 import java.util.Observable;
 import java.util.Observer;
+import java.util.ArrayList;
+import java.util.Collection;
 
 public class LangFunctions extends FunctionsContainer {
+    @Override
+    public Collection<CompileFunctionSpec> getFunctionSpecs() {
+        Collection<CompileFunctionSpec> result = new ArrayList<>();
+        for (CompileFunctionSpec spec : super.getFunctionSpecs()) {
+            if (!spec.getName().equals("is_numeric") && !spec.getName().equals("intval")
+                    && !spec.getName().equals("floatval") && !spec.getName().equals("doubleval")
+                    && !spec.getName().equals("settype")) result.add(spec);
+        }
+        for (String name : new String[] {"is_numeric", "intval", "floatval", "doubleval"}) {
+            CompileFunctionSpec spec = new CompileFunctionSpec(name);
+            spec.addMethod(getNative(PhpNumericFunctions.class, name, Environment.class, TraceInfo.class, Memory.class));
+            if (name.equals("intval")) spec.addMethod(getNative(PhpNumericFunctions.class, name,
+                    Environment.class, TraceInfo.class, Memory.class, int.class));
+            result.add(spec);
+        }
+        CompileFunctionSpec settype = new CompileFunctionSpec("settype");
+        settype.addMethod(getNative(PhpNumericFunctions.class, "settype", Environment.class, TraceInfo.class, Memory.class, String.class));
+        result.add(settype);
+        return result;
+    }
+
     private static String evalErrorMessage(ErrorException e) {
         return e.getMessage() + ", eval()'s code on line " + (e.getTraceInfo().getStartLine() + 1)
                 + ", position " + (e.getTraceInfo().getStartPosition() + 1);
@@ -44,7 +70,7 @@ public class LangFunctions extends FunctionsContainer {
     public static Memory eval(Environment env, TraceInfo trace, @Runtime.GetLocals ArrayMemory locals, String code)
             throws Throwable {
         try {
-            return env.eval(code, locals);
+            return env.eval(code, locals, env.getModuleManager().getPhpLanguageProfile(trace));
         } catch (ErrorException e) {
             if (e.getType() == ErrorType.E_PARSE) {
                 if (env.isHandleErrors(ErrorType.E_PARSE))
@@ -320,7 +346,9 @@ public class LangFunctions extends FunctionsContainer {
 
             ConstantEntity constant = entity.findConstant(constName);
             InvokeHelper.checkAccess(env, trace, constant, false);
-            return constant == null ? Memory.NULL : constant.getValue();
+            return constant == null ? Memory.NULL
+                    : env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                        ? constant.getValue(env, trace) : constant.getValue();
         } else {
             Memory value = env.findConstant(name);
             if (value == null)
@@ -557,6 +585,21 @@ public class LangFunctions extends FunctionsContainer {
         }
         invoker.setTrace(trace);
 
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            String name = invoker instanceof php.runtime.invoke.DynamicMethodInvoker
+                    && ((php.runtime.invoke.DynamicMethodInvoker) invoker).getObject() instanceof php.runtime.lang.Closure
+                    ? php.runtime.invoke.InvokeArgumentHelper.closureCallName(
+                            (php.runtime.lang.Closure) ((php.runtime.invoke.DynamicMethodInvoker) invoker).getObject())
+                    : invoker instanceof php.runtime.invoke.DynamicMethodInvoker
+                    ? ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod().getClazzName() + "::"
+                        + ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod().getName()
+                    : invoker instanceof php.runtime.invoke.StaticMethodInvoker
+                        ? ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod().getClazzName() + "::"
+                            + ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod().getName()
+                        : invoker.getName();
+            args = php.runtime.invoke.InvokeArgumentHelper.prepareIndirectArguments(env, trace, args,
+                    invoker.getParameters(), name);
+        }
         return invoker.call(args);
     }
 
@@ -573,7 +616,9 @@ public class LangFunctions extends FunctionsContainer {
 
         env.pushCall(trace, null, passed, "call_user_func", null, null);
         try {
-            return _call_user_func(env, trace, function, args);
+            return _call_user_func(env, trace, function,
+                    env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                            ? php.runtime.invoke.InvokeArgumentHelper.argumentsByValue(args) : args);
         } finally {
             env.popCall();
         }
@@ -585,7 +630,10 @@ public class LangFunctions extends FunctionsContainer {
             Memory[] passed = new Memory[]{function, args};
             env.pushCall(trace, null, passed, "call_user_func_array", null, null);
             try {
-                return _call_user_func(env, trace, function, ((ArrayMemory) args).values(false));
+                ArrayMemory values = args.toValue(ArrayMemory.class);
+                return _call_user_func(env, trace, function,
+                        env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                                ? values.valuesForCall() : values.values(false));
             } finally {
                 env.popCall();
             }
@@ -717,6 +765,15 @@ public class LangFunctions extends FunctionsContainer {
             PropertyEntity entity = classEntity.isInstanceOf(context)
                     ? context.properties.get(property) : classEntity.properties.get(property);
 
+            boolean modern = classEntity.getModule() != null
+                    && classEntity.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    || env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+            if (modern && entity != null) {
+                if (!entity.isPrivate() || entity.getClazz() == classEntity || entity.getClazz() == context) return Memory.TRUE;
+                // An inherited private declaration is not visible here; an actual plain dynamic
+                // bucket with the same name still exists independently of the parent's slot.
+                return props != null && props.getByScalar(property) != null ? Memory.TRUE : Memory.FALSE;
+            }
             int accessFlags = entity == null ? 0 : entity.canAccess(env);
             if (accessFlags != 0)
                 return Memory.FALSE;
@@ -725,6 +782,10 @@ public class LangFunctions extends FunctionsContainer {
                     ? Memory.TRUE : Memory.FALSE;
         } else {
             PropertyEntity entity = classEntity.properties.get(property);
+            boolean modern = classEntity.getModule() != null
+                    && classEntity.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    || env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+            if (modern && entity != null && entity.isPrivate() && entity.getClazz() != classEntity) return Memory.FALSE;
             if (isMagic) {
                 int accessFlags = entity == null ? 0 : entity.canAccess(env);
                 if (accessFlags != 0)
@@ -758,7 +819,8 @@ public class LangFunctions extends FunctionsContainer {
         if (parentClass == null)
             return Memory.FALSE;
 
-        return classEntity.isInstanceOf(parentClass) ? Memory.TRUE : Memory.FALSE;
+        boolean modern = PhpClassNames.isModern(env) || PhpClassNames.isModern(classEntity) || PhpClassNames.isModern(parentClass);
+        return (modern ? classEntity.isInstanceOfAsciiName(parentClass.getName()) : classEntity.isInstanceOf(parentClass)) ? Memory.TRUE : Memory.FALSE;
     }
 
     public static Memory is_a(Environment env, TraceInfo trace, Memory object, String className) {
@@ -791,8 +853,11 @@ public class LangFunctions extends FunctionsContainer {
             if (object.isObject() && object.toValue(ObjectMemory.class).value instanceof Closure)
                 return Memory.FALSE;
 
-            return classEntity.isInstanceOf(parentClass)
-                    && !classEntity.equals(parentClass) ? Memory.TRUE : Memory.FALSE;
+            boolean modern = PhpClassNames.isModern(env) || PhpClassNames.isModern(classEntity) || PhpClassNames.isModern(parentClass);
+            boolean matches = modern ? classEntity.isInstanceOfAsciiName(parentClass.getName()) : classEntity.isInstanceOf(parentClass);
+            boolean same = modern ? PhpClassNames.canonicalKey(classEntity.getName()).equals(PhpClassNames.canonicalKey(parentClass.getName()))
+                    : classEntity.equals(parentClass);
+            return matches && !same ? Memory.TRUE : Memory.FALSE;
         }
     }
 
@@ -833,6 +898,11 @@ public class LangFunctions extends FunctionsContainer {
 
     public static Memory get_called_class(Environment env) {
         String name = env.getLateStatic();
+        if ((name == null || name.isEmpty()) && env.getModuleManager().getPhpLanguageProfile(env.trace())
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            env.exception(env.trace(), php.runtime.lang.exception.BaseError.class,
+                    "get_called_class() must be called from within a class");
+        }
         return name == null || name.isEmpty() ? Memory.FALSE : new StringMemory(name);
     }
 
@@ -886,12 +956,12 @@ public class LangFunctions extends FunctionsContainer {
         ArrayMemory result = new ArrayMemory();
         for (PropertyEntity el : entity.getProperties()) {
             if (el.canAccess(env, context) == 0)
-                result.refOfIndex(el.getName()).assign(el.getDefaultValue(env));
+                result.refOfIndex(el.getName()).assign(el.hasDefaultValue() ? el.getDefaultValue(env) : Memory.NULL);
         }
 
         for (PropertyEntity el : entity.getStaticProperties()) {
             if (el.canAccess(env, context) == 0)
-                result.refOfIndex(el.getName()).assign(el.getDefaultValue(env));
+                result.refOfIndex(el.getName()).assign(el.hasDefaultValue() ? el.getDefaultValue(env) : Memory.NULL);
         }
 
         return result.toConstant();
@@ -907,11 +977,29 @@ public class LangFunctions extends FunctionsContainer {
             ForeachIterator iterator = props.foreachIterator(false, false);
 
             ArrayMemory result = new ArrayMemory();
+            boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    || entity.getModule() != null && entity.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+            boolean convertNumericKeys = modern && props.hasNumericStringKeys();
             while (iterator.next()) {
-                PropertyEntity prop = entity.findProperty(iterator.getKey().toString());
-                if (prop == null || prop.canAccess(env, context) == 0)
-                    result.refOfIndex(prop == null ? iterator.getKey().toString() : prop.getName())
-                            .assign(iterator.getValue());
+                if (iterator.getValue().isUndefined() && (modern || props instanceof php.runtime.memory.PhpObjectProperties
+                        && ((php.runtime.memory.PhpObjectProperties) props).isExplicitlyUnset(iterator.getKey().toString()))) continue;
+                String key = iterator.getKey().toString();
+                String name = modern ? key.substring(key.lastIndexOf('\0') + 1) : key;
+                ClassEntity owner = entity;
+                if (modern && key.startsWith("\0") && key.length() > 1 && key.charAt(1) != '*') {
+                    ClassEntity specific = env.fetchClass(key.substring(1, key.lastIndexOf('\0')), false);
+                    if (specific != null) owner = specific;
+                }
+                PropertyEntity prop = owner.findProperty(name);
+                if (prop == null || prop.canAccess(env, context) == 0) {
+                    if (modern) {
+                        Memory stored = iterator.getValue();
+                        Object convertedKey = ArrayMemory.toKey(new StringMemory(prop == null ? key : prop.getName()));
+                        Memory copied = stored.isReference() ? stored : stored.toImmutable();
+                        if (convertNumericKeys) result.put(convertedKey, copied);
+                        else result.insertBucket(convertedKey, copied);
+                    } else result.refOfIndex(prop == null ? key : prop.getName()).assign(iterator.getValue());
+                }
             }
             return result.toConstant();
         } else

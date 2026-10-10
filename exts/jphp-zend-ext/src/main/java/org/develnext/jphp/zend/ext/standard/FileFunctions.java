@@ -74,6 +74,13 @@ public class FileFunctions extends FunctionsContainer {
 
     @Immutable
     public static String dirname(String path) {
+        int scheme = path.indexOf("://");
+        if (scheme > 1) {
+            int end = path.length();
+            while (end > scheme + 3 && path.charAt(end - 1) == '/') end--;
+            int separator = path.lastIndexOf('/', end - 1);
+            return path.substring(0, Math.max(scheme + 3, separator));
+        }
         String r = new File(path).getParent();
         if (r == null)
             return "";

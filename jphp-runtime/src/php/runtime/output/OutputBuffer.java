@@ -207,6 +207,13 @@ public class OutputBuffer {
                         ? result.getBinaryBytes(environment.getDefaultCharset()) : result.toString().getBytes(environment.getDefaultCharset());
                 if (flush){
                     if (output == null) {
+                        if (parentOutput == null) {
+                            // A root without an output stream is an in-memory sink.
+                            reset();
+                            buffer.write(data);
+                            status = HANDLER_FLUSH;
+                            return;
+                        }
                         parentOutput.write(data);
                     } else {
                         output.write(data);
@@ -223,6 +230,7 @@ public class OutputBuffer {
         if (flush){
             status |= HANDLER_FLUSH;
             if (output == null) {
+                if (parentOutput == null) return; // Keep root contents available to the embedding host.
                 parentOutput.write(buffer.toByteArray());
             } else {
                 buffer.writeTo(output);

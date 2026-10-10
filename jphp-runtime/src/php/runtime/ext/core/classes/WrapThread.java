@@ -52,9 +52,6 @@ public class WrapThread extends BaseObject implements IComparableObject<WrapThre
     public void setThread(Thread thread, Environment env) {
         this.thread = thread;
 
-        if (thread != null) {
-            Environment.addThreadSupport(thread, env);
-        }
     }
 
     @Signature({
@@ -82,14 +79,14 @@ public class WrapThread extends BaseObject implements IComparableObject<WrapThre
             setThread(new Thread(group, new Runnable() {
                 @Override
                 public void run() {
-                    invoker.callNoThrow();
+                    getCustomEnv().runInThread(invoker);
                 }
             }), env);
         } else {
             setThread(new Thread(group, new Runnable() {
                 @Override
                 public void run() {
-                    invoker.callNoThrow();
+                    getCustomEnv().runInThread(invoker);
                 }
             }, args[2].toString()), env);
         }

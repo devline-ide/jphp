@@ -1,6 +1,7 @@
 package php.runtime.loader.dump;
 
 import php.runtime.common.LangMode;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
 import php.runtime.loader.dump.io.DumpException;
@@ -13,13 +14,33 @@ import php.runtime.reflection.ModuleEntity;
 import php.runtime.reflection.helper.ClosureEntity;
 import php.runtime.reflection.helper.GeneratorEntity;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
 public class ModuleDumper extends Dumper<ModuleEntity> {
     public final static int DUMP_STAMP = 479873682;
-    public final static int DUMP_VERSION = 20141011;
+    public final static int LEGACY_DUMP_VERSION = 20141011;
+    public final static int DUMP_VERSION = 20261007;
+    public final static int COMPILER_ABI_VERSION = 9;
+    public final static int COMPILER_PROVENANCE_STAMP = 0x43414249; // CABI, in the existing reserved module tail.
+    public final static int COMPILER_PROVENANCE_VERSION = 1;
+
+    public static final class Header {
+        private final PhpLanguageProfile profile;
+        private final int compilerAbiVersion;
+
+        private Header(PhpLanguageProfile profile, int compilerAbiVersion) {
+            this.profile = profile;
+            this.compilerAbiVersion = compilerAbiVersion;
+        }
+
+        public PhpLanguageProfile getPhpLanguageProfile() { return profile; }
+        /** Zero denotes the original header without an explicit ABI, not unknown provenance. */
+        public int getCompilerAbiVersion() { return compilerAbiVersion; }
+    }
 
     protected ConstantDumper constantDumper = new ConstantDumper(context, env, debugInformation);
     protected ClosureDumper closureDumper = new ClosureDumper(context, env, debugInformation);
@@ -52,11 +73,17 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         if (entity.getData() == null)
             throw new DumpException("Module '" + entity.getName() + "' not compiled");
 
+        int compilerAbi = entity.getCompilerProvenance().getCompilerAbiVersion();
+        if (compilerAbi > COMPILER_ABI_VERSION)
+            throw new DumpException("Unsupported original compiler ABI: " + compilerAbi);
+
         DumpOutputStream data = new DumpOutputStream(output);
 
         // version
         data.writeInt(DUMP_STAMP);
         data.writeInt(DUMP_VERSION);
+        data.writeInt(COMPILER_ABI_VERSION);
+        data.writeInt(entity.getPhpLanguageProfile().getId());
 
         // legacy code.
         data.writeEnum(LangMode.DEFAULT);
@@ -109,24 +136,80 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
             data.writeInt(0);
         }
 
-        data.writeRawData(null, 1024 * 1024 * 5); // 5 mb
+        // Current source ABI is already represented exactly by the header; retain its original empty tail.
+        if (compilerAbi == COMPILER_ABI_VERSION) {
+            data.writeRawData(null, 1024 * 1024 * 5);
+            return;
+        }
+        // Keep the transport ABI/layout unchanged, without certifying old or manually supplied bytecode.
+        ByteArrayOutputStream metadata = new ByteArrayOutputStream();
+        DumpOutputStream provenance = new DumpOutputStream(metadata);
+        provenance.writeInt(COMPILER_PROVENANCE_STAMP);
+        provenance.writeInt(COMPILER_PROVENANCE_VERSION);
+        provenance.writeInt(1); // Original compiler ABI field count.
+        provenance.writeInt(compilerAbi);
+        data.writeRawData(metadata.toByteArray(), 1024 * 1024 * 5); // Existing reserved field, consumed by older readers.
+    }
+
+    /** Reads and validates only the header; no class dependency resolution or provenance certification. */
+    public static Header readHeader(InputStream input) throws IOException {
+        DumpInputStream data = new DumpInputStream(input);
+        int STAMP = data.readInt();
+        if (STAMP != DUMP_STAMP)
+            throw new DumpException("Invalid file format");
+
+        int VERSION = data.readInt();
+        if (VERSION != DUMP_VERSION && VERSION != LEGACY_DUMP_VERSION)
+            throw new DumpException("Unsupported JPHP dump version: " + VERSION);
+
+        PhpLanguageProfile profile = PhpLanguageProfile.JPHP_LEGACY;
+        int abi = 0;
+        if (VERSION == DUMP_VERSION) {
+            abi = data.readInt();
+            if (abi < 1 || abi > COMPILER_ABI_VERSION)
+                throw new DumpException("Unsupported JPHP compiler ABI: " + abi);
+            try {
+                profile = PhpLanguageProfile.fromId(data.readInt());
+            } catch (IllegalArgumentException e) {
+                throw new DumpException(e.getMessage());
+            }
+        }
+
+        return new Header(profile, abi);
+    }
+
+    public static PhpLanguageProfile readLanguageProfileHeader(InputStream input) throws IOException {
+        return readHeader(input).getPhpLanguageProfile();
+    }
+
+    private static int readCompilerProvenance(byte[] metadata, int acceptedAbi) throws IOException {
+        if (metadata.length == 0) return acceptedAbi; // Original ABI0..7 dumps have no lineage extension.
+        if (metadata.length < 4) return ModuleEntity.CompilerProvenance.UNKNOWN_ABI;
+        DumpInputStream data = new DumpInputStream(new ByteArrayInputStream(metadata));
+        if (data.readInt() != COMPILER_PROVENANCE_STAMP)
+            return ModuleEntity.CompilerProvenance.UNKNOWN_ABI; // Unrelated historical reserved data is opaque.
+        if (data.readInt() != COMPILER_PROVENANCE_VERSION)
+            throw new DumpException("Unsupported compiler provenance version");
+        if (data.readInt() != 1) throw new DumpException("Invalid compiler provenance field count");
+        int abi = data.readInt();
+        if (abi < ModuleEntity.CompilerProvenance.UNKNOWN_ABI || abi > acceptedAbi)
+            throw new DumpException("Invalid original compiler ABI: " + abi);
+        if (data.available() != 0) throw new DumpException("Invalid compiler provenance size");
+        return abi;
     }
 
     @Override
     public ModuleEntity load(InputStream input) throws IOException {
         DumpInputStream data = new DumpInputStream(input);
 
-        int STAMP = data.readInt();
-        if (STAMP != DUMP_STAMP)
-            throw new DumpException("Invalid file format");
-
-        int VERSION = data.readInt();
-        if (VERSION != DUMP_VERSION)
-            throw new DumpException("Invalid dump version - " + VERSION + ", only " + DUMP_VERSION);
+        Header header = readHeader(input);
+        PhpLanguageProfile profile = header.getPhpLanguageProfile();
 
         data.readLangMode(); // legacy
 
         ModuleEntity entity = new ModuleEntity(context);
+        entity.setCompiledArtifact(true);
+        entity.setPhpLanguageProfile(profile);
         entity.setName(data.readName());
         entity.setInternalName(data.readName());
         entity.setStrictTypes(data.readBoolean());
@@ -143,7 +226,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         // closures
         count = data.readInt();
         for(int i = 0; i < count; i++){
-            ClosureEntity el = closureDumper.load(input);
+            ClosureEntity el = closureDumper.load(input, header.getCompilerAbiVersion());
             el.setModule(entity);
             entity.addClosure(el);
         }
@@ -175,7 +258,9 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         // byte code
         entity.setData(data.readRawData(Integer.MAX_VALUE));
 
-        data.readRawData(1024 * 1024 * 5);
+        int compilerAbi = readCompilerProvenance(data.readRawData(1024 * 1024 * 5), header.getCompilerAbiVersion());
+        entity.validateMethodSignatures(env);
+        entity.recordDumpCompilerAbi(compilerAbi, header.getCompilerAbiVersion());
         return entity;
     }
 }

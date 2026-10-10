@@ -1,5 +1,7 @@
 package php.runtime.loader.dump;
 
+import php.runtime.common.PhpClassNames;
+
 import php.runtime.common.collections.map.HashedMap;
 import php.runtime.reflection.ClassEntity;
 import php.runtime.reflection.ConstantEntity;
@@ -14,6 +16,7 @@ public class StandaloneLibrary {
     private Map<String, Module> modules = new LinkedHashMap<>();
 
     private Map<String, Module> classModules = new HashMap<>();
+    private Map<String, Module> legacyClassModules = new HashMap<>();
     private Map<String, Module> functionModules = new HashMap<>();
     private Map<String, Module> constantModules = new HashMap<>();
 
@@ -23,6 +26,10 @@ public class StandaloneLibrary {
 
     public Map<String, Module> getClassModules() {
         return classModules;
+    }
+
+    public Module findLegacyClassModule(String name) {
+        return legacyClassModules.get(name.toLowerCase());
     }
 
     public Map<String, Module> getFunctionModules() {
@@ -37,7 +44,8 @@ public class StandaloneLibrary {
         modules.put(module.getName(), module);
 
         for (String name : module.getClasses()) {
-            classModules.put(name.toLowerCase(), module);
+            classModules.put(PhpClassNames.canonicalKey(name), module);
+            legacyClassModules.put(name.toLowerCase(), module);
         }
 
         for (String name : module.getFunctions()) {

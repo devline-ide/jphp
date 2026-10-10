@@ -25,6 +25,10 @@ public class ListCompiler extends BaseExprCompiler<ListExprToken> {
     }
 
     public void write(ListExprToken list, boolean returnValue, boolean writeValue) {
+        for (ListExprToken.Variable variable:list.getVariables())
+            if (org.develnext.jphp.core.compiler.common.NullsafeChain.isResult(variable.var))
+                env.error(variable.var.toTraceInfo(compiler.getContext()),php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,
+                        "Assignments can only happen to writable values");
         if (writeValue) {
             expr.writeExpression(list.getValue(), true, false);
             expr.writePopBoxing();

@@ -37,6 +37,11 @@ allprojects {
         options.encoding = 'UTF-8'
     }
 
+    tasks.withType(Test).configureEach {
+        inputs.property('jphpTestCompiled', System.getenv('JPHP_TEST_COMPILED') != null)
+        inputs.property('jphpTestConcurrent', System.getenv('JPHP_TEST_CONCURRENT') != null)
+    }
+
     tasks.withType(Javadoc).configureEach {
         options.encoding = 'UTF-8'
     }

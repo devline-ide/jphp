@@ -167,7 +167,17 @@ public class VarDump extends Printer {
             printer.write("object(");
             printer.write(classEntity.getName());
             printer.write(")#" + value.getPointer());
-            printer.write(" (" + arr.size() + ") {\n");
+            boolean modernStorage = arr instanceof PhpObjectProperties && (classEntity.getModule() != null
+                    && classEntity.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    || env != null && env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    || ((PhpObjectProperties) arr).hasUnsetAnchors());
+            int visibleCount = arr.size();
+            if (modernStorage) {
+                visibleCount = 0;
+                ForeachIterator entries = arr.foreachIterator(false, false);
+                while (entries.next()) if (!entries.getValue().isUndefined()) visibleCount++;
+            }
+            printer.write(" (" + visibleCount + ") {\n");
 
             level += 1;
 
@@ -199,6 +209,11 @@ public class VarDump extends Printer {
             ForeachIterator iterator = arr.foreachIterator(false, false);
 
             while (iterator.next()){
+                PropertyEntity uninitialized = null;
+                if (modernStorage && iterator.getValue().isUndefined()) {
+                    uninitialized = ((PhpObjectProperties) arr).declaration(iterator.getKey().toString());
+                    if (uninitialized == null || uninitialized.getDeclaredType() == null) continue;
+                }
                 printer.write(StringUtils.repeat(' ', level * PRINT_INDENT));
                 Memory key = iterator.getMemoryKey();
 
@@ -237,7 +252,8 @@ public class VarDump extends Printer {
                 printer.write("]=>\n");
                 printer.write(StringUtils.repeat(' ', level * PRINT_INDENT));
 
-                print(iterator.getValue(), level, used);
+                if (uninitialized != null) printer.write("uninitialized(" + uninitialized.getDeclaredType().getErrorSignature() + ")\n");
+                else print(iterator.getValue(), level, used);
                 //printer.write('\n');
             }
 

@@ -55,11 +55,29 @@ public class ConstGenerator extends Generator<ConstStmtToken> {
             while (true) {
                 Token next = analyzer.getClazz() == null ? nextToken(iterator) : nextTokenSensitive(iterator, ClassStmtToken.class);
 
-                if (next instanceof NameToken){
+                boolean modernHead = analyzer.getClazz() != null && result.items.isEmpty()
+                        && analyzer.getPhpLanguageProfile()
+                            == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+                if (next instanceof NameToken || modernHead && !isBreak(next) && !(next instanceof CommaToken) && !(next instanceof ClassStmtToken)) {
+                    Token token = nextToken(iterator);
+                    if (modernHead && !(token instanceof AssignExprToken)) {
+                        java.util.List<Token> type = new java.util.ArrayList<>(); type.add(next);
+                        Token name = token;
+                        while (true) {
+                            token = nextTokenSensitive(iterator, ClassStmtToken.class);
+                            if (token instanceof AssignExprToken) break;
+                            if (isBreak(token) || token instanceof CommaToken) unexpectedToken(token, "=");
+                            type.add(name); name = token;
+                        }
+                        name = makeSensitive(name);
+                        if (!(name instanceof NameToken)) unexpectedToken(name, TokenType.T_STRING);
+                        next = name;
+                        result.setDeclaredType(PhpTypeDeclarationParser.parse(analyzer, type,
+                                analyzer.getClazz().getFulledName() + "::" + ((NameToken) name).getName()));
+                    }
+                    if (!(next instanceof NameToken)) unexpectedToken(next, TokenType.T_STRING);
                     if (next instanceof FulledNameToken && !((FulledNameToken) next).isProcessed(NamespaceUseStmtToken.UseType.CONSTANT))
                         unexpectedToken(next, TokenType.T_STRING);
-
-                    Token token = nextToken(iterator);
                     if (!(token instanceof AssignExprToken))
                         unexpectedToken(token, "=");
 

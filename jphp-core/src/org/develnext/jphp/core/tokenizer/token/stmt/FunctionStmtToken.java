@@ -22,6 +22,7 @@ public class FunctionStmtToken extends StmtToken {
     protected boolean returnReference;
     protected boolean returnOptional;
     protected HintType returnHintType;
+    protected php.runtime.reflection.support.PhpTypeDeclaration declaredReturnType;
     protected NameToken returnHintTypeClass;
 
     protected List<ArgumentStmtToken> arguments;
@@ -309,6 +310,9 @@ public class FunctionStmtToken extends StmtToken {
     public void setReturnOptional(boolean returnOptional) {
         this.returnOptional = returnOptional;
     }
+
+    public php.runtime.reflection.support.PhpTypeDeclaration getDeclaredReturnType() {return declaredReturnType;}
+    public void setDeclaredReturnType(php.runtime.reflection.support.PhpTypeDeclaration type) {declaredReturnType = type;}
 
     public HintType getReturnHintType() {
         return returnHintType;

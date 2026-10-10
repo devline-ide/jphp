@@ -2,6 +2,7 @@ package org.develnext.jphp.core.compiler.common;
 
 import php.runtime.common.Association;
 import php.runtime.common.Messages;
+import php.runtime.common.PhpLanguageProfile;
 import php.runtime.exceptions.support.ErrorType;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
@@ -29,6 +30,8 @@ public class ASMExpression {
         this.env = env;
         this.context = context;
         this.expr = expr;
+        boolean modern = env != null && context != null
+                && context.getPhpLanguageProfile(env.getScope()) == PhpLanguageProfile.PHP_8_5;
 
         Stack<Token> stack  = new Stack<Token>();
         List<Token> result = new ArrayList<Token>();
@@ -85,6 +88,23 @@ public class ASMExpression {
                 if (!operator.isValidAssociation())
                     unexpectedToken(operator);
 
+                if (modern
+                        && (el instanceof AssignableOperatorToken || el instanceof IncExprToken || el instanceof DecExprToken || el instanceof AmpersandRefToken)) {
+                    int operand = checkStack.size() - (operator.isBinary() ? 2 : 1);
+                    if (operand >= 0 && isClassConstant(checkStack.get(operand)))
+                        env.error(el.toTraceInfo(context), ErrorType.E_COMPILE_ERROR, "Cannot use temporary expression in write context");
+                }
+                if (modern) {
+                    int operand=checkStack.size()-(operator.isBinary() ? 2 : 1);
+                    boolean nullsafe=operand>=0 && checkStack.get(operand) instanceof DynamicAccessExprToken
+                            && ((DynamicAccessExprToken)checkStack.get(operand)).isNullsafe();
+                    if (el instanceof DynamicAccessAssignExprToken)
+                        nullsafe |= ((DynamicAccessExprToken)el).isNullsafe();
+                    if (nullsafe && (el instanceof AssignableOperatorToken || el instanceof IncExprToken
+                            || el instanceof DecExprToken || el instanceof DynamicAccessAssignExprToken || el instanceof AmpersandRefToken))
+                        env.error(el.toTraceInfo(context),ErrorType.E_COMPILE_ERROR,el instanceof AmpersandRefToken
+                                ? "Cannot take reference of a nullsafe chain" : "Can't use nullsafe operator in write context");
+                }
                 if (el instanceof IncExprToken || el instanceof DecExprToken){
                     if (prev != null && prev.getClass() == DynamicAccessExprToken.class){
                         DynamicAccessAssignExprToken newAssign
@@ -107,8 +127,14 @@ public class ASMExpression {
                 } else {
                     if (checkStack.empty())
                         unexpectedToken(operator);
-                    checkStack.pop();
-                    checkStack.push(null);
+                    Token operand = checkStack.pop();
+                    DynamicAccessExprToken access=NullsafeChain.access(el);
+                    checkStack.push(modern && NullsafeChain.step(el)
+                            && (access!=null && access.isNullsafe() || operand instanceof DynamicAccessExprToken
+                                && ((DynamicAccessExprToken)operand).isNullsafe())
+                            ? access!=null && access.isNullsafe() ? access : operand
+                            : modern && el instanceof StaticAccessOperatorExprToken ? ((StaticAccessOperatorExprToken)el).getOrigin()
+                            : modern && el instanceof ArrayGetExprToken && isClassConstant(operand) ? operand : null);
                 }
             } else if (el instanceof CallExprToken){
                 if (((CallExprToken) el).getName() instanceof OperatorExprToken){
@@ -118,8 +144,15 @@ public class ASMExpression {
                     } else {
                         if (checkStack.empty())
                             unexpectedToken(operator);
-                        checkStack.pop();
-                        checkStack.push(null);
+                        Token operand=checkStack.pop();
+                        DynamicAccessExprToken access=NullsafeChain.access(el);
+                        boolean nullsafe=modern && NullsafeChain.step(el)
+                                && (access!=null && access.isNullsafe() || operand instanceof DynamicAccessExprToken
+                                    && ((DynamicAccessExprToken)operand).isNullsafe());
+                        if (nullsafe && ((CallExprToken)el).isFirstClassCallable())
+                            env.error(el.toTraceInfo(context),ErrorType.E_COMPILE_ERROR,
+                                    "Cannot combine nullsafe operator with Closure creation");
+                        checkStack.push(nullsafe ? access!=null && access.isNullsafe() ? access : operand : null);
                     }
                 } else
                     checkStack.push(el);
@@ -140,10 +173,17 @@ public class ASMExpression {
         this.result = new ExprStmtToken(null, null, result);
     }
 
+    private static boolean isClassConstant(Token token) {
+        if (!(token instanceof org.develnext.jphp.core.tokenizer.token.expr.value.StaticAccessExprToken)) return false;
+        var access = (org.develnext.jphp.core.tokenizer.token.expr.value.StaticAccessExprToken) token;
+        return access.isDynamicConstant() || access.getField() instanceof org.develnext.jphp.core.tokenizer.token.expr.value.NameToken
+                || access.getField() instanceof org.develnext.jphp.core.tokenizer.token.expr.ClassExprToken;
+    }
+
     protected void processOperator(Stack<Token> stack, List<Token> result, OperatorExprToken current){
         List<Token> list = new ArrayList<Token>();
         boolean isRightOperator = current != null && current.isRightSide();
-        int prior = current == null ? -1 : current.getPriority();
+        int prior = current == null ? -1 : getPriority(current);
 
         while (!stack.empty()){
             Token el = stack.peek();
@@ -159,7 +199,8 @@ public class ASMExpression {
 
             boolean flush = current == null
                     || elPrior == 1
-                    || (isRightOperator ? elPrior > prior : elPrior <= prior);
+                    || (isRightOperator ? current instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.PhpPowExprToken
+                        ? elPrior < prior : elPrior > prior : elPrior <= prior);
             if (flush){
                 stack.pop();
                 list.add(el);
@@ -235,6 +276,9 @@ public class ASMExpression {
     }
 
     private int getPriority(Token token){
+        if (env != null && context.getPhpLanguageProfile(env.getScope()) == PhpLanguageProfile.PHP_8_5) {
+            if (token instanceof ConcatExprToken) return 65; // Below addition/shifts, above comparisons.
+        }
         if (token instanceof ExprToken)
             return  ((ExprToken)token).getPriority();
         else

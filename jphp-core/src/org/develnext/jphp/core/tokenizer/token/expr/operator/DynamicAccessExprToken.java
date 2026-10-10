@@ -8,6 +8,10 @@ import org.develnext.jphp.core.tokenizer.token.expr.ValueExprToken;
 import org.develnext.jphp.core.tokenizer.token.stmt.ExprStmtToken;
 
 public class DynamicAccessExprToken extends OperatorExprToken {
+    public boolean isNullsafe() {return "?->".equals(getMeta().getWord());}
+    private boolean coalescingRead;
+    public boolean isCoalescingRead() {return coalescingRead;}
+    public void setCoalescingRead(boolean value) {coalescingRead = value;}
     protected ValueExprToken field;
     protected ExprStmtToken fieldExpr;
 

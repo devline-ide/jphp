@@ -1,6 +1,7 @@
 package php.runtime.memory;
 
 import php.runtime.Memory;
+import php.runtime.OperatorUtils;
 import php.runtime.memory.support.MemoryStringUtils;
 
 import java.nio.charset.Charset;
@@ -102,23 +103,23 @@ public class LongMemory extends Memory {
 
     @Override
     public Memory inc() {
-        return new LongMemory(value + 1);
+        return plus(1L);
     }
 
     @Override
     public Memory dec() {
-        return new LongMemory(value - 1);
+        return minus(1L);
     }
 
     @Override
     public Memory negative() {
-        return new LongMemory(- value);
+        return OperatorUtils.minus(0L, value);
     }
 
     @Override
     public Memory plus(Memory memory) {
         switch (memory.type){
-            case INT: return LongMemory.valueOf(value + ((LongMemory) memory).value);
+            case INT: return plus(((LongMemory) memory).value);
             case DOUBLE: return new DoubleMemory(value + ((DoubleMemory)memory).value);
             case REFERENCE: return plus(memory.toValue());
             default: return plus(memory.toNumeric());
@@ -128,7 +129,7 @@ public class LongMemory extends Memory {
     @Override
     public Memory minus(Memory memory) {
         switch (memory.type){
-            case INT: return LongMemory.valueOf(value - ((LongMemory) memory).value);
+            case INT: return minus(((LongMemory) memory).value);
             case DOUBLE: return new DoubleMemory(value - ((DoubleMemory)memory).value);
             case REFERENCE: return minus(memory.toValue());
             default: return minus(memory.toNumeric());
@@ -138,7 +139,7 @@ public class LongMemory extends Memory {
     @Override
     public Memory mul(Memory memory) {
         switch (memory.type){
-            case INT: return LongMemory.valueOf(value * ((LongMemory) memory).value);
+            case INT: return mul(((LongMemory) memory).value);
             case DOUBLE: return new DoubleMemory(value * ((DoubleMemory)memory).value);
             case REFERENCE: return mul(memory.toValue());
             default: return mul(memory.toNumeric());
@@ -266,12 +267,12 @@ public class LongMemory extends Memory {
 
     @Override
     public Memory minus(long value) {
-        return LongMemory.valueOf(this.value - value);
+        return OperatorUtils.minus(this.value, value);
     }
 
     @Override
     public Memory plus(long value) {
-        return LongMemory.valueOf(this.value + value);
+        return OperatorUtils.plus(this.value, value);
     }
 
     @Override

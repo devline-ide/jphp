@@ -15,11 +15,30 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 
 public class RuntimeClassLoader extends URLClassLoader {
     protected Map<String, ClassEntity> internalClasses = new HashMap<String, ClassEntity>();
     protected Map<String, FunctionEntity> internalFunctions = new HashMap<String, FunctionEntity>();
     protected Map<String, ModuleEntity> internalModules = new HashMap<String, ModuleEntity>();
+    private final Map<String, byte[]> definedBytecodeHashes = new HashMap<>();
+
+    private synchronized Class<?> defineOrReuse(String name, byte[] data) {
+        byte[] hash;
+        try { hash = MessageDigest.getInstance("SHA-256").digest(data); }
+        catch (NoSuchAlgorithmException impossible) { throw new IllegalStateException(impossible); }
+        Class<?> existing = findLoadedClass(name);
+        if (existing != null) {
+            byte[] previous = definedBytecodeHashes.get(name);
+            if (previous == null || !MessageDigest.isEqual(hash, previous))
+                throw new LinkageError("Different bytecode already defined for " + name);
+            return existing;
+        }
+        Class<?> defined = defineClass(name, data, 0, data.length);
+        definedBytecodeHashes.put(name, hash);
+        return defined;
+    }
 
     protected List<Callback<Void, URL>> addLibraryListeners = new ArrayList<>();
 
@@ -46,11 +65,7 @@ public class RuntimeClassLoader extends URLClassLoader {
     public Class<?> loadClass(ClassEntity clazz, boolean withBytecode) throws NoSuchMethodException, NoSuchFieldException {
         if (withBytecode) {
             byte[] data = translateData(clazz.getData());
-            Class<?> result = null;
-
-            if (result == null) {
-                result = defineClass(null, data, 0, data.length);
-            }
+            Class<?> result = defineOrReuse(clazz.getCompiledInternalName(), data);
 
             clazz.setNativeClazz(result);
         }
@@ -77,7 +92,7 @@ public class RuntimeClassLoader extends URLClassLoader {
         if (withBytecode) {
             byte[] data = translateData(function.getData());
 
-            Class<?> result = defineClass(null, data, 0, data.length);
+            Class<?> result = defineOrReuse(className, data);
 
             function.setNativeClazz(result);
         }
@@ -95,12 +110,12 @@ public class RuntimeClassLoader extends URLClassLoader {
         return loadClass(generator, withBytecode);
     }
 
-    public boolean loadModule(ModuleEntity module, boolean withBytecode) {
+    public synchronized boolean loadModule(ModuleEntity module, boolean withBytecode) {
+        if (module.isLoaded() && module.getNativeMethod() != null) return false;
         String internal = module.getInternalName();
 
         boolean ret = false;
         if (!module.isLoaded()) {
-            internalModules.put(internal, module);
             try {
                 for (ClosureEntity closure : module.getClosures())
                     loadClosure(closure, withBytecode);
@@ -109,7 +124,7 @@ public class RuntimeClassLoader extends URLClassLoader {
                     loadGenerator(generator, withBytecode);
 
                 for (ClassEntity clazz : module.getClasses()) {
-                    if (clazz.getType() != ClassEntity.Type.INTERFACE)
+                    if (clazz.getType() != ClassEntity.Type.INTERFACE || clazz.getData() != null && clazz.getData().length > 0)
                         loadClass(clazz, withBytecode);
                 }
 
@@ -123,15 +138,12 @@ public class RuntimeClassLoader extends URLClassLoader {
                 throw new RuntimeException(e);
             }
 
-            module.setLoaded(true);
             ret = true;
         }
 
         if (withBytecode) {
             byte[] data = translateData(module.getData());
-            Class<?> result = defineClass(
-                    null, data, 0, module.getData().length
-            );
+            Class<?> result = defineOrReuse(internal, data);
             module.setNativeClazz(result);
         }
 
@@ -144,6 +156,8 @@ public class RuntimeClassLoader extends URLClassLoader {
             throw new RuntimeException(e);
         }
 
+        module.setLoaded(true);
+        internalModules.put(internal, module);
         return ret;
     }
 

@@ -1,4 +1,11 @@
 
+import org.gradle.api.attributes.LibraryElements
+
+// The merged JFoenix JAR includes unchanged upstream controls; its classes directory contains only repairs.
+configurations.compileClasspath {
+    attributes.attribute(LibraryElements.LIBRARY_ELEMENTS_ATTRIBUTE, objects.named(LibraryElements, LibraryElements.JAR))
+}
+
 dependencies {
     compileOnly project(":jphp-runtime")
     compileOnly project(":exts:jphp-gui-ext")

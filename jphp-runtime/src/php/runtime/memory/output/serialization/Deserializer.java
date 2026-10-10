@@ -271,8 +271,10 @@ public class Deserializer {
                                     ArrayMemory props = iObject.getProperties();
                                     Memory serProps = readArray(input, i);
                                     if (serProps.isArray()) {
-                                        props.putAll(serProps.toValue(ArrayMemory.class));
-                                        if (classEntity.methodMagicWakeup != null){
+                                        boolean modernRestoration = PhpSerialization.restoreLegacyObjectProperties(
+                                                env, trace, iObject, serProps.toValue(ArrayMemory.class));
+                                        if (!modernRestoration) props.putAll(serProps.toValue(ArrayMemory.class));
+                                        if (!modernRestoration && classEntity.methodMagicWakeup != null){
                                             env.pushCall(trace, iObject, classEntity.methodMagicWakeup.getName());
                                             try {
                                                 classEntity.methodMagicWakeup.invokeDynamic(iObject, env, trace);

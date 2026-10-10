@@ -5,6 +5,9 @@ import org.develnext.jphp.core.tokenizer.token.stmt.ExprStmtToken;
 import java.util.List;
 
 public class ArrayGetRefExprToken extends ArrayGetExprToken {
+    private boolean arithmeticTarget;
+    public boolean isArithmeticTarget() { return arithmeticTarget; }
+    public void setArithmeticTarget(boolean value) { arithmeticTarget = value; }
     private List<ExprStmtToken> parameters;
     private boolean isShortcut = false;
 

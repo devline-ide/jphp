@@ -3,6 +3,7 @@ package org.develnext.jphp.zend.ext.json;
 import com.google.gson.GsonBuilder;
 import org.develnext.jphp.json.gson.MemoryDeserializer;
 import org.develnext.jphp.json.gson.MemorySerializer;
+import org.develnext.jphp.json.gson.MemoryStreamAdapterFactory;
 import php.runtime.Memory;
 import php.runtime.env.CompileScope;
 import php.runtime.ext.support.Extension;
@@ -59,6 +60,8 @@ public class JsonExtension extends Extension {
         builder.registerTypeAdapter(KeyValueMemory.class, memorySerializer);
         builder.registerTypeAdapter(StringBuilderMemory.class, memorySerializer);
         builder.registerTypeAdapter(StringMemory.class, memorySerializer);
+        builder.registerTypeAdapterFactory(new MemoryStreamAdapterFactory(memorySerializer));
+        builder.serializeNulls();
         return builder;
     }
 

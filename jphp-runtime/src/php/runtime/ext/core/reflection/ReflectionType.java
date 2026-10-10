@@ -12,6 +12,16 @@ import php.runtime.reflection.ClassEntity;
 
 @Name("ReflectionType")
 public class ReflectionType extends BaseObject {
+    public static ReflectionType fromDeclaration(Environment env, php.runtime.reflection.support.PhpTypeDeclaration type) {
+        if (type.getNamedType() != null) return new ReflectionNamedType(env, type);
+        return type.getAlternatives().size() == 1 ? new ReflectionIntersectionType(env, type) : new ReflectionUnionType(env, type);
+    }
+
+    protected static php.runtime.reflection.support.PhpTypeDeclaration initialized(Environment env, php.runtime.reflection.support.PhpTypeDeclaration type) {
+        if (type == null) env.exception(env.trace(), php.runtime.lang.exception.BaseError.class, "Internal error: Failed to retrieve the reflection object");
+        return type;
+    }
+
     private Memory name;
     private boolean allowsNull;
     private boolean isBuiltin;

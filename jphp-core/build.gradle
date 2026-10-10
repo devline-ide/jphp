@@ -8,7 +8,11 @@ sourceSets {
 
 dependencies {
     api project(':jphp-runtime')
-    api group: 'org.ow2.asm', name: 'asm-all', version:'5.2'
+    def asmVersion = '9.8'
+    api "org.ow2.asm:asm:$asmVersion"
+    api "org.ow2.asm:asm-tree:$asmVersion"
+    api "org.ow2.asm:asm-util:$asmVersion"
+    api "org.ow2.asm:asm-analysis:$asmVersion"
 
     testImplementation 'junit:junit:4.+'
     testImplementation project(':exts:jphp-zend-ext')

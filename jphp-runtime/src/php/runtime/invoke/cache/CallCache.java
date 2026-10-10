@@ -6,68 +6,71 @@ import php.runtime.reflection.support.Entity;
 import java.lang.ref.WeakReference;
 
 abstract public class CallCache<T extends Entity> {
+    /**
+     * Retained only for binary linkage of existing Java subclasses. This matrix is no longer populated.
+     * Custom storage readers must migrate to getItem(Environment, int); compiled PHP get/put ABI is unchanged.
+     */
+    @Deprecated
     protected Item[][] cache;
 
+    /** An Environment-owned row; a static CallCache must never retain this object. */
+    public static final class Row {
+        private Item[] data;
+        public Row() { }
+    }
+
+    @SuppressWarnings("unchecked")
     public T get(Environment env, int index) {
-        if (cache == null) {
-            return null;
+        Item item = getItem(env, index);
+        return item == null ? null : (T) item.data;
+    }
+
+    /** Returns one stable item, including its receiver/scope metadata, under the row's monitor. */
+    protected Item getItem(Environment env, int index) {
+        Row row = env.getCallCacheRow(this, false);
+        if (row == null) return null;
+        synchronized (row) {
+            Item[] data = row.data;
+            if (data == null || index >= data.length) return null;
+            Item item = data[index];
+            if (item == null) return null;
+            if (item.env.get() != env) {
+                data[index] = null;
+                return null;
+            }
+            return item;
         }
-
-        Item[] data = env.id < cache.length ? cache[env.id] : null;
-        if (data == null)
-            return null;
-
-        if (index >= data.length)
-            return null;
-
-        Item item = data[index];
-        if (item == null) {
-            return null;
-        }
-
-        if (item.env.get() != env) {
-            data[index] = null;
-            return null;
-        }
-
-        return (T) item.data;
     }
 
     abstract public Item[] newArrayData(int length);
+    /** Legacy Java linkage only: Environment IDs no longer index a cache matrix. */
+    @Deprecated
     abstract public Item[][] newArrayArrayData(int length);
 
     @SuppressWarnings("unchecked")
-    synchronized public void put(Environment env, int index, T entity) {
-        int id = env.id;
+    public void put(Environment env, int index, T entity) {
+        putItem(env, index, new Item(entity, env));
+    }
 
-        if (cache == null) {
-            cache = newArrayArrayData(id + 1);
-        }
-
-        if (id >= cache.length) {
-            Item[][] newCache = newArrayArrayData(id + 1);
-            System.arraycopy(cache, 0, newCache, 0, cache.length);
-            cache = newCache;
-        }
-
-        Item[] data = cache[id];
-
-        if (data == null) {
-            cache[id] = data = newArrayData(index + 1 + 10);
-        } else {
-            if (index >= data.length) {
+    protected void putItem(Environment env, int index, Item item) {
+        Row row = env.getCallCacheRow(this, true);
+        if (row == null) return; // A finalized Environment can still execute fallback calls without resurrecting cache state.
+        synchronized (row) {
+            Item[] data = row.data;
+            if (data == null) {
+                row.data = data = newArrayData(index + 1 + 10);
+            } else if (index >= data.length) {
                 Item[] newData = newArrayData(index + 1 + 10);
                 System.arraycopy(data, 0, newData, 0, data.length);
-                cache[id] = data = newData;
+                row.data = data = newData;
             }
+            data[index] = item;
         }
-
-        data[index] = new Item(entity, env);
     }
 
     protected static class Item {
-        Entity data;
-        WeakReference<Environment> env;
+        final Entity data;
+        final WeakReference<Environment> env;
 
         public Item(Entity data, Environment env) {
             this.data = data;

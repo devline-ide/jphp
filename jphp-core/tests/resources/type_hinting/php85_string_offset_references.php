@@ -1,0 +1,34 @@
+<?php
+class SOReferenceOwner {public string $value="abc";public static string $shared="abc";}
+$rows=[];
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{$r=&$s[0];$r="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["string-rhs",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{$s[0]=&$x;}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["string-lhs",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="";$x="z";$m="ok";try{$r=&$s[0];}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["string-empty",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{$r=&$s[5];}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["string-beyond",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="abc";$whole=&$s;$x="z";$m="ok";try{$r=&$whole[0];}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["string-alias",$m,serialize([$s,$whole,$x])];})();
+$rows[]=(function(){$a=["abc"];$x="z";$m="ok";try{$r=&$a[0][0];$r="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["array-rhs",$m,serialize([$a,$x])];})();
+$rows[]=(function(){$a=["abc"];$x="z";$m="ok";try{$a[0][0]=&$x;}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["array-lhs",$m,serialize([$a,$x])];})();
+$rows[]=(function(){$a=[["abc"]];$x="z";$m="ok";try{$r=&$a[0][0][0];}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["array-nested",$m,serialize([$a,$x])];})();
+$rows[]=(function(){$a=["abc"];$copy=$a;$x="z";$m="ok";try{$r=&$a[0][0];}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["array-cow",$m,serialize([$a,$copy,$x])];})();
+$rows[]=(function(){$c=new SOReferenceOwner;$x="z";$m="ok";try{$r=&$c->value[0];$r="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["typed-property-rhs",$m,serialize([$c->value,$x])];})();
+$rows[]=(function(){$c=new SOReferenceOwner;$x="z";$m="ok";try{$c->value[0]=&$x;}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["typed-property-lhs",$m,serialize([$c->value,$x])];})();
+$rows[]=(function(){$c=new SOReferenceOwner;$whole=&$c->value;$x="z";$m="ok";try{$r=&$whole[0];}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["typed-property-alias",$m,serialize([$c->value,$whole,$x])];})();
+$rows[]=(function(){SOReferenceOwner::$shared="abc";$x="z";$m="ok";try{$r=&SOReferenceOwner::$shared[0];}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["static-property-rhs",$m,serialize([SOReferenceOwner::$shared,$x])];})();
+$rows[]=(function(){SOReferenceOwner::$shared="abc";$x="z";$m="ok";try{SOReferenceOwner::$shared[0]=&$x;}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["static-property-lhs",$m,serialize([SOReferenceOwner::$shared,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$f=function(&$r){$r="q";};$m="ok";try{$f($s[0]);}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["implicit-user-ref",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$c=new SOReferenceOwner;$x="z";$f=function(&$r){$r="q";};$m="ok";try{$f($c->value[0]);}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["implicit-property-ref",$m,serialize([$c->value,$x])];})();
+$rows[]=(function(){$a=["abc"];$x="z";$f=function(&$r){$r="q";};$m="ok";try{$f($a[0][0]);}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["implicit-array-ref",$m,serialize([$a,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{sort($s[0]);}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["implicit-native-sort",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{array_pop($s[0]);}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["implicit-native-array-pop",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$f=function&()use(&$s){return $s[0];};$m="ok";try{$r=&$f();$r="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["return-ref-source",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$f=function&()use(&$s){return $s[0];};$m="ok";try{$v=$f();}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["return-ref-value-call",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$c=new SOReferenceOwner;$x="z";$f=function&()use($c){return $c->value[0];};$m="ok";try{$r=&$f();}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["return-ref-property",$m,serialize([$c->value,$x])];})();
+$rows[]=(function(){$a=["abc"];$x="z";$f=function&()use(&$a){return $a[0][0];};$m="ok";try{$r=&$f();}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["return-ref-nested-array",$m,serialize([$a,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{$s[0]="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["ordinary-offset-write",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$a=["abc"];$x="z";$m="ok";try{$a[0][0]="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["ordinary-array-offset-write",$m,serialize([$a,$x])];})();
+$rows[]=(function(){$c=new SOReferenceOwner;$x="z";$m="ok";try{$c->value[0]="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["ordinary-typed-offset-write",$m,serialize([$c->value,$x])];})();
+$rows[]=(function(){$s="abc";$v=$s[0];$x="z";$m="ok";try{$r=&$v;$r="q";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["ordinary-offset-value-copy",$m,serialize([$s,$v,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$f=function($v){$r=&$v;$r="q";return $v;};$m="ok";try{$x=$f($s[0]);}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["ordinary-offset-value-arg",$m,serialize([$s,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{$v=($s[0]="q");$r=&$v;$r="r";}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["ordinary-assignment-value",$m,serialize([$s,$v,$x])];})();
+$rows[]=(function(){$s="abc";$x="z";$m="ok";try{$x=strlen($s[0]);}catch(Throwable$e){$m=get_class($e).":".$e->getMessage();}return ["ordinary-offset-strlen",$m,serialize([$s,$x])];})();
+return serialize($rows);

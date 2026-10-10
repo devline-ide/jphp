@@ -26,6 +26,13 @@ class UXPopupWindow extends UXWindow
     public $hideOnEscape;
 
     /**
+     * Popup anchor relative to the window or content, including CSS bounds.
+     * @var string WINDOW_TOP_LEFT, WINDOW_TOP_RIGHT, WINDOW_BOTTOM_LEFT, WINDOW_BOTTOM_RIGHT,
+     *             CONTENT_TOP_LEFT, CONTENT_TOP_RIGHT, CONTENT_BOTTOM_LEFT, CONTENT_BOTTOM_RIGHT
+     */
+    public $anchorLocation;
+
+    /**
      * @var string
      */
     public $style;

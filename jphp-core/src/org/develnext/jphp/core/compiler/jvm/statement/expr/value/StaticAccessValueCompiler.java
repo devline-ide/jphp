@@ -18,16 +18,88 @@ public class StaticAccessValueCompiler extends BaseExprCompiler<StaticAccessExpr
         super(exprCompiler);
     }
 
+    private void writeModernConstant(StaticAccessExprToken token, boolean returnValue) {
+        ValueExprToken clazz = token.getClazz();
+        if (token.isDynamicConstant() && (clazz instanceof ParentExprToken || clazz instanceof StaticExprToken || clazz instanceof SelfExprToken)) {
+            // Relative scope errors occur after the name expression, unlike an ordinary class fetch.
+            expr.writeExpression(token.getFieldExpr(), true, false);
+            expr.writePopBoxing();
+            expr.writePushEnv();
+            expr.writePushTraceInfo(token);
+            expr.writePushConstString(clazz instanceof ParentExprToken ? "parent" : clazz instanceof StaticExprToken ? "static" : "self");
+            expr.writeGetStatic("$CALL_CONST_CACHE", ConstantCallCache.class);
+            expr.writePushConstInt(method.clazz.getAndIncCallConstCount());
+            expr.writeSysStaticCall(ObjectInvokeHelper.class, "getRelativeConstant", Memory.class,
+                    Memory.class, Environment.class, TraceInfo.class, String.class, ConstantCallCache.class, Integer.TYPE);
+            expr.setStackPeekAsImmutable();
+            if (!returnValue) expr.writePopAll(1);
+            return;
+        }
+        if (clazz instanceof ParentExprToken || clazz instanceof StaticExprToken) {
+            expr.writePushEnv();
+            expr.writePushTraceInfo(token);
+            expr.writeSysStaticCall(php.runtime.invoke.PhpMethodResolver.class,
+                    clazz instanceof ParentExprToken ? "parentClass" : "staticClass", php.runtime.reflection.ClassEntity.class,
+                    Environment.class, TraceInfo.class);
+        } else {
+            if (clazz instanceof SelfExprToken) expr.writePushSelf(false);
+            else if (clazz instanceof NameToken) expr.writePushString(((NameToken) clazz).getName());
+            else if (clazz != null) expr.writePush(clazz, true, false);
+            expr.writePopBoxing();
+            expr.writePushEnv();
+            expr.writePushTraceInfo(token);
+            expr.writeSysStaticCall(php.runtime.invoke.PhpMethodResolver.class, "resolveClass", php.runtime.reflection.ClassEntity.class,
+                    Memory.class, Environment.class, TraceInfo.class);
+        }
+        if (token.isDynamicConstant()) expr.writeExpression(token.getFieldExpr(), true, false);
+        else expr.writePushString(((NameToken) token.getField()).getName());
+        expr.writePopBoxing();
+        expr.writePushEnv();
+        expr.writePushTraceInfo(token);
+        expr.writeGetStatic("$CALL_CONST_CACHE", ConstantCallCache.class);
+        expr.writePushConstInt(method.clazz.getAndIncCallConstCount());
+        expr.writePushConstBoolean(clazz instanceof StaticExprToken);
+        String reference = clazz instanceof SelfExprToken ? "self" : clazz instanceof ParentExprToken ? "parent"
+                : clazz instanceof StaticExprToken ? "static" : clazz instanceof NameToken ? ((NameToken) clazz).getName() : null;
+        if (reference == null) expr.writePushConstNull(); else expr.writePushConstString(reference);
+        expr.writeSysStaticCall(ObjectInvokeHelper.class, "getConstant", Memory.class,
+                php.runtime.reflection.ClassEntity.class, Memory.class, Environment.class, TraceInfo.class,
+                ConstantCallCache.class, Integer.TYPE, boolean.class, String.class);
+        expr.setStackPeekAsImmutable();
+        if (!returnValue) expr.writePopAll(1);
+    }
+
     @Override
     public void write(StaticAccessExprToken token, boolean returnValue) {
         boolean isConstant = token.getField() instanceof NameToken;
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && (isConstant || token.isDynamicConstant())) {
+            writeModernConstant(token, returnValue);
+            return;
+        }
         /*if (token.getField() == null)
             expr.unexpectedToken(token.getFieldExpr().getSingle());*/
 
         boolean lateStaticCall = false;
 
         if (token.getField() instanceof ClassExprToken) {
-            if (token.getClazz() instanceof ParentExprToken) {
+            if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                if (token.getClazz() instanceof ParentExprToken || token.getClazz() instanceof StaticExprToken || token.getClazz() instanceof SelfExprToken) {
+                    expr.writePushEnv();
+                    expr.writePushTraceInfo(token);
+                    expr.writePushConstString(token.getClazz() instanceof ParentExprToken ? "parent"
+                            : token.getClazz() instanceof StaticExprToken ? "static" : "self");
+                    expr.writeSysStaticCall(php.runtime.invoke.PhpMethodResolver.class, "relativeClassName", String.class,
+                            Environment.class, TraceInfo.class, String.class);
+                } else {
+                    if (token.getClazz() != null) expr.writePush(token.getClazz(), true, false);
+                    expr.writePopBoxing();
+                    expr.writePushEnv();
+                    expr.writePushTraceInfo(token);
+                    expr.writeSysStaticCall(php.runtime.invoke.PhpMethodResolver.class, "objectClassName", String.class,
+                            Memory.class, Environment.class, TraceInfo.class);
+                }
+            } else if (token.getClazz() instanceof ParentExprToken) {
                 expr.writePushParent(token.getClazz());
             } else if (token.getClazz() instanceof StaticExprToken) {
                 expr.writePushStatic();
@@ -41,9 +113,10 @@ public class StaticAccessValueCompiler extends BaseExprCompiler<StaticAccessExpr
 
             if (clazz instanceof ParentExprToken){
                 expr.writePushParent(clazz);
+                expr.writePushDupLowerCase();
             } else if (clazz instanceof NameToken){
                 expr.writePushConstString(((NameToken) clazz).getName());
-                expr.writePushConstString(((NameToken) clazz).getName().toLowerCase());
+                expr.writePushConstString(((NameToken) clazz).getName().toLowerCase(java.util.Locale.ROOT));
             } else {
                 if (clazz instanceof StaticExprToken){
                     expr.writePushStatic();
@@ -56,7 +129,12 @@ public class StaticAccessValueCompiler extends BaseExprCompiler<StaticAccessExpr
                     }
                 }
 
-                expr.writePopString();
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    expr.writePopBoxing();expr.writePushEnv();expr.writePushTraceInfo(token);
+                    expr.writeSysStaticCall(php.runtime.invoke.PhpMethodResolver.class,"resolveClass",php.runtime.reflection.ClassEntity.class,
+                            Memory.class,Environment.class,TraceInfo.class);
+                    expr.writeSysDynamicCall(php.runtime.reflection.support.Entity.class,"getName",String.class);
+                } else expr.writePopString();
                 expr.writePushDupLowerCase();
             }
 
@@ -89,6 +167,8 @@ public class StaticAccessValueCompiler extends BaseExprCompiler<StaticAccessExpr
                 expr.writePushTraceInfo(token);
 
                 String name = "get";
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                    name=token.isQuietRead() ? "isset" : token.isWriteAccess() ? "get" : "read";
                 if (token instanceof StaticAccessUnsetExprToken)
                     name = "unset";
                 else if (token instanceof StaticAccessIssetExprToken)
@@ -103,6 +183,14 @@ public class StaticAccessValueCompiler extends BaseExprCompiler<StaticAccessExpr
                 }
 
                 expr.writePushConstBoolean(lateStaticCall);
+                if (expr.writeArgumentReferenceMode(token)) {
+                    expr.writeSysStaticCall(php.runtime.invoke.PhpCallFrame.class,
+                            expr.isArgumentArrayProperty(token) ? "argumentArrayStaticProperty" : "argumentStaticProperty",Memory.class,
+                            String.class,String.class,String.class,Environment.class,TraceInfo.class,
+                            PropertyCallCache.class,int.class,boolean.class,boolean.class);
+                    if (!returnValue) expr.writePopAll(1);
+                    return;
+                }
                 expr.writeSysStaticCall(ObjectInvokeHelper.class,
                         name + "StaticProperty",
                         Memory.class, String.class, String.class, String.class, Environment.class, TraceInfo.class,

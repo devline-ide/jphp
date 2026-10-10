@@ -81,7 +81,7 @@ public class VarExport extends Printer {
             level += 1;
             while (iterator.next()){
                 Memory el = iterator.getValue();
-                if (el == Memory.UNDEFINED) continue;
+                if (el == Memory.UNDEFINED || value instanceof php.runtime.memory.PhpObjectProperties && el.isUndefined()) continue;
 
                 printer.write(StringUtils.repeat(' ', level * PRINT_INDENT));
                 Memory key = iterator.getMemoryKey();

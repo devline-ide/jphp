@@ -132,6 +132,16 @@ abstract public class AbstractFunctionEntity extends Entity {
         return null;
     }
 
+    protected Memory getImmutableResultForTypeCheck(php.runtime.reflection.ModuleEntity module) {
+        // The legacy dump represents both null and undefined as null. An empty function's
+        // existing flag recovers the missing-return sentinel without changing the dump layout.
+        if (isEmpty && !abstractable && returnTypeChecker != null && module != null
+                && module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            return Memory.UNDEFINED;
+        }
+        return getImmutableResult();
+    }
+
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
         Memory result = getImmutableResult();
 

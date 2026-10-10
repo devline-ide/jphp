@@ -63,7 +63,7 @@ public class FunctionDumper extends Dumper<FunctionEntity> {
             data.writeRawData(null);
         }
 
-        data.writeRawData(null);
+        data.writeRawData(TypeDeclarationDumper.save(entity.getReturnTypeChecker()));
     }
 
     @Override
@@ -106,7 +106,8 @@ public class FunctionDumper extends Dumper<FunctionEntity> {
         }
 
         entity.setData(data.readRawData(Integer.MAX_VALUE));
-        data.readRawData();
+        var declaration = TypeDeclarationDumper.load(data.readRawData());
+        if (declaration != null) entity.setReturnTypeChecker(declaration);
 
         return entity;
     }

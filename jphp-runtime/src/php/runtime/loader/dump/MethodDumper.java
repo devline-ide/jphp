@@ -86,7 +86,7 @@ public class MethodDumper extends Dumper<MethodEntity> {
         }
 
         // raw data
-        print.writeRawData(null);
+        print.writeRawData(TypeDeclarationDumper.save(entity.getReturnTypeChecker()));
     }
 
     @Override
@@ -152,7 +152,8 @@ public class MethodDumper extends Dumper<MethodEntity> {
             entity.getParameters()[i] = param;
         }
 
-        data.readRawData();
+        var declaration = TypeDeclarationDumper.load(data.readRawData());
+        if (declaration != null) entity.setReturnTypeChecker(declaration);
         return entity;
     }
 }

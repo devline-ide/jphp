@@ -98,7 +98,7 @@ public class JsonFunctions extends FunctionsContainer {
         }
 
         Gson gson = builder.create();
-        return gson.toJson(memory);
+        return gson.toJson(memory, Memory.class);
     }
 
     @Immutable

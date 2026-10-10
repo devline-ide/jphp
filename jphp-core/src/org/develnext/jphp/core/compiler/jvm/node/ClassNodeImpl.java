@@ -8,8 +8,8 @@ import java.util.ArrayList;
 public class ClassNodeImpl extends ClassNode {
 
     public ClassNodeImpl() {
-        super(Opcodes.ASM5);
-        version = Opcodes.V1_6; // todo: available to switch this value
+        super(Opcodes.ASM9);
+        version = Opcodes.V25; // Matches the Java 25 runtime baseline.
         this.interfaces = new ArrayList();
         this.visibleAnnotations = new ArrayList();
     }

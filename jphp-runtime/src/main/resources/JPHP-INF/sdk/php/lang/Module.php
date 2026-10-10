@@ -18,8 +18,9 @@ class Module
      * @param File|Stream|string $source
      * @param bool $compiled
      * @param bool $debugInformation
+     * @param string|null $sourceName Logical source path for diagnostics and __FILE__/__DIR__.
      */
-    public function __construct($source, $compiled = false, $debugInformation = true) { }
+    public function __construct($source, $compiled = false, $debugInformation = true, $sourceName = null) { }
 
     /**
      * @return string

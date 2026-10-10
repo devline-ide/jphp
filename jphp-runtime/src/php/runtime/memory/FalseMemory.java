@@ -116,7 +116,7 @@ public class FalseMemory extends Memory {
     @Override
     public Memory minus(Memory memory) {
         switch (memory.type){
-            case INT: return new LongMemory(-((LongMemory)memory).value);
+            case INT: return memory.negative();
             case DOUBLE: return new DoubleMemory(-((DoubleMemory)memory).value);
             case REFERENCE: return minus(memory.toValue());
             default: return minus(memory.toNumeric());
@@ -246,7 +246,7 @@ public class FalseMemory extends Memory {
 
     @Override
     public Memory minus(long value) {
-        return new LongMemory(- value);
+        return CONST_INT_0.minus(value);
     }
 
     @Override

@@ -10,6 +10,7 @@ import php.runtime.common.GrammarUtils;
 
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Locale;
 
 public class TokenFinder {
 
@@ -43,12 +44,14 @@ public class TokenFinder {
         put("&&", BooleanAndExprToken.class);
         put("and", BooleanAnd2ExprToken.class);
         put("||", BooleanOrExprToken.class);
+        put("|>", PipeExprToken.class);
         put("or", BooleanOr2ExprToken.class);
         put("xor", BooleanXorExprToken.class);
         put("!", BooleanNotExprToken.class);
 
         put("?", ValueIfElseToken.class);
         put("??", ValueNullCoalesceIfElseToken.class);
+        put("??=", AssignNullCoalesceExprToken.class);
 
         put("~", NotExprToken.class);
         put("^", XorExprToken.class);
@@ -60,6 +63,7 @@ public class TokenFinder {
         put("@", SilentToken.class);
 
         put("->", DynamicAccessExprToken.class);
+        put("?->", DynamicAccessExprToken.class);
         put("::", StaticAccessExprToken.class);
         put("=>", KeyValueExprToken.class);
         put("fn", LambdaStmtToken.class);
@@ -197,11 +201,12 @@ public class TokenFinder {
             return token;
         }
 
-        word = word.toLowerCase();
+        String cacheKey = word;
+        word = word.toLowerCase(Locale.ROOT);
         token = patterns.get(word);
         
         if (token != null) {
-            findCache.put(word, token);
+            findCache.put(cacheKey, token);
             return token;
         }
 
@@ -212,18 +217,18 @@ public class TokenFinder {
         }
 
         if (GrammarUtils.isVariable(word)) {
-            findCache.put(word, VariableExprToken.class);
+            findCache.put(cacheKey, VariableExprToken.class);
             return VariableExprToken.class;
         }
         
         if (GrammarUtils.isInteger(word) || GrammarUtils.isHexInteger(word)
                 || GrammarUtils.isBinaryInteger(word)) {
-            findCache.put(word, IntegerExprToken.class);
+            findCache.put(cacheKey, IntegerExprToken.class);
             return IntegerExprToken.class;
         }
         
         if (GrammarUtils.isSimpleFloat(word) || GrammarUtils.isExpFloat(word)) {
-            findCache.put(word, DoubleExprToken.class);
+            findCache.put(cacheKey, DoubleExprToken.class);
             return DoubleExprToken.class;
         }
 
@@ -240,14 +245,14 @@ public class TokenFinder {
 
         if (fulledName) {
             if (word.length() < 32) {
-                findCache.put(word, FulledNameToken.class);
+                findCache.put(cacheKey, FulledNameToken.class);
             }
 
             return FulledNameToken.class;
         }
 
         if (word.length() < 32) {
-            findCache.put(word, NameToken.class);
+            findCache.put(cacheKey, NameToken.class);
         }
         
         return NameToken.class;
