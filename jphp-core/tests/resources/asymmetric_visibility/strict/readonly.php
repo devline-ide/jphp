@@ -1,0 +1,4 @@
+<?php
+declare(strict_types=1);
+function attempt($name,$f){try{$v=$f();echo $name,":ok:",json_encode($v),"\n";}catch(Throwable $e){echo $name,":",get_class($e),":",$e->getMessage(),"\n";}}
+class A{public readonly int $x;public private(set) readonly int $y;public public(set) readonly int $z;}class B extends A{function init(){$this->x=2;attempt("child_private",function(){$this->y=3;});}}$b=new B;$b->init();attempt("global_publicset",function()use($b){$b->z=4;});attempt("repeat",function()use($b){$b->z=5;});$r=new ReflectionProperty(A::class,"y");$r->setValue($b,6);echo "state:",$b->x,":",$b->y,":",$b->z,"\n";foreach(["x","y","z"]as$n){$r=new ReflectionProperty(A::class,$n);echo $n,":",$r->getModifiers(),":",(int)$r->isPrivateSet(),":",(int)$r->isProtectedSet(),"\n";}

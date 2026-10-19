@@ -11,6 +11,13 @@ import java.util.HashMap;
 import java.util.Map;
 
 abstract public class Entity {
+    private java.util.List<PhpAttribute> phpAttributes;
+    public java.util.List<PhpAttribute> getPhpAttributes() {
+        return phpAttributes == null ? java.util.List.of() : phpAttributes;
+    }
+    public void setPhpAttributes(java.util.List<PhpAttribute> attributes) {
+        phpAttributes=attributes.isEmpty() ? null : java.util.List.copyOf(attributes);
+    }
     private Map<String, Object> additionalData = new HashMap<String, Object>();
 
     protected Context context;

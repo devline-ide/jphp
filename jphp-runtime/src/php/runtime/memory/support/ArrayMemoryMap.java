@@ -1,6 +1,7 @@
 package php.runtime.memory.support;
 
 import php.runtime.Memory;
+import php.runtime.memory.ReferenceMemory;
 import php.runtime.common.Pair;
 import php.runtime.common.collections.*;
 import php.runtime.common.collections.iterators.*;
@@ -84,7 +85,199 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
     private transient ArrayList<ArrayMapEntryMemory> buckets;
     private transient IdentityHashMap<ArrayMapEntryMemory, Integer> bucketOrdinals;
 
+    // A native symbol table is not PHP ARRAY storage. No authority exists until explicitly sealed.
+    private transient NativeGlobalSlots nativeGlobals;
+
+    /** Structural authority only; carrier payload and Environment admission remain separate. */
+    public NativeGlobalSlots sealNativeGlobals() {
+        if (nativeGlobals != null) throw new IllegalStateException("Native global map is already sealed");
+        if (getClass() != ArrayMemoryMap.class || buckets != null)
+            throw new IllegalArgumentException("Native globals require an exact ordinary map");
+        NativeGlobalSlots prepared = new NativeGlobalSlots();
+        ReferenceMemory.NativeGlobalAttachment[] attachments = new ReferenceMemory.NativeGlobalAttachment[prepared.slots.size()];
+        int ordinal=0;
+        for (NativeGlobalSlot slot : prepared.slots.values()) attachments[ordinal++]=slot.carrier.prepareNativeGlobalSlot(slot);
+        for (ReferenceMemory.NativeGlobalAttachment attachment : attachments) attachment.validate();
+        nativeGlobals = prepared;
+        for (ReferenceMemory.NativeGlobalAttachment attachment : attachments) attachment.store();
+        return prepared;
+    }
+    private void rejectNativeGlobalMutation() {
+        if (nativeGlobals != null) throw new IllegalStateException("Native globals require their exact placement token");
+    }
+
+    public final class NativeGlobalSlots {
+        private Map<Object, NativeGlobalSlot> slots = new LinkedHashMap<>();
+        private NativeGlobalPlacement pending;
+        private NativeGlobalSlots() {
+            for (ArrayMapEntryMemory entry = header.after; entry != header; entry = entry.after) {
+                requireNativeKey(entry.getKey());
+                if (entry.getClass() != ArrayMapEntryMemory.class)
+                    throw new IllegalArgumentException("Native globals require plain physical carriers");
+                slots.put(entry.getKey(), new NativeGlobalSlot(this, entry.getKey(), entry, true));
+            }
+        }
+        public ArrayMemoryMap map() { return ArrayMemoryMap.this; }
+        public NativeGlobalSlot slot(Object key) {
+            requireNativeKey(key);
+            if (pending != null) throw new IllegalStateException("Native global placement is in progress");
+            NativeGlobalSlot result = slots.get(key);
+            if (result == null) {
+                result = new NativeGlobalSlot(this, key, new ArrayMapEntryMemory(null, hash(key), key, Memory.UNDEFINED), false);
+                result.carrier.prepareNativeGlobalSlot(result).store();
+                slots.put(key, result);
+            }
+            result.validate(); return result;
+        }
+        /** Retire only the authentic constructor bucket; its distinct user slot remains absent. */
+        public NativeGlobalPlacement prepareSyntheticRetirement(NativeGlobalSlot oldSlot, php.runtime.env.Environment.SyntheticGlobalsOrigin origin) {
+            if (nativeGlobals != this || oldSlot == null || oldSlot.owner != this || origin == null)
+                throw new IllegalArgumentException("Synthetic global retirement belongs to another map");
+            if (pending != null) throw new IllegalStateException("Native global placement is in progress");
+            oldSlot.validate();origin.validateCarrier(oldSlot.carrier);
+            if (!oldSlot.linked) throw new IllegalArgumentException("Synthetic global bucket is no longer linked");
+            NativeGlobalSlot fresh = new NativeGlobalSlot(this, oldSlot.key,
+                    new ArrayMapEntryMemory(null, oldSlot.carrier.hashCode, oldSlot.key, Memory.UNDEFINED), false);
+            fresh.carrier.prepareNativeGlobalSlot(fresh).store();
+            Map<Object, NativeGlobalSlot> replacement = new LinkedHashMap<>(slots);
+            replacement.put(oldSlot.key, fresh);
+            NativeGlobalPlacement result = new NativeGlobalPlacement(this, oldSlot, false, fresh, replacement, origin);
+            pending = result;return result;
+        }
+        public NativeGlobalPlacement prepareLink(NativeGlobalSlot slot) { return prepare(slot, true); }
+        public NativeGlobalPlacement prepareUnlink(NativeGlobalSlot slot) { return prepare(slot, false); }
+        private NativeGlobalPlacement prepare(NativeGlobalSlot slot, boolean link) {
+            if (nativeGlobals != this || slot == null || slot.owner != this)
+                throw new IllegalArgumentException("Native global slot belongs to another map");
+            if (pending != null) throw new IllegalStateException("Native global placement is in progress");
+            slot.validate();
+            if (slot.linked == link) throw new IllegalArgumentException("Native global membership already matches");
+            NativeGlobalPlacement result = new NativeGlobalPlacement(this, slot, link);
+            pending = result; return result;
+        }
+    }
+    private static void requireNativeKey(Object key) {
+        if (key == null || key.getClass() != String.class && key.getClass() != php.runtime.memory.LongMemory.class)
+            throw new IllegalArgumentException("Native global key must already be normalized");
+        if (key instanceof String && !(php.runtime.memory.ArrayMemory.toKey(new php.runtime.memory.StringMemory((String) key)) instanceof String))
+            throw new IllegalArgumentException("Numeric native global key must already be canonical");
+    }
+    public final class NativeGlobalSlot {
+        private final NativeGlobalSlots owner;
+        private final Object key;
+        private final ArrayMapEntryMemory carrier;
+        private boolean linked;
+        private long generation;
+        private NativeGlobalSlot(NativeGlobalSlots owner, Object key, ArrayMapEntryMemory carrier, boolean linked) {
+            this.owner = owner; this.key = key; this.carrier = carrier; this.linked = linked;
+        }
+        /** Private-minted slot identity only; this proof adds no payload or graph ownership. */
+        public void validateCarrierAttachment(ReferenceMemory actual) {
+            if (actual != carrier || carrier.getClass() != ArrayMapEntryMemory.class
+                    || nativeGlobals != null && nativeGlobals != owner)
+                throw new IllegalArgumentException("Native global structural slot belongs to another carrier or map");
+        }
+        public Object key() { return key; }
+        public ArrayMapEntryMemory carrier() { return carrier; }
+        public boolean isLinked() { return linked; }
+        public long generation() { return generation; }
+        public void validate() {
+            if (nativeGlobals != owner || owner.slots.get(key) != this || carrier.getKey() != key || carrier.hashCode != hash(key)
+                    || (linked ? getEntry(key) != carrier : getEntry(key) != null || carrier.before != null || carrier.after != null))
+                throw new IllegalArgumentException("Native global carrier or placement is stale");
+        }
+    }
+
+    /** Allocation and validation precede beginStore. store() changes only map pointers/metadata. */
+    public final class NativeGlobalPlacement implements AutoCloseable {
+        private final NativeGlobalSlots owner;
+        private final NativeGlobalSlot slot;
+        private final boolean link;
+        private final NativeGlobalSlot replacement;
+        private final Map<Object, NativeGlobalSlot> replacementSlots;
+        private final php.runtime.env.Environment.SyntheticGlobalsOrigin syntheticOrigin;
+        private final ArrayMapEntryMemory[] beforeData, nextData;
+        private final int beforeSize, beforeModCount, nextThreshold, index;
+        private final long beforeGeneration;
+        private final ArrayMapEntryMemory previousHash, nextHash, beforeOrder, afterOrder;
+        private boolean begun, stored, closed;
+        private NativeGlobalPlacement(NativeGlobalSlots owner, NativeGlobalSlot slot, boolean link) {
+            this(owner,slot,link,null,null,null);
+        }
+        private NativeGlobalPlacement(NativeGlobalSlots owner, NativeGlobalSlot slot, boolean link,
+                NativeGlobalSlot replacement, Map<Object, NativeGlobalSlot> replacementSlots,
+                php.runtime.env.Environment.SyntheticGlobalsOrigin syntheticOrigin) {
+            this.owner = owner; this.slot = slot; this.link = link;
+            this.replacement=replacement;this.replacementSlots=replacementSlots;this.syntheticOrigin=syntheticOrigin;
+            beforeData = data; beforeSize = size; beforeModCount = modCount; beforeGeneration = slot.generation;
+            int capacity = data.length;
+            if (link && size + 1 >= threshold && capacity <= MAXIMUM_CAPACITY / 2) capacity *= 2;
+            nextData = capacity == data.length ? data : new ArrayMapEntryMemory[capacity];
+            nextThreshold = capacity == data.length ? threshold : calculateThreshold(capacity, loadFactor);
+            index = hashIndex(slot.carrier.hashCode, data.length);
+            ArrayMapEntryMemory previous = null;
+            if (!link) for (ArrayMapEntryMemory entry = data[index]; entry != slot.carrier; entry = entry.next) previous = entry;
+            previousHash = previous; nextHash = slot.carrier.next;
+            beforeOrder = link ? header.before : slot.carrier.before;
+            afterOrder = link ? header : slot.carrier.after;
+        }
+        public NativeGlobalSlot slot() { return replacement == null ? slot : replacement; }
+        public void validate() {
+            if (closed || stored || owner.pending != this || data != beforeData || size != beforeSize
+                    || modCount != beforeModCount || slot.generation != beforeGeneration)
+                throw new IllegalArgumentException("Prepared native global placement is stale");
+            slot.validate();
+            if (syntheticOrigin != null) {
+                syntheticOrigin.validateCarrier(slot.carrier);
+                if (replacement.carrier.getKey() != replacement.key || replacement.carrier.hashCode != slot.carrier.hashCode
+                        || replacement.carrier.getRawValue() != Memory.UNDEFINED || replacement.carrier.next != null
+                        || replacement.carrier.before != null || replacement.carrier.after != null)
+                    throw new IllegalArgumentException("Prepared replacement global carrier changed before retirement");
+            }
+        }
+        /** Must run before the owning ReferenceMemory's private raw publication. */
+        public void beginStore() {
+            validate();
+            if (begun) throw new IllegalStateException("Native global placement is already begun");
+            begun = true;
+        }
+        /** No payload store, allocation, key hashing, destroyEntry or user callback. */
+        public void store() {
+            if (!begun || stored || closed) throw new IllegalStateException("Native global placement is not ready");
+            ArrayMapEntryMemory entry = slot.carrier;
+            if (link) {
+                if (nextData != beforeData) {
+                    for (ArrayMapEntryMemory current = header.after; current != header; current = current.after) {
+                        int bucket = current.hashCode & (nextData.length - 1);
+                        current.next = nextData[bucket]; nextData[bucket] = current;
+                    }
+                }
+                int bucket = entry.hashCode & (nextData.length - 1);
+                entry.next = nextData[bucket]; nextData[bucket] = entry;
+                entry.before = beforeOrder; entry.after = afterOrder; beforeOrder.after = entry; afterOrder.before = entry;
+                data = nextData; threshold = nextThreshold; size = beforeSize + 1;
+            } else {
+                if (previousHash == null) beforeData[index] = nextHash; else previousHash.next = nextHash;
+                beforeOrder.after = afterOrder; afterOrder.before = beforeOrder;
+                entry.next = null; entry.before = null; entry.after = null; size = beforeSize - 1;
+            }
+            modCount = beforeModCount + 1; slot.linked = link; slot.generation = beforeGeneration + 1;
+            if (replacement != null) {
+                owner.slots=replacementSlots;
+                slot.carrier.retireSyntheticGlobalsOrigin();
+            }
+            stored = true; owner.pending = null;
+        }
+        @Override public void close() {
+            if (closed) return;
+            if (begun && !stored) throw new IllegalStateException("Abort raw publication before closing its placement");
+            if (!stored && owner.pending == this) owner.pending = null;
+            closed = true;
+        }
+    }
+
     public void enableBucketLayout() {
+        rejectNativeGlobalMutation();
         if (buckets != null) return;
         buckets = new ArrayList<>();
         bucketOrdinals = new IdentityHashMap<>();
@@ -104,14 +297,63 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
         return ordinal == null ? -1 : ordinal;
     }
 
-    public void appendBucketHole() { enableBucketLayout(); buckets.add(null); }
+    public void appendBucketHole() { rejectNativeGlobalMutation(); enableBucketLayout(); buckets.add(null); }
 
     public ArrayMapEntryMemory insertBucket(Object key, Memory value) {
+        rejectNativeGlobalMutation();
         enableBucketLayout();
         int hashCode = hash(key == null ? NULL : key);
         return addMapping(hashIndex(hashCode, data.length), hashCode, key, value);
     }
 
+    /** Preallocation only; actual insertion requires the private-origin restoration permit. */
+    public final class OwnershipInsertion {
+        private final ArrayMapEntryMemory[] beforeData,nextData;
+        private final int beforeSize,beforeModCount,nextThreshold;
+        private final ArrayMapEntryMemory entry;
+        private final ArrayList<ArrayMapEntryMemory> nextBuckets;
+        private final IdentityHashMap<ArrayMapEntryMemory,Integer> nextOrdinals;
+        private OwnershipInsertion(Object key) {
+            beforeData=data;beforeSize=size;beforeModCount=modCount;
+            if (getEntry(key) != null) throw new IllegalArgumentException("Insertion key is already present");
+            entry=new ArrayMapEntryMemory(null,hash(key == null ? NULL : key),key,Memory.NULL);
+            int capacity=data.length;
+            if (size+1 >= threshold && capacity <= MAXIMUM_CAPACITY/2) capacity*=2;
+            nextData=capacity == data.length ? data : new ArrayMapEntryMemory[capacity];
+            nextThreshold=capacity == data.length ? threshold : calculateThreshold(capacity,loadFactor);
+            if (buckets == null) {nextBuckets=null;nextOrdinals=null;}
+            else {nextBuckets=new ArrayList<>(buckets);nextOrdinals=new IdentityHashMap<>(bucketOrdinals);nextOrdinals.put(entry,nextBuckets.size());nextBuckets.add(entry);}
+        }
+        public ArrayMapEntryMemory carrier() {return entry;}
+        public void validate() {
+            if (data != beforeData || size != beforeSize || modCount != beforeModCount || getEntry(entry.getKey()) != null)
+                throw new IllegalArgumentException("Prepared map insertion is stale");
+        }
+        public void store(php.runtime.PhpOwnershipArrays.RestorationPublication publication) {
+            rejectNativeGlobalMutation();publication.consumeMapInsertion(ArrayMemoryMap.this,this);storePrepared();
+        }
+        public void storeRuntime(php.runtime.memory.ArrayMemory.RuntimeInsertion insertion,php.runtime.PhpRuntimeOwnership.Publication publication) {
+            rejectNativeGlobalMutation();insertion.consumeMapInsertion(ArrayMemoryMap.this,this,publication);storePrepared();
+        }
+        private void storePrepared() {
+            if (nextData != beforeData) {
+                for (ArrayMapEntryMemory existing=header.after;existing != header;existing=existing.after) {
+                    int index=hashIndex(existing.hashCode,nextData.length);existing.next=nextData[index];nextData[index]=existing;
+                }
+            }
+            int index=hashIndex(entry.hashCode,nextData.length);entry.next=nextData[index];nextData[index]=entry;
+            entry.after=header;entry.before=header.before;header.before.after=entry;header.before=entry;
+            data=nextData;threshold=nextThreshold;buckets=nextBuckets;bucketOrdinals=nextOrdinals;size=beforeSize+1;modCount=beforeModCount+1;
+        }
+    }
+    public OwnershipInsertion prepareOwnershipInsertion(php.runtime.PhpOwnershipArrays.RestorationPublication publication,Object key) {
+        rejectNativeGlobalMutation();
+        publication.validateMapPreparation(this);return new OwnershipInsertion(key);
+    }
+    public OwnershipInsertion prepareRuntimeInsertion(php.runtime.memory.ArrayMemory.RuntimeInsertion insertion,Object key) {
+        rejectNativeGlobalMutation();
+        insertion.validateMapPreparation(this);return new OwnershipInsertion(key);
+    }
     public ArrayMemoryMap copyBuckets(java.util.function.Function<Memory, Memory> copyValue) {
         ArrayMemoryMap result = new ArrayMemoryMap();
         result.enableBucketLayout();
@@ -439,6 +681,7 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
     }
 
     public Pair<Memory, ArrayMapEntryMemory> putWithEntry(Object key, Memory value) {
+        rejectNativeGlobalMutation();
         int hashCode = hash((key == null) ? NULL : key);
         int index = hashIndex(hashCode, data.length);
         ArrayMapEntryMemory entry = data[index];
@@ -464,6 +707,7 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      * @throws NullPointerException if the map is null
      */
     public void putAll(ArrayMemoryMap map) {
+        rejectNativeGlobalMutation();
         int mapSize = map.size();
         if (mapSize == 0) {
             return;
@@ -493,6 +737,7 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
     }
 
     public Memory remove(Object key) {
+        rejectNativeGlobalMutation();
         int hashCode = hash((key == null) ? NULL : key);
         int index = hashIndex(hashCode, data.length);
         ArrayMapEntryMemory entry = data[index];
@@ -514,6 +759,7 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      * to avoid garbage collection issues.
      */
     public void clear() {
+        rejectNativeGlobalMutation();
         // Validate every carrier before any bulk unlink, including retained collection views.
         for (ArrayMapEntryMemory entry = header.after; entry != header; entry = entry.after)
             rejectCertifiedUnlink(entry);
@@ -773,12 +1019,13 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      * @param previous  the previous entry in the chain
      */
     private void rejectCertifiedUnlink(ArrayMapEntryMemory entry) {
-        if (entry.getOwnershipEntry() != null)
+        if (entry.getOwnershipEntry() != null || entry.getRuntimeHolder() != null)
             throw new IllegalStateException("Certified map unlink requires its actual ownership publisher");
     }
 
     /** A private-origin token authorizes only this actual bucket, never payload destruction. */
     public void publishOwnershipUnlink(php.runtime.PhpOwnershipArrays.UnsetPublication publication) {
+        rejectNativeGlobalMutation();
         ArrayMapEntryMemory wanted=publication.mapEntry(this);
         int index=hashIndex(wanted.hashCode,data.length);ArrayMapEntryMemory previous=null;
         for (ArrayMapEntryMemory entry=data[index];entry != null;entry=entry.next) {
@@ -790,6 +1037,18 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
         throw new IllegalArgumentException("Removal bucket is no longer attached");
     }
 
+    public void publishRuntimeUnlink(php.runtime.memory.ArrayMemory.RuntimeRemoval removal) {
+        rejectNativeGlobalMutation();
+        ReferenceMemory wanted=removal.mapEntry(this);
+        int index=hashIndex(((ArrayMapEntryMemory)wanted).hashCode,data.length);ArrayMapEntryMemory previous=null;
+        for (ArrayMapEntryMemory entry=data[index];entry != null;entry=entry.next) {
+            if (entry == wanted) {
+                removal.consumeMap(this,wanted);modCount++;removeEntry(entry,index,previous);size--;return;
+            }
+            previous=entry;
+        }
+        throw new IllegalArgumentException("Removal bucket is no longer attached");
+    }
     protected void removeMapping(ArrayMapEntryMemory entry, int hashIndex, ArrayMapEntryMemory previous) {
         rejectCertifiedUnlink(entry);
         modCount++;
@@ -1045,6 +1304,37 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
      *
      * @return the map iterator
      */
+    /** Reorder an unmanaged table without replacing its physical value carriers. */
+    public void reorderKeys(java.util.List<Object> keys) {
+        rejectNativeGlobalMutation();
+        int expectedVersion = modCount;
+        if (keys.size() != size) throw new IllegalArgumentException("Incomplete table permutation");
+        ArrayMapEntryMemory[] ordered = new ArrayMapEntryMemory[size];
+        IdentityHashMap<ArrayMapEntryMemory, Boolean> seen = new IdentityHashMap<>();
+        ArrayList<ArrayMapEntryMemory> newBuckets = buckets == null ? null : new ArrayList<>(size);
+        IdentityHashMap<ArrayMapEntryMemory, Integer> newOrdinals = buckets == null ? null : new IdentityHashMap<>();
+        for (int i = 0; i < ordered.length; i++) {
+            ArrayMapEntryMemory entry = getEntry(keys.get(i));
+            if (entry == null || seen.put(entry, Boolean.TRUE) != null)
+                throw new IllegalArgumentException("Invalid or duplicate table permutation");
+            rejectCertifiedUnlink(entry);
+            ordered[i] = entry;
+            if (newBuckets != null) { newBuckets.add(entry); newOrdinals.put(entry, i); }
+        }
+        if (seen.size() != size || modCount != expectedVersion)
+            throw new IllegalArgumentException("Stale table permutation");
+        // All lookups, authority checks and allocations precede this pointer-only interval.
+        ArrayMapEntryMemory previous = header;
+        for (int i = 0; i < ordered.length; i++) {
+            ArrayMapEntryMemory entry = ordered[i];
+            previous.after = entry; entry.before = previous; previous = entry;
+        }
+        previous.after = header; header.before = previous;
+        if (ordered.length == 0) header.after = header;
+        if (newBuckets != null) { buckets = newBuckets; bucketOrdinals = newOrdinals; }
+        modCount++;
+    }
+
     public OrderedMapIterator<Object, Memory> orderedMapIterator() {
         if (size == 0) {
             return EmptyOrderedMapIterator.INSTANCE;
@@ -1170,6 +1460,7 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
         }
 
         public Memory setValue(Memory value) {
+            parent.rejectNativeGlobalMutation();
             ArrayMapEntryMemory current = currentEntry();
             if (current == null) {
                 throw new IllegalStateException(SETVALUE_INVALID);
@@ -1223,11 +1514,13 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
             super(parent);
         }
 
-        public ArrayMapEntryMemory next() {
-            return super.nextEntry();
+        public Entry<Object, Memory> next() {
+            ArrayMapEntryMemory entry = super.nextEntry();
+            return parent.nativeGlobals == null ? entry : new SimpleImmutableEntry<>(entry.getKey(), entry.getValue());
         }
-        public ArrayMapEntryMemory previous() {
-            return super.previousEntry();
+        public Entry<Object, Memory> previous() {
+            ArrayMapEntryMemory entry = super.previousEntry();
+            return parent.nativeGlobals == null ? entry : new SimpleImmutableEntry<>(entry.getKey(), entry.getValue());
         }
     }
 

@@ -51,16 +51,27 @@ public class ClosureStmtCompiler extends StmtCompiler<ClosureEntity> {
         classStmtCompiler.setClassContext(statement.getOwnerClass());
 
         classStmtCompiler.setFunctionName(null);
+        if(statement.getFunction().getPhpAttributes().stream().anyMatch(a->a.getName().getName().equalsIgnoreCase("NoDiscard"))){
+            String owner=statement.getOwnerClass()==null?null:statement.getOwnerClass().getFulledName();
+            var parent=statement.getParentFunction();
+            String context=parent==null||parent.getName()==null?statement.toTraceInfo(compiler.getContext()).getFileName()
+                    :(owner==null?parent.getFulledName():owner+"::"+parent.getName().getName())+"()";
+            String closure="{closure:"+context+":"+(statement.toTraceInfo(compiler.getContext()).getStartLine()+1)+"}";
+            classStmtCompiler.setNoDiscardClosureName((owner==null?"function ":"method "+owner+"::")+closure);
+        }
         ClassEntity clazzEntity = classStmtCompiler.compile();
         clazzEntity.setType(ClassEntity.Type.CLOSURE);
 
         MethodEntity __invoke = clazzEntity.findMethod("__invoke");
 
         entity.getMethods().putAll(clazzEntity.getMethods());
+        if (compiler.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5)
+            __invoke.setClazz(entity);
         if (clazzEntity.getParent() != null)
             entity.setParent(clazzEntity.getParent());
 
         entity.setData(clazzEntity.getData());
+        entity.setPhpAttributes(__invoke.getPhpAttributes());
         entity.setParameters(__invoke.getParameters());
         entity.doneDeclare();
 

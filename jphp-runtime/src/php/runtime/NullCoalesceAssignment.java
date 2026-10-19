@@ -16,7 +16,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.nio.charset.StandardCharsets;
-import java.util.Arrays;
 
 /** Evaluates an isset fetch once and delays write-context lookup until after the RHS. */
 public final class NullCoalesceAssignment {
@@ -27,6 +26,9 @@ public final class NullCoalesceAssignment {
     private final boolean lateStatic;
     private final List<Step> steps = new ArrayList<>();
     private Memory value;
+    private PhpRuntimeOwnership.Frame runtimeFrame;
+    private int runtimeSite = -1, runtimeRootLocal = -1;
+    private boolean runtimeGlobals;
 
     private NullCoalesceAssignment(Memory root, String className, String staticProperty, boolean lateStatic,
                                    Environment env, TraceInfo trace) throws Throwable {
@@ -40,6 +42,34 @@ public final class NullCoalesceAssignment {
 
     public static NullCoalesceAssignment variable(Memory root, Environment env, TraceInfo trace) throws Throwable {
         return new NullCoalesceAssignment(root, null, null, false, env, trace);
+    }
+
+    public static NullCoalesceAssignment variableRuntime(Memory root, Environment env, TraceInfo trace,
+                                                         PhpRuntimeOwnership.Frame frame, int siteId, int rootLocalId) throws Throwable {
+        if (frame != null) frame.requireArrayTarget(siteId,rootLocalId,root);
+        NullCoalesceAssignment target=variable(root,env,trace);
+        target.runtimeFrame=frame;target.runtimeSite=siteId;target.runtimeRootLocal=rootLocalId;
+        return target;
+    }
+
+    public static NullCoalesceAssignment variableGlobalsRuntime(Memory root, Environment env, TraceInfo trace,
+                                                                PhpRuntimeOwnership.Frame frame, int siteId, int rootLocalId) throws Throwable {
+        if(frame!=null)frame.requireGlobalsTarget(siteId,rootLocalId,root);
+        NullCoalesceAssignment target=variable(root,env,trace);
+        target.runtimeFrame=frame;target.runtimeSite=siteId;target.runtimeRootLocal=rootLocalId;target.runtimeGlobals=true;
+        return target;
+    }
+
+    public NullCoalesceAssignment indexGlobal(String literalKey) throws Throwable {
+        return index(new StringMemory(literalKey));
+    }
+
+    public Memory assignGlobalRuntime(Memory assigned,PhpRuntimeOwnership.Frame frame,int sourceEvalId,int sourceLocalId,int mode) throws Throwable {
+        if(frame==null)return mode==1?assignRef(assigned):assign(assigned);
+        if(!runtimeGlobals||frame!=runtimeFrame||steps.size()!=1||steps.get(0).key==null
+                ||steps.get(0).property!=null||steps.get(0).variable!=null)
+            throw new IllegalArgumentException("Named GLOBALS requires its exact literal addressed target");
+        return frame.assignGlobal(runtimeSite,runtimeRootLocal,root,steps.get(0).key,assigned,sourceEvalId,sourceLocalId,mode);
     }
 
     public static NullCoalesceAssignment staticProperty(String clazz, String property, boolean lateStatic,
@@ -119,16 +149,65 @@ public final class NullCoalesceAssignment {
         return write(assigned, false);
     }
 
+    public Memory assignRuntime(Memory assigned, PhpRuntimeOwnership.Frame frame, int sourceEvalId) throws Throwable {
+        if (frame == null) return assign(assigned);
+        if (frame != runtimeFrame || steps.size()!=1 || steps.get(0).property!=null || steps.get(0).variable!=null)
+            throw new IllegalArgumentException("ARRAY ENTRY requires its exact single addressed target");
+        frame.requireArrayTarget(runtimeSite,runtimeRootLocal,root);
+        Memory value=assigned.toImmutable();
+        frame.requireArrayValue(sourceEvalId,value);
+        if (root.toValue().getRealType()==Memory.Type.BOOL && !root.toValue().toBoolean())
+            return assignRuntimeFalse(value,frame,sourceEvalId);
+        return write(value,false,frame,sourceEvalId);
+    }
+
+    private Memory assignRuntimeFalse(Memory assigned, PhpRuntimeOwnership.Frame frame, int sourceEvalId) throws Throwable {
+        if (!(root instanceof php.runtime.memory.ReferenceMemory))
+            throw new IllegalArgumentException("False ARRAY conversion needs its physical addressed CV");
+        var carrier=(php.runtime.memory.ReferenceMemory)root;
+        carrier.initializeArray();
+        var converted=carrier.toValue(ArrayMemory.class);
+        boolean survives=false;
+        Throwable primary=null;
+        var lease=converted.pinWriteFetch();
+        try {
+            try {env.error(trace,ErrorType.E_DEPRECATED,"Automatic conversion of false to array is deprecated");}
+            catch(Throwable warning){primary=warning;}
+            survives=lease.hasSurvivingValueOwners();
+        } catch(Throwable failure){primary=frame.authority().domain().graph().composeFailure(primary,failure);}
+        finally {
+            try {lease.close();}
+            catch(Throwable cleanup){primary=frame.authority().domain().graph().composeFailure(primary,cleanup);}
+        }
+        Memory result=Memory.NULL;
+        try {
+            if (!survives) frame.cancelArrayEntry(runtimeSite,runtimeRootLocal,root,sourceEvalId,assigned);
+            else {
+                frame.requireArrayTarget(runtimeSite,runtimeRootLocal,root);
+                frame.requireArrayValue(sourceEvalId,assigned);
+                result=frame.writableArrayTarget(runtimeSite,runtimeRootLocal,root)
+                        .assignRuntimeEntry(steps.get(0).key,assigned,frame,sourceEvalId,env,trace);
+            }
+        } catch(Throwable failure){primary=frame.authority().domain().graph().composeFailure(primary,failure);}
+        if(primary!=null)throw primary;
+        return result;
+    }
+
     public Memory assignRef(Memory assigned) throws Throwable {
         return write(assigned, true);
     }
 
     private Memory write(Memory assigned, boolean byReference) throws Throwable {
+        return write(assigned,byReference,null,-1);
+    }
+
+    private Memory write(Memory assigned, boolean byReference, PhpRuntimeOwnership.Frame frame, int sourceEvalId) throws Throwable {
         Memory result = byReference && assigned instanceof php.runtime.memory.ReferenceMemory
                 ? ((php.runtime.memory.ReferenceMemory) assigned).getReferenceForBinding()
-                : byReference ? assigned : assigned.toImmutable();
-        Memory container = className == null ? root : ObjectInvokeHelper.getStaticProperty(className,
-                className.toLowerCase(Locale.ROOT), staticProperty, env, trace, null, 0, lateStatic);
+                : byReference || frame != null ? assigned : assigned.toImmutable();
+        Memory container = className == null ? root : steps.isEmpty() && !byReference
+                ?ObjectInvokeHelper.directStaticProperty(className,className.toLowerCase(Locale.ROOT),staticProperty,env,trace,null,0,lateStatic)
+                :ObjectInvokeHelper.getStaticProperty(className,className.toLowerCase(Locale.ROOT),staticProperty,env,trace,null,0,lateStatic);
         if (steps.isEmpty()) {
             if (byReference) container.assignRef(result); else result=container.assign(result);
         } else {
@@ -138,6 +217,8 @@ public final class NullCoalesceAssignment {
                 if (step.variable != null && step.key.isUndefined()) env.warning(trace, "Undefined variable $%s", step.variable);
                 String property = step.dynamicProperty ? step.key.toString() : step.property;
                 if (property == null) {
+                    if(container instanceof php.runtime.memory.ReferenceMemory)
+                        ((php.runtime.memory.ReferenceMemory)container).checkPhpReadonlyArrayWrite();
                     Memory actual = container.toValue();
                     if (actual.isNull() || actual.getRealType() == Memory.Type.BOOL && !actual.toBoolean()) {
                         if (!actual.isNull() && last) env.error(trace, ErrorType.E_DEPRECATED, "Automatic conversion of false to array is deprecated");
@@ -165,8 +246,10 @@ public final class NullCoalesceAssignment {
                     if (actual.isString()) {
                         if (key == null) env.exception(trace, BaseError.class, "[] operator not supported for strings");
                         if (byReference && last) env.exception(trace, BaseError.class, "Cannot create references to/from string offsets");
-                        stringOffset(key);
-                        if (!last) env.exception(trace, BaseError.class, "Cannot use string offset as an array");
+                        if (!last) {
+                            PhpStringOffsets.index(key,env,trace);
+                            env.exception(trace, BaseError.class, "Cannot use string offset as an array");
+                        }
                         return assignStringOffset(container, key, result);
                     }
                     if (!actual.isArray() && !actual.isObject() && !actual.isString()
@@ -175,6 +258,12 @@ public final class NullCoalesceAssignment {
                     if (last && byReference && actual.isObject()) {
                         readOverloaded(actual, key);
                         env.exception(trace, BaseError.class, "Cannot assign by reference to an array dimension of an object");
+                    }
+                    if (frame != null && last && actual.isArray()) {
+                        if (!(container instanceof php.runtime.memory.ReferenceMemory))
+                            throw new IllegalArgumentException("ARRAY ENTRY needs its physical addressed CV carrier");
+                        return frame.writableArrayTarget(runtimeSite,runtimeRootLocal,root)
+                                .assignRuntimeEntry(key,result,frame,sourceEvalId,env,trace);
                     }
                     if (!last && actual.isObject()) {
                         container = readOverloaded(actual, key);
@@ -207,36 +296,8 @@ public final class NullCoalesceAssignment {
         return fetched;
     }
 
-    private Memory stringOffset(Memory key) {
-        Memory offset = key.isString() ? StringMemory.toNumericStrict(key.toString()) : key;
-        if (offset == null || key.isString() && offset.getRealType() != Memory.Type.INT || key.isArray() || key.isObject())
-            env.exception(trace, BaseTypeError.class, "Cannot access offset of type %s on string", key.getRealType().toString().toLowerCase(Locale.ROOT));
-        return offset;
-    }
-
     private Memory assignStringOffset(Memory container, Memory key, Memory assigned) {
-        Memory offset = stringOffset(key);
-        if (assigned.isArray() || assigned.isObject())
-            env.exception(trace, BaseTypeError.class, "Cannot assign %s to a string offset", assigned.getRealType().toString().toLowerCase(Locale.ROOT));
-        byte[] bytes = container.getBinaryBytes(StandardCharsets.UTF_8).clone();
-        long position = offset.toLong();
-        if (position < 0) position += bytes.length;
-        if (position < 0) {
-            env.warning(trace, "Illegal string offset %s", key.toString());
-            return Memory.NULL;
-        }
-        byte[] replacement = assigned.getBinaryBytes(StandardCharsets.UTF_8);
-        if (replacement.length == 0) env.exception(trace, BaseError.class, "Cannot assign an empty string to a string offset");
-        if (replacement.length > 1) env.warning(trace, "Only the first byte will be assigned to the string offset");
-        if (position >= Integer.MAX_VALUE) env.exception(trace, BaseError.class, "String offset exceeds JVM array capacity");
-        if (position >= bytes.length) {
-            int previousLength = bytes.length;
-            bytes = Arrays.copyOf(bytes, (int) position + 1);
-            Arrays.fill(bytes, previousLength, (int) position, (byte) ' ');
-        }
-        bytes[(int) position] = replacement[0];
-        container.assign(new BinaryMemory(bytes));
-        return new BinaryMemory(new byte[] {replacement[0]});
+        return PhpStringOffsets.reference(container,trace,key,env).assign(assigned);
     }
 
     private static final class Step {

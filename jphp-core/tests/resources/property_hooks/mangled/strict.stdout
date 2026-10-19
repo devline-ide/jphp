@@ -1,0 +1,13 @@
+70=1;002a0071=2;00526177506172656e740073616d65=3;005261774368696c640073616d65=4;6261636b=5;36=6;64796e616d6963=7;calls=0
+1:7
+8:8
+002a0071,00526177506172656e740073616d65,005261774368696c640073616d65,6261636b,36,64796e616d6963
+{"v":1}
+{"name":"A","value":"a"}
+object:object:array
+get_mangled_object_vars(): Argument #1 ($object) must be of type object, null given
+get_mangled_object_vars(): Argument #1 ($object) must be of type object, int given
+get_mangled_object_vars(): Argument #1 ($object) must be of type object, float given
+get_mangled_object_vars(): Argument #1 ($object) must be of type object, true given
+get_mangled_object_vars(): Argument #1 ($object) must be of type object, string given
+get_mangled_object_vars(): Argument #1 ($object) must be of type object, array given

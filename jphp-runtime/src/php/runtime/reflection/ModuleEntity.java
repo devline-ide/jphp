@@ -28,6 +28,7 @@ public class ModuleEntity extends Entity {
     private boolean strictTypes = false;
     private PhpLanguageProfile phpLanguageProfile = PhpLanguageProfile.JPHP_LEGACY;
     private boolean compiledArtifact;
+    private volatile boolean generatorLinkageValidated;
     private volatile CompilerProvenance compilerProvenance = CompilerProvenance.UNKNOWN;
 
     public enum CompilerOrigin { UNKNOWN, SOURCE, DUMP }
@@ -53,7 +54,20 @@ public class ModuleEntity extends Entity {
     }
 
     private final Map<String, ClassEntity> classes;
+    private final NavigableMap<Integer, ClassEntity> deferredClasses = new TreeMap<>();
     private final List<FunctionEntity> functions;
+    private java.util.Map<String,ConstantEntity> deferredGlobalConstantDeclarations;
+    public void addDeferredGlobalConstantDeclaration(ConstantEntity declaration) {
+        if(deferredGlobalConstantDeclarations==null) deferredGlobalConstantDeclarations=new java.util.LinkedHashMap<>();
+        if(declaration.getModule()!=this || deferredGlobalConstantDeclarations.putIfAbsent(declaration.getName(),declaration)!=null)
+            throw new IllegalArgumentException("Duplicate deferred global constant declaration");
+    }
+    public java.util.Collection<ConstantEntity> getDeferredGlobalConstantDeclarations() {
+        return deferredGlobalConstantDeclarations==null ? java.util.List.of() : java.util.Collections.unmodifiableCollection(deferredGlobalConstantDeclarations.values());
+    }
+    public ConstantEntity getDeferredGlobalConstantDeclaration(String name) {
+        return deferredGlobalConstantDeclarations==null ? null : deferredGlobalConstantDeclarations.get(name);
+    }
     private final Map<String, ConstantEntity> constants;
     private final List<ClosureEntity> closures;
     private final List<GeneratorEntity> generators;
@@ -98,18 +112,30 @@ public class ModuleEntity extends Entity {
     }
 
     public Memory include(Environment env, ArrayMemory locals) throws Throwable {
+        if (php.runtime.PhpOwnershipExecution.current(env) != null)
+            return php.runtime.PhpOwnershipExecution.invokeModule(this,env,locals);
+        if(php.runtime.PhpRuntimeOwnership.isIncluding(env,this))return php.runtime.PhpRuntimeOwnership.includeBody(this,env,locals);
+        env.runPendingFinalizers();
         env.getModuleManager().markIncluded(context.getFileName());
         try {
-            return (Memory) nativeMethod.invoke(null, env, argsMock, locals);
+            Memory result = (Memory) nativeMethod.invoke(null, env, argsMock, locals);
+            env.runPendingFinalizers();
+            return result;
         } catch (InvocationTargetException e){
             return env.__throwException(e);
         }
     }
 
     public Memory include(Environment env) throws Throwable {
+        if (php.runtime.PhpOwnershipExecution.current(env) != null)
+            return php.runtime.PhpOwnershipExecution.invokeModule(this,env,env.getGlobals());
+        if(php.runtime.PhpRuntimeOwnership.isIncluding(env,this))return php.runtime.PhpRuntimeOwnership.includeBody(this,env,env.getGlobals());
+        env.runPendingFinalizers();
         env.getModuleManager().markIncluded(context.getFileName());
         try {
-            return (Memory) nativeMethod.invoke(null, env, argsMock, env.getGlobals());
+            Memory result = (Memory) nativeMethod.invoke(null, env, argsMock, env.getGlobals());
+            env.runPendingFinalizers();
+            return result;
         } catch (InvocationTargetException e){
             return env.__throwException(e);
         }
@@ -159,6 +185,18 @@ public class ModuleEntity extends Entity {
         compilerProvenance = provenance;
     }
 
+    /** Source metadata is complete; old dumps have unknown, not false, generator linkage. */
+    public boolean hasValidatedGeneratorLinkage() {
+        return generatorLinkageValidated || !compiledArtifact && compilerProvenance.getOrigin() == CompilerOrigin.SOURCE;
+    }
+
+    /** Publish only after the future component reader has checked every declaration/factory. */
+    public synchronized void recordGeneratorLinkageValidated() {
+        if (!compiledArtifact || generatorLinkageValidated || isLoaded)
+            throw new IllegalStateException("Generator linkage cannot be published twice or on source metadata");
+        generatorLinkageValidated = true;
+    }
+
     public boolean isCompiledArtifact() { return compiledArtifact; }
     public void setCompiledArtifact(boolean compiledArtifact) { this.compiledArtifact = compiledArtifact; }
 
@@ -180,6 +218,29 @@ public class ModuleEntity extends Entity {
 
     public Collection<ClassEntity> getClasses(){
         return classes.values();
+    }
+
+    /** Lexical ordinal catalog; these templates are never published by module registration. */
+    public synchronized List<ClassEntity> getDeferredClasses() {
+        return Collections.unmodifiableList(new ArrayList<>(deferredClasses.values()));
+    }
+
+    public synchronized ClassEntity findDeferredClass(int declarationId) {
+        return deferredClasses.get(declarationId);
+    }
+
+    public synchronized void addDeferredClass(ClassEntity clazz) {
+        Objects.requireNonNull(clazz, "clazz");
+        if (!clazz.isDeclarationTemplate() || clazz.isStatic() || clazz.isAnonymous()
+                || clazz.getModule() != null && clazz.getModule() != this)
+            throw new IllegalArgumentException("Invalid deferred class template");
+        if (deferredClasses.containsKey(clazz.getDeclarationId()) || classes.containsValue(clazz))
+            throw new IllegalArgumentException("Duplicate deferred class ordinal");
+        clazz.setModule(this);
+        deferredClasses.put(clazz.getDeclarationId(), clazz);
+        for (MethodEntity method : clazz.getOwnedMethods()) {
+            if (method.getGeneratorEntity() != null) addGenerator(method.getGeneratorEntity());
+        }
     }
 
     public Collection<ClosureEntity> getClosures(){
@@ -249,11 +310,18 @@ public class ModuleEntity extends Entity {
     }
 
     public void addGenerator(GeneratorEntity generator) {
+        Objects.requireNonNull(generator, "generator");
+        // Imported trait factories still address their donor's module and lexical table.
+        // Preserve that owner; the consumer must not adopt or append the donor generator.
+        if (generator.getModule() != null && generator.getModule() != this) return;
+        for (GeneratorEntity existing : generators) if (existing == generator) return;
         generator.setModule(this);
         generators.add(generator);
     }
 
     public void addClass(ClassEntity clazz){
+        if (clazz.isDeferredDeclaration())
+            throw new IllegalArgumentException("Deferred class belongs to the ordinal catalog");
         clazz.setModule(this);
         classes.put(clazz.getLowerName(), clazz);
         for (MethodEntity entity : clazz.getOwnedMethods()) {

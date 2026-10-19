@@ -1,0 +1,2 @@
+<?php function ro_result($f){try{return ["ok",$f()];}catch(Throwable $e){return [get_class($e),$e->getMessage()];}}
+$diagnostics=[];set_error_handler(function($n,$s)use(&$diagnostics){$diagnostics[]=$s;return true;},E_DEPRECATED);class R{private readonly int $x;function init(){$this->x=3;}function get(){return $this->x;}}class C extends R{function attempt(){$this->x=4;}}$r=new C;echo serialize([ro_result(function()use($r){$r->attempt();}),ro_result(function()use($r){$r->init();}),$r->get(),$diagnostics]);

@@ -24,7 +24,7 @@ public class ReflectionClassConstant extends BaseObject {
     public final static int IS_PROTECTED = 2 ;
     public final static int IS_PRIVATE = 4 ;
 
-    private ConstantEntity entity;
+    protected ConstantEntity entity;
 
     public ReflectionClassConstant(Environment env, ConstantEntity constantEntity) {
         super(env);
@@ -37,6 +37,15 @@ public class ReflectionClassConstant extends BaseObject {
 
     public ReflectionClassConstant(Environment env, ClassEntity clazz) {
         super(env, clazz);
+    }
+
+    @php.runtime.annotation.Reflection.Signature({
+            @php.runtime.annotation.Reflection.Arg(value="name",type=php.runtime.common.HintType.STRING,
+                    nullable=true,optional=@php.runtime.annotation.Reflection.Optional("null")),
+            @php.runtime.annotation.Reflection.Arg(value="flags",type=php.runtime.common.HintType.INT,
+                    optional=@php.runtime.annotation.Reflection.Optional("0"))})
+    public Memory getAttributes(Environment env,Memory...args) {
+        return ReflectionAttribute.collect(env,entity,args[0],args[1],"ReflectionClassConstant");
     }
 
     @Signature({
@@ -106,6 +115,8 @@ public class ReflectionClassConstant extends BaseObject {
 
     @Signature
     public boolean isFinal() { return entity.isFinal(); }
+
+    @Signature public boolean isEnumCase() {return entity.isEnumCase();}
 
     @Signature
     public boolean isPrivate() {

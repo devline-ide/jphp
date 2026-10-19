@@ -24,6 +24,11 @@ public final class PhpOwnershipObjects {
     public interface CompletePropertiesProtocol {
         void validateResolvedState(ClassEntity entity, Environment environment);
     }
+    /** Explicit exact destructor body protocol; validation must have no PHP effects. */
+    public interface CompleteDestructorProtocol {
+        void validateMember(ClassEntity entity,php.runtime.reflection.MethodEntity method,Environment environment);
+        void invoke(ExecutionEntry entry,Environment environment,php.runtime.env.TraceInfo trace) throws Throwable;
+    }
     /** An owned clone needs a new allocation witness and complete child publication protocol. */
     public static void rejectUnmanagedClone(IObject object) {
         if (object instanceof BaseObject && ((BaseObject)object).getOwnershipObject() != null)
@@ -50,6 +55,22 @@ public final class PhpOwnershipObjects {
         if (providers.containsKey(entity)) throw new IllegalStateException("Class already has an allocation provider");
         Provider provider=new Provider(entity,exactConstructor,protocol,storedProperties(entity));providers.put(entity,provider);return provider;
     }
+    /** Optional managed lifecycle entry; ordinary allocation registration retains its existing dispatch. */
+    public Provider registerPropertiesProvider(ClassEntity entity,Constructor<?> exactConstructor,
+            CompletePropertiesProtocol protocol,php.runtime.reflection.MethodEntity destructor,CompleteDestructorProtocol lifecycle) {
+        Objects.requireNonNull(destructor);Objects.requireNonNull(lifecycle);
+        if (destructor!=entity.methodDestruct || destructor.isStatic() || destructor.isAbstract()
+                || destructor.getParameters()!=null && destructor.getParameters().length!=0
+                || destructor.getNativeMethod()==null
+                || !destructor.getNativeMethod().getDeclaringClass().isAssignableFrom(exactConstructor.getDeclaringClass())
+                || !Arrays.equals(destructor.getNativeMethod().getParameterTypes(),new Class<?>[]{Environment.class,Memory[].class})
+                || destructor.getNativeMethod().getReturnType()!=Memory.class
+                || php.runtime.lang.support.IManualDestructable.class.isAssignableFrom(exactConstructor.getDeclaringClass()))
+            throw new IllegalArgumentException("Lifecycle protocol needs its exact generated no-argument destructor");
+        Provider provider=registerPropertiesProvider(entity,exactConstructor,protocol);
+        provider.destructor=destructor;provider.destructorMember=destructor.getNativeMethod();provider.destructorProtocol=lifecycle;
+        return provider;
+    }
     /** Explicit lexical-shell protocol; capture metadata alone never certifies a constructor. */
     Provider registerLexicalClosureProvider(php.runtime.reflection.helper.ClosureEntity entity, Constructor<?> constructor,
                                            CompletePropertiesProtocol protocol) {
@@ -71,6 +92,17 @@ public final class PhpOwnershipObjects {
         private final CompletePropertiesProtocol protocol;
         private final List<PropertyEntity> properties;
         private boolean lexicalClosure;
+        private php.runtime.reflection.MethodEntity destructor;
+        private java.lang.reflect.Method destructorMember;
+        private CompleteDestructorProtocol destructorProtocol;
+        private void validateDestructor(Environment environment) {
+            if (destructorProtocol==null) return;
+            if (providers.get(entity)!=this || entity.methodDestruct!=destructor
+                    || !destructorMember.equals(destructor.getNativeMethod()) || destructor.isStatic() || destructor.isAbstract()
+                    || destructor.getParameters()!=null && destructor.getParameters().length!=0)
+                throw new IllegalArgumentException("Registered destructor identity changed");
+            destructorProtocol.validateMember(entity,destructor,environment);
+        }
         private Provider(ClassEntity entity,Constructor<?> constructor,CompletePropertiesProtocol protocol,List<PropertyEntity> properties) {
             this.entity=entity;this.constructor=constructor;this.protocol=protocol;this.properties=Collections.unmodifiableList(properties);
         }
@@ -104,6 +136,7 @@ public final class PhpOwnershipObjects {
             }
         }
         provider.protocol.validateResolvedState(provider.entity,environment);
+        provider.validateDestructor(environment);
         AllocationWitness witness=new AllocationWitness(provider,environment);
         IObject raw;
         if (provider.lexicalClosure) {
@@ -131,10 +164,11 @@ public final class PhpOwnershipObjects {
             domain().graph().deferDestruction(() -> {
                 certificate.properties.constructing=true;
                 try {
+                    php.runtime.memory.helper.PhpPropertyGuard.OwnerToken lifetime=null;
                     for (PropertyEntity property : provider.properties) {
                         table.declare(property);
                         ReferenceMemory carrier=table.putAsKeyString(property.getSpecificName(),defaults.get(property).rawValue());
-                        carrier.attachPropertySource(environment,property);
+                        lifetime=carrier.attachInstancePropertySource(environment,property,object,lifetime);
                         certificate.properties.attach(carrier,defaults.get(property));
                     }
                 } finally {certificate.properties.constructing=false;}
@@ -164,10 +198,20 @@ public final class PhpOwnershipObjects {
         if (binding.domain() != domain()) throw new IllegalArgumentException("Child belongs to another domain");
         binding.requireCertifiedObject();Memory raw=binding.rawValue();
         if (raw instanceof ArrayMemory) {
-            if (arrays.certificate((ArrayMemory)raw).node() != binding.node())
+            ArrayMemory array=(ArrayMemory)raw;var origin=array.getRuntimeOrigin();
+            if (origin != null) {
+                if (origin.authority().domain() != domain() || origin.node() != binding.node())
+                    throw new IllegalArgumentException("Runtime ARRAY child belongs to another origin");
+                origin.validate(array);
+            } else if (arrays.certificate(array).node() != binding.node())
                 throw new IllegalArgumentException("Array child does not have its originating storage certificate");
         } else if (binding.role() == PhpOwnershipValues.Role.CELL) {
-            if (arrays.certificate((ReferenceMemory)raw).node() != binding.node())
+            ReferenceMemory cell=(ReferenceMemory)raw;var origin=cell.getRuntimeCell();
+            if (origin != null) {
+                if (origin.authority().domain() != domain() || origin.node() != binding.node())
+                    throw new IllegalArgumentException("Runtime CELL child belongs to another origin");
+                origin.authority().value(cell,PhpRuntimeOwnership.Role.CELL);
+            } else if (arrays.certificate(cell).node() != binding.node())
                 throw new IllegalArgumentException("CELL child does not have its originating allocation certificate");
         }
     }
@@ -198,6 +242,12 @@ public final class PhpOwnershipObjects {
         private boolean closed;
         private Allocation(ObjectCertificate certificate,PhpOwnershipDomain.OwnedValue root) {this.certificate=certificate;this.root=root;}
         private void open() {domain().currentContext();if (closed) throw new IllegalStateException("Object preparation is closed");certificate.validateObject(certificate.object);}
+        private boolean restorationClaimed;
+        public PhpOwnershipArrays.RestorationAssembly restoration() {
+            open();if (restorationClaimed || certificate.node.incoming() != 1)
+                throw new IllegalStateException("Restoration requires its fresh unpublished allocation");
+            restorationClaimed=true;return arrays.restorationTable(certificate.properties);
+        }
         public IObject object() {open();return certificate.object;}
         public ObjectCertificate certificate() {open();return certificate;}
         public PhpOwnershipValues.Binding binding() {open();return PhpOwnershipValues.bindValue(domain(),new ObjectMemory(certificate.object),certificate.node);}
@@ -214,6 +264,7 @@ public final class PhpOwnershipObjects {
         private PropertiesCertificate properties;
         private PhpOwnership.Slot tableEdge;
         private boolean initialized;
+        private ExecutionEntry activeEntry;
         private PhpOwnershipClosures.Certificate closure;
         public PhpOwnershipClosures.Certificate closure() {validateObject(object);return closure;}
         /** Identity-only leaf for prepared no-callback raw stores. */
@@ -228,7 +279,17 @@ public final class PhpOwnershipObjects {
             this.object=object;this.provider=provider;
             node=domain().object(object,new PhpOwnershipDomain.Lifecycle() {
                 @Override public void destruct(PhpOwnership.Node target,Object context) throws Throwable {
-                    if (initialized) PhpObjectLifecycle.destruct(object,(Environment)context,PhpObjectLifecycle.Reason.OWNERSHIP_RELEASE);
+                    if (!initialized) return;
+                    if (provider.destructorProtocol==null) {
+                        PhpObjectLifecycle.destruct(object,(Environment)context,PhpObjectLifecycle.Reason.OWNERSHIP_RELEASE);return;
+                    }
+                    if (object.isFinalized()) return;
+                    provider.validateDestructor((Environment)context);
+                    if (target!=node || activeEntry!=null || node.state()!=PhpOwnership.State.FINALIZING)
+                        throw new IllegalStateException("Destructor entry needs its actual lifecycle callback");
+                    ExecutionEntry entry=new ExecutionEntry(ObjectCertificate.this,(Environment)context);activeEntry=entry;
+                    try {PhpObjectLifecycle.destruct(entry,(Environment)context);}
+                    finally {entry.expired=true;activeEntry=null;}
                 }
                 @Override public void destroy(PhpOwnership.Node target,Object context) {
                     // Graph calls destroy only after its resurrection decision. No early/manual/GC guard detach.
@@ -243,7 +304,7 @@ public final class PhpOwnershipObjects {
         public PropertiesCertificate properties() {validateObject(object);return properties;}
         public void validateObject(IObject actual) {
             domain().currentContext();
-            if (actual != object || object.getOwnershipObject() != this || node.identity() != object || node.state() == PhpOwnership.State.DISPOSED)
+            if (actual != object || object.getReflection() != provider.entity || object.getOwnershipObject() != this || node.identity() != object || node.state() == PhpOwnership.State.DISPOSED)
                 throw new IllegalArgumentException("Certificate does not identify this live actual object");
             if (properties != null && object.getOwnershipProperties() != properties.table)
                 throw new IllegalStateException("Actual object property field changed outside its descriptor");
@@ -255,12 +316,65 @@ public final class PhpOwnershipObjects {
         }
         public void validateAttachment(IObject actual,AllocationWitness witness) {Objects.requireNonNull(witness).attach(this,actual);}
     }
+    /**
+     * Non-owning one-shot receiver authority. Only the real lifecycle callback can mint it;
+     * it contributes no receiver root and expires before the graph decides resurrection.
+     */
+    public final class ExecutionEntry {
+        private final ObjectCertificate certificate;
+        private final Environment environment;
+        private boolean consumed,dispatched,expired;
+        private ExecutionEntry(ObjectCertificate certificate,Environment environment) {this.certificate=certificate;this.environment=environment;}
+        private void open() {
+            certificate.validateObject(certificate.object);
+            if (expired || certificate.activeEntry!=this || domain().currentContext()!=environment
+                    || certificate.node.state()!=PhpOwnership.State.FINALIZING
+                    || certificate.provider.destructorProtocol==null)
+                throw new IllegalArgumentException("Destructor receiver entry is not the active lifecycle origin");
+            if (providers.get(certificate.provider.entity)!=certificate.provider
+                    || certificate.provider.entity.methodDestruct!=certificate.provider.destructor
+                    || !certificate.provider.destructorMember.equals(certificate.provider.destructor.getNativeMethod())
+                    || certificate.provider.destructor.isStatic() || certificate.provider.destructor.isAbstract()
+                    || certificate.provider.destructor.getParameters()!=null && certificate.provider.destructor.getParameters().length!=0)
+                throw new IllegalArgumentException("Destructor receiver changed its exact method");
+        }
+        /** Checks the releasing environment before finalized/call-stack effects. */
+        public void validateEnvironment(Environment releasing) {
+            open();if (releasing!=environment) throw new IllegalArgumentException("Foreign destructor releasing environment");
+        }
+        public IObject receiver() {open();return certificate.object;}
+        public php.runtime.reflection.MethodEntity method() {open();return certificate.provider.destructor;}
+        public IObject consume(PhpOwnershipDomain requested,Environment releasing,php.runtime.reflection.MethodEntity method) {
+            open();
+            if (consumed || requested!=domain() || releasing!=environment || method!=certificate.provider.destructor
+                    || !certificate.object.isFinalized())
+                throw new IllegalArgumentException("Destructor receiver consumption needs its exact domain/environment/method");
+            consumed=true;return certificate.object;
+        }
+        /** Revalidates a consumed receiver import; this is a borrow, never a VALUE publication. */
+        public void validateReceiver(PhpOwnershipDomain requested,Environment releasing,
+                php.runtime.reflection.MethodEntity method,IObject actual) {
+            open();
+            if (!consumed || requested!=domain() || releasing!=environment || method!=certificate.provider.destructor
+                    || actual!=certificate.object || !certificate.object.isFinalized())
+                throw new IllegalArgumentException("Destructor receiver import differs from its consumed lifecycle origin");
+        }
+        /** Lifecycle dispatch only; a registered body must consume this entry before returning. */
+        public void dispatch(Environment releasing,php.runtime.env.TraceInfo trace) throws Throwable {
+            open();
+            if (dispatched || releasing!=environment || !certificate.object.isFinalized())
+                throw new IllegalArgumentException("Destructor dispatch differs from its one-shot lifecycle callback");
+            dispatched=true;
+            certificate.provider.destructorProtocol.invoke(this,releasing,trace);
+            if (!consumed) throw new IllegalArgumentException("Destructor body did not consume its lifecycle receiver entry");
+        }
+    }
     public final class PropertiesCertificate {
         private final ObjectCertificate owner;
         private final PhpObjectProperties table;
         private final Object identity;
         private final PhpOwnership.Node node;
-        private final IdentityHashMap<ReferenceMemory,PhpOwnershipArrays.PhysicalSlot> entries=new IdentityHashMap<>();
+        private IdentityHashMap<ReferenceMemory,PhpOwnershipArrays.PhysicalSlot> entries=new IdentityHashMap<>();
         private boolean constructing;
         private long removalRevision;
         private PropertiesCertificate(ObjectCertificate owner,PhpObjectProperties table) {
@@ -296,6 +410,18 @@ public final class PhpOwnershipObjects {
                 try {result[0]=table.insertBucket(key,value.rawValue());attach(result[0],value);}
                 finally {constructing=false;}
             });removalRevision++;return entries.get(result[0]);
+        }
+        public IdentityHashMap<ReferenceMemory,PhpOwnershipArrays.PhysicalSlot> prepareRestorationEntries(PhpOwnershipArrays.RestorationPublication publication) {
+            if (!publication.validatesTablePreparation(this)) throw new IllegalArgumentException("Wrong TABLE restoration origin");
+            return new IdentityHashMap<>(entries);
+        }
+        public void publishRestorationEntries(PhpOwnershipArrays.RestorationPublication publication,IdentityHashMap<ReferenceMemory,PhpOwnershipArrays.PhysicalSlot> next) {
+            if (!publication.validatesTableCommit(this)) throw new IllegalArgumentException("Wrong TABLE restoration publication");
+            entries=next;removalRevision++;
+        }
+        public void publishRestorationClear(PhpOwnershipArrays.RestorationClearPublication publication) {
+            if (!publication.validatesTableCommit(this)) throw new IllegalArgumentException("Wrong TABLE restoration cleanup");
+            removalRevision++;
         }
         public long removalRevision() {return removalRevision;}
         public PhpOwnershipArrays.UnsetPublication prepareUnset(String literalStorageKey) {

@@ -84,7 +84,7 @@ public class CompilerProvenanceTest extends JvmCompilerCase {
                     ModuleDumper dumper = new ModuleDumper(context, env, true);
                     byte[] bytes = save(dumper, module);
                     assertEquals(ModuleDumper.COMPILER_ABI_VERSION, ModuleDumper.readHeader(new ByteArrayInputStream(bytes)).getCompilerAbiVersion());
-                    assertEquals(0, new DataInputStream(new ByteArrayInputStream(bytes, bytes.length - 4, 4)).readInt());
+                    assertEquals(0, new DataInputStream(new ByteArrayInputStream(bytes, reservedTailOffset(bytes), 4)).readInt());
                     ModuleEntity loaded = dumper.load(new ByteArrayInputStream(bytes));
                     provenance(loaded, ModuleEntity.CompilerOrigin.DUMP, ModuleDumper.COMPILER_ABI_VERSION, ModuleDumper.COMPILER_ABI_VERSION);
                     assertTrue(loaded.isCompiledArtifact());
@@ -97,9 +97,9 @@ public class CompilerProvenanceTest extends JvmCompilerCase {
         }
     }
 
-    @Test public void realGoldenAbiZeroThroughEightCannotBeLaunderedByRepeatedRedumps() throws Throwable {
-        long[] expected = {42, 3, 3, 5, 7, 7, 7, 8, 9};
-        for (int abi = 0; abi <= 8; abi++) {
+    @Test public void realGoldenAbiZeroThroughNineCannotBeLaunderedByRepeatedRedumps() throws Throwable {
+        long[] expected = {42, 3, 3, 5, 7, 7, 7, 8, 9, 9};
+        for (int abi = 0; abi <= 9; abi++) {
             Environment env = environment(true);
             try {
                 String name = abi == 0 ? "legacy_jphp.phb" : abi >= 7 ? "compiler_provenance_abi" + abi + ".phb" : "abi" + abi + "_jphp.phb";
@@ -168,13 +168,36 @@ public class CompilerProvenanceTest extends JvmCompilerCase {
         for (int value : values) output.writeInt(value);
         return bytes.toByteArray();
     }
+    private static int generatorFrameOffset(byte[] dump) {
+        int result=-1;
+        for(int at=4;at+12<=dump.length;at++) {
+            var frame=java.nio.ByteBuffer.wrap(dump,at,12);
+            if(frame.getInt()!=0x474c4e4b || frame.getInt()!=1)continue;
+            int length=frame.getInt();if(length<0 || length>16*1024*1024 || length>dump.length-at-12)continue;
+            int end=at+12+length;
+            boolean suffix=end==dump.length;
+            if(!suffix && end+12<=dump.length) {
+                int attributes=java.nio.ByteBuffer.wrap(dump,end,4).getInt();
+                suffix=attributes>=8 && attributes==dump.length-end-4
+                        && java.nio.ByteBuffer.wrap(dump,end+4,4).getInt()==0x41544d44;
+            }
+            if(suffix){assertEquals("unique actual GLNK frame",-1,result);result=at;}
+        }
+        assertTrue("actual bounded GLNK frame",result>=4);return result;
+    }
+    private int reservedTailOffset(byte[] dump) { return generatorFrameOffset(dump)-4; }
     private byte[] replaceEmptyTail(byte[] dump, byte[] metadata) throws IOException {
-        assertEquals(0, new DataInputStream(new ByteArrayInputStream(dump, dump.length - 4, 4)).readInt());
+        int tail=reservedTailOffset(dump);
+        assertEquals(0, new DataInputStream(new ByteArrayInputStream(dump, tail, 4)).readInt());
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
-        bytes.write(dump, 0, dump.length - 4);
+        bytes.write(dump, 0, tail);
         DataOutputStream output = new DataOutputStream(bytes);
         output.writeInt(metadata.length);
         output.write(metadata);
+        // Perturbed provenance cannot keep the original generator linkage authority.
+        int frame=generatorFrameOffset(dump),length=java.nio.ByteBuffer.wrap(dump,frame+8,4).getInt();
+        output.writeInt(0x474c4e4b);output.writeInt(1);output.writeInt(0);
+        bytes.write(dump,frame+12+length,dump.length-frame-12-length);
         return bytes.toByteArray();
     }
 
@@ -201,12 +224,19 @@ public class CompilerProvenanceTest extends JvmCompilerCase {
                 provenance(recovered, ModuleEntity.CompilerOrigin.DUMP, ModuleDumper.COMPILER_ABI_VERSION, ModuleDumper.COMPILER_ABI_VERSION);
                 provenance(partial, ModuleEntity.CompilerOrigin.UNKNOWN, -1, -1);
             }
+            int glnk=generatorFrameOffset(good),size=java.nio.ByteBuffer.wrap(good,glnk+8,4).getInt();
+            int attributes=glnk+12+size;
+            byte[] malformedAttributes=good.clone();malformedAttributes[attributes+7]++;
+            try { dumper.load(new ByteArrayInputStream(malformedAttributes)); fail("Malformed ATMD accepted"); }
+            catch (IOException expected) { }
+            assertNotNull("ATMD corruption follows real function decoding",dumper.observed);
+            provenance(dumper.observed.getModule(),ModuleEntity.CompilerOrigin.UNKNOWN,-1,-1);
             byte[] truncated = replaceEmptyTail(good, metadata(stamp, 1, 1, 7));
-            try { dumper.load(new ByteArrayInputStream(Arrays.copyOf(truncated, truncated.length - 1))); fail("Truncated metadata accepted"); }
+            try { dumper.load(new ByteArrayInputStream(Arrays.copyOf(truncated, reservedTailOffset(good) + 4 + metadata(stamp, 1, 1, 7).length - 1))); fail("Truncated metadata accepted"); }
             catch (EOFException expected) { }
             provenance(dumper.observed.getModule(), ModuleEntity.CompilerOrigin.UNKNOWN, -1, -1);
-            byte[] higherThanHeader = replaceEmptyTail(good, metadata(stamp, 1, 1, 2));
-            higherThanHeader[11] = 1; // Header claims ABI1, so original ABI2 is contradictory.
+            // Keep the ABI20 declaration layout intact while contradicting its accepted header bound.
+            byte[] higherThanHeader = replaceEmptyTail(good, metadata(stamp, 1, 1, ModuleDumper.COMPILER_ABI_VERSION + 1));
             try { dumper.load(new ByteArrayInputStream(higherThanHeader)); fail("Lineage exceeded accepted ABI"); }
             catch (IOException expected) { }
             provenance(dumper.observed.getModule(), ModuleEntity.CompilerOrigin.UNKNOWN, -1, -1);

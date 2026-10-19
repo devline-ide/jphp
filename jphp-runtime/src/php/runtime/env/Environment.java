@@ -75,11 +75,12 @@ public class Environment {
     private SystemMessage lastMessage;
 
     private ErrorReportHandler errorReportHandler;
-    private ErrorHandler previousErrorHandler;
+    private List<ErrorHandler> previousErrorHandlers;
     private ErrorHandler errorHandler;
+    private boolean ownedErrorHandlersReleased;
     private ShellExecHandler shellExecHandler = ShellExecHandler.DEFAULT;
 
-    private ExceptionHandler previousExceptionHandler;
+    private List<ExceptionHandler> previousExceptionHandlers;
     private ExceptionHandler exceptionHandler = ExceptionHandler.DEFAULT;
 
     private OutputBuffer defaultBuffer;
@@ -95,6 +96,26 @@ public class Environment {
 
     // vars
     protected final ArrayMemory globals;
+    private SyntheticGlobalsOrigin syntheticGlobalsOrigin;
+    /** Constructor provenance only; this metadata never owns the legacy recursive value. */
+    public static final class SyntheticGlobalsOrigin {
+        private final Environment environment;
+        private final ReferenceMemory carrier;
+        private boolean retired;
+        private SyntheticGlobalsOrigin(Environment environment,ReferenceMemory carrier){this.environment=environment;this.carrier=carrier;}
+        public Environment environment(){return environment;}
+        public ReferenceMemory carrier(){return carrier;}
+        public boolean isRetired(){return retired;}
+        public void validateCarrier(ReferenceMemory actual){
+            if(retired||actual!=carrier||environment.syntheticGlobalsOrigin!=this
+                    ||environment.globals.getByScalar("GLOBALS")!=carrier||carrier.getRawValue()!=environment.globals)
+                throw new IllegalArgumentException("Synthetic GLOBALS creation origin is stale or foreign");
+        }
+        /** Called only after the actual carrier's successful mutation was prevalidated. */
+        public final void retire(){retired=true;}
+    }
+    public final SyntheticGlobalsOrigin getSyntheticGlobalsOrigin(){return syntheticGlobalsOrigin;}
+    public final ArrayMemory getRuntimeGlobalsTable(){return globals;}
     protected final Map<String, ReferenceMemory> statics;
     protected final Map<String, Object> userValues = new HashMap<String, Object>();
 
@@ -123,8 +144,64 @@ public class Environment {
     private final Set<ThreadBinding> threadBindings = new HashSet<>();
     private ThreadBinding constructionBinding;
     private boolean finalizationStarted;
+    private Thread embeddingFinalizationThread;
     private volatile boolean finalizationComplete;
     private IdentityHashMap<CallCache<?>, CallCache.Row> callCacheRows;
+    private IdentityHashMap<ClassEntity,php.runtime.PhpEnums.State> enumStates;
+    public php.runtime.PhpEnums.State getEnumState(ClassEntity declaration,boolean create) {
+        synchronized (getClassInitializationLock()) {
+            var state=enumStates==null?null:enumStates.get(declaration);
+            if(state==null && create) {
+                if(finalizationStarted || finalizationComplete)throw new IllegalStateException("Environment enum storage has retired");
+                if(enumStates==null)enumStates=new IdentityHashMap<>();
+                state=new php.runtime.PhpEnums.State();enumStates.put(declaration,state);
+            }
+            return state;
+        }
+    }
+    private volatile ThreadLocal<php.runtime.PhpOwnershipExecution.Context> ownershipExecutionContexts;
+    private php.runtime.PhpRuntimeOwnership.Authority runtimeOwnership;
+    /** One explicitly connected ordinary authority shares the existing heap; no inferred domain. */
+    public final php.runtime.PhpRuntimeOwnership.Authority getRuntimeOwnership() {return runtimeOwnership;}
+    public final void bindRuntimeOwnership(php.runtime.PhpRuntimeOwnership.Authority authority) {
+        if(authority==null || authority.environment()!=this)throw new IllegalArgumentException("Foreign runtime ownership authority");
+        if(runtimeOwnership!=null && runtimeOwnership!=authority)throw new IllegalStateException("Environment already has a runtime authority");
+        var explicit=php.runtime.PhpOwnershipExecution.current(this);
+        if(explicit!=null && explicit.domain()!=authority.domain())throw new IllegalArgumentException("Environment has a foreign explicit heap");
+        runtimeOwnership=authority;
+    }
+
+
+    /** Explicit execution tickets; ordinary environments allocate no ownership context storage. */
+    public final php.runtime.PhpOwnershipExecution.Context getOwnershipExecutionContext() {
+        ThreadLocal<php.runtime.PhpOwnershipExecution.Context> contexts=ownershipExecutionContexts;
+        return contexts == null ? null : contexts.get();
+    }
+    public final OwnershipExecutionBinding bindOwnershipExecutionContext(php.runtime.PhpOwnershipExecution.Context context) {
+        context.validateBinding(this);
+        ThreadLocal<php.runtime.PhpOwnershipExecution.Context> contexts=ownershipExecutionContexts;
+        if (contexts == null) synchronized (threadBindings) {
+            contexts=ownershipExecutionContexts;
+            if (contexts == null) ownershipExecutionContexts=contexts=new ThreadLocal<>();
+        }
+        OwnershipExecutionBinding binding=new OwnershipExecutionBinding(contexts,context,contexts.get());
+        contexts.set(context);return binding;
+    }
+    public static final class OwnershipExecutionBinding implements AutoCloseable {
+        private final ThreadLocal<php.runtime.PhpOwnershipExecution.Context> contexts;
+        private final php.runtime.PhpOwnershipExecution.Context context,previous;
+        private final Thread thread=Thread.currentThread();private boolean closed;
+        private OwnershipExecutionBinding(ThreadLocal<php.runtime.PhpOwnershipExecution.Context> contexts,
+                php.runtime.PhpOwnershipExecution.Context context,php.runtime.PhpOwnershipExecution.Context previous) {
+            this.contexts=contexts;this.context=context;this.previous=previous;
+        }
+        @Override public void close() {
+            if (closed) return;
+            if (thread != Thread.currentThread() || contexts.get() != context)
+                throw new IllegalStateException("Ownership execution scopes must close on their thread in LIFO order");
+            if (previous == null) contexts.remove();else contexts.set(previous);closed=true;
+        }
+    }
 
     /** Runtime cache storage is owned by this Environment, never by a compiled class's static cache. */
     public CallCache.Row getCallCacheRow(CallCache<?> cache, boolean create) {
@@ -314,8 +391,91 @@ public class Environment {
         return fallback;
     }
 
+    // Per execution environment: this policy never disables the JVM's physical collector.
+    private volatile boolean gcEnabled = true;
+    public final boolean isGcEnabled() {return gcEnabled;}
+    public final void setGcEnabled(boolean enabled) {gcEnabled=enabled;}
+    /** Explicit collection remains available when automatic logical collection is disabled. */
+    public final int collectGarbage() throws Throwable {return collectGarbage(false);}
+    public final void collectGarbageIfNeeded() throws Throwable {
+        runPendingFinalizers();
+        if(gcEnabled)collectGarbage(true);
+    }
+    private int collectGarbage(boolean automatic) throws Throwable {
+        runPendingFinalizers();
+        cleanGcObjects();
+        var session=php.runtime.PhpOwnershipExecution.current(this);
+        if(session!=null) {
+            var domain=session.domain();
+            return automatic && !domain.graph().shouldCollectCycles()?0:domain.collectCycles();
+        }
+        if(runtimeOwnership!=null)try(var execution=runtimeOwnership.enter()) {
+            var domain=runtimeOwnership.domain();
+            return automatic && !domain.graph().shouldCollectCycles()?0:domain.collectCycles();
+        }
+        return 0;
+    }
+
     private final ReferenceQueue<IObject> gcObjectRefQueue = new ReferenceQueue<IObject>();
-    private final Set<WeakReference<IObject>> gcObjects = new HashSet<WeakReference<IObject>>();
+    private static final class GcObjectReference extends WeakReference<IObject> {
+        private int index = -1;
+        GcObjectReference(IObject object, ReferenceQueue<IObject> queue) {
+            super(object, queue);
+        }
+    }
+    private final List<GcObjectReference> gcObjects = new ArrayList<>();
+    private volatile ArrayDeque<IObject> pendingJvmFinalizers;
+    private boolean drainingJvmFinalizers;
+
+    /** JVM finalizer notification only: no PHP callback or thread binding on the JVM daemon. */
+    public final void enqueueJvmFinalizer(IObject object) {
+        synchronized (gcObjects) {
+            if (finalizationComplete || object.isFinalized()) return;
+            if (pendingJvmFinalizers == null) pendingJvmFinalizers = new ArrayDeque<>();
+            pendingJvmFinalizers.addLast(object);
+        }
+    }
+
+    /** Deliver notifications on a runtime caller, with a temporary binding and balanced PHP stack. */
+    public final void runPendingFinalizers() {
+        if (pendingJvmFinalizers != null) { php.runtime.PhpPrimitiveCellRuntime.opaque(this);drainPendingJvmFinalizers(); }
+    }
+
+    private void drainPendingJvmFinalizers() {
+        if (php.runtime.PhpOwnershipExecution.current(this) != null) return;
+        synchronized (gcObjects) {
+            if (finalizationComplete || drainingJvmFinalizers || pendingJvmFinalizers == null) return;
+            drainingJvmFinalizers = true;
+        }
+        try {
+            ThreadBinding binding;
+            synchronized (Thread.currentThread()) {
+                synchronized (threadBindings) {
+                    if (finalizationComplete) return;
+                    binding = bindCurrentThread();
+                }
+            }
+            try (binding) {
+                for (;;) {
+                    IObject object;
+                    synchronized (gcObjects) {
+                        if (finalizationComplete || pendingJvmFinalizers == null) return;
+                        object = pendingJvmFinalizers.pollFirst();
+                        if (object == null) { pendingJvmFinalizers = null; return; }
+                    }
+                    php.runtime.invoke.PhpObjectLifecycle.destruct(object, this,
+                            php.runtime.invoke.PhpObjectLifecycle.Reason.ENVIRONMENT_FINALIZE);
+                }
+            }
+        } catch (Throwable failure) {
+            Environment.<RuntimeException>raiseFinalizerFailure(failure);
+        } finally {
+            synchronized (gcObjects) { drainingJvmFinalizers = false; }
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> void raiseFinalizerFailure(Throwable failure) throws T { throw (T) failure; }
     private static final AtomicInteger ids = new AtomicInteger();
     private static int nextEnvironmentId() {
         for (;;) {
@@ -424,7 +584,9 @@ public class Environment {
             }
         });
 
-        this.globals.put("GLOBALS", this.globals);
+        ReferenceMemory syntheticGlobalsCarrier=this.globals.put("GLOBALS", this.globals);
+        this.syntheticGlobalsOrigin=new SyntheticGlobalsOrigin(this,syntheticGlobalsCarrier);
+        syntheticGlobalsCarrier.attachSyntheticGlobalsOrigin(this.syntheticGlobalsOrigin);
         this.globals.put("_ENV", ObjectMemory.valueOf(new WrapEnvironmentVariables(this)));
 
         //classMap.putAll(scope.getClassMap());
@@ -481,46 +643,105 @@ public class Environment {
         }
     }
 
+    private Throwable composeFinalizationFailure(Throwable primary, Throwable cleanup) {
+        php.runtime.PhpOwnershipExecution.Session session = php.runtime.PhpOwnershipExecution.current(this);
+        if (session != null) return session.domain().graph().composeFailure(primary, cleanup);
+        if (primary == null) return cleanup;
+        if (cleanup != primary) primary.addSuppressed(cleanup);
+        return primary;
+    }
+
+    /** Finalize an embedded runtime without CLI reporting or terminating the host JVM. */
+    public synchronized void doFinalForEmbedding() throws Throwable {
+        Thread previous = embeddingFinalizationThread;
+        embeddingFinalizationThread = Thread.currentThread();
+        try {
+            doFinal();
+        } finally {
+            embeddingFinalizationThread = previous;
+        }
+    }
+
     public void doFinal() throws Throwable {
+        if (php.runtime.PhpOwnershipExecution.currentEntry(this) != null
+                || runtimeOwnership != null && runtimeOwnership.isExecuting())
+            throw new IllegalStateException("Environment finalization inside an owned invocation requires an explicit unwind handoff");
         synchronized (threadBindings) {
             if (finalizationStarted) return;
             finalizationStarted = true;
         }
+        boolean embedding = embeddingFinalizationThread == Thread.currentThread();
         Throwable failure = null;
         try (ThreadBinding binding = bindCurrentThread()) {
             for (ShutdownHandler handler : shutdownFunctions) {
                 try {
                     handler.call();
                 } catch (DieException e) {
+                    if (embedding) { failure = e; break; }
                     finalizeObjects();
                     catchUncaught(e);
                     break;
                 } catch (BaseBaseException | ErrorException e) {
+                    if (embedding) { failure = e; break; }
                     try { reportThreadThrowable(e); }
                     catch (Throwable reportingFailure) { if (reportingFailure != e) e.addSuppressed(reportingFailure); throw e; }
                     break;
                 } catch (Exception e) {
+                    if (embedding) { failure = e; break; }
                     boolean reported;
                     try { reported = reportThreadThrowable(e); }
                     catch (Throwable reportingFailure) { if (reportingFailure != e) e.addSuppressed(reportingFailure); throw e; }
                     if (!reported) throw e;
                     break;
+                } catch (Throwable e) {
+                    if (!embedding) throw e;
+                    failure = e;
+                    break;
                 }
             }
 
-            finalizeObjects();
-            flushAll();
-            lastMessage = null;
+            if (embedding) {
+                try { finalizeObjects(); }
+                catch (Throwable cleanup) {
+                    failure = composeFinalizationFailure(failure, cleanup);
+                }
+                try { releaseOwnedErrorHandlers(); }
+                catch (Throwable cleanup) {
+                    failure = composeFinalizationFailure(failure, cleanup);
+                }
+                try { flushAll(); }
+                catch (Throwable cleanup) {
+                    failure = composeFinalizationFailure(failure, cleanup);
+                }
+                lastMessage = null;
+                if (failure != null) throw failure;
+            } else {
+                finalizeObjects();
+                releaseOwnedErrorHandlers();
+                flushAll();
+                lastMessage = null;
+            }
         } catch (Throwable thrown) {
-            failure = thrown;
-            throw thrown;
+            if (thrown != failure) failure = composeFinalizationFailure(failure, thrown);
+            throw failure;
         } finally {
+            try {releaseOwnedErrorHandlers();}
+            catch (Throwable cleanup) {
+                if (failure == null) {failure=cleanup;throw cleanup;}
+                php.runtime.PhpOwnershipExecution.Session session=php.runtime.PhpOwnershipExecution.current(this);
+                Throwable composed=session == null ? failure : session.domain().graph().composeFailure(failure,cleanup);
+                if (session == null && cleanup != failure) failure.addSuppressed(cleanup);
+                if (composed != failure) {failure=composed;throw composed;}
+            } finally {
             synchronized (threadBindings) {
                 finalizationComplete = true;
                 callCacheRows = null;
+                enumStates = null;
             }
+            synchronized (gcObjects) { pendingJvmFinalizers = null; }
             try { retireThreadBindings(); }
             catch (RuntimeException | Error cleanup) { if (failure == null) throw cleanup; else if (cleanup != failure) failure.addSuppressed(cleanup); }
+            }
         }
     }
 
@@ -530,27 +751,50 @@ public class Environment {
      * @throws Throwable
      */
     public void finalizeObjects() throws Throwable {
-        cleanGcObjects();
-        for (WeakReference<IObject> el : gcObjects) {
-            IObject o = el.get();
-            if (o == null)
-                continue;
-
-            php.runtime.invoke.PhpObjectLifecycle.destruct(o, this,
-                    php.runtime.invoke.PhpObjectLifecycle.Reason.ENVIRONMENT_FINALIZE);
+        for (;;) {
+            runPendingFinalizers();
+            cleanGcObjects();
+            List<GcObjectReference> pending;
+            synchronized (gcObjects) {
+                if (gcObjects.isEmpty()) {
+                    if (!drainingJvmFinalizers && pendingJvmFinalizers != null
+                            && php.runtime.PhpOwnershipExecution.current(this) == null) continue;
+                    return;
+                }
+                pending = new ArrayList<>(gcObjects);
+            }
+            // Callbacks run outside the registry monitor and may publish the next batch.
+            for (GcObjectReference reference : pending) {
+                if (!removeGcObject(reference)) continue;
+                IObject object = reference.get();
+                if (object != null)
+                    php.runtime.invoke.PhpObjectLifecycle.destruct(object, this,
+                            php.runtime.invoke.PhpObjectLifecycle.Reason.ENVIRONMENT_FINALIZE);
+            }
         }
-        gcObjects.clear();
+    }
+
+    /** Swap removal keeps queue cleanup constant-time without allocating a hash-table node per object. */
+    private boolean removeGcObject(GcObjectReference reference) {
+        synchronized (gcObjects) {
+            int index = reference.index;
+            if (index < 0) return false;
+            if (gcObjects.get(index) != reference)
+                throw new IllegalStateException("GC registry index no longer identifies its reference");
+            int lastIndex = gcObjects.size() - 1;
+            GcObjectReference last = gcObjects.remove(lastIndex);
+            if (index != lastIndex) {
+                gcObjects.set(index, last);last.index = index;
+            }
+            reference.index = -1;
+            return true;
+        }
     }
 
     private void cleanGcObjects() throws Throwable {
         Reference<? extends IObject> object;
-        while (true) {
-            object = gcObjectRefQueue.poll();
-            if (object == null)
-                break;
-            else
-                gcObjects.remove(object);
-        }
+        while ((object = gcObjectRefQueue.poll()) != null)
+            removeGcObject((GcObjectReference)object);
     }
 
     public void pushCall(CallStackItem stackItem) {
@@ -710,25 +954,27 @@ public class Environment {
         synchronized (autoloadLocks) {
             // detect recursion in autoload
             if (StringUtils.isValidClassName(name) && autoloadLocks.add(lowerName)) {
-                StringMemory tmp = new StringMemory(name);
+                try {
+                    StringMemory tmp = new StringMemory(name);
 
-                for (SplClassLoader loader : classLoaders) {
-                    loader.load(tmp);
+                    for (SplClassLoader loader : classLoaders) {
+                        loader.load(tmp);
 
-                    ClassEntity classEntity = fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
+                        ClassEntity classEntity = fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
 
-                    if (classEntity != null) {
-                        autoloadLocks.remove(lowerName);
-                        return classEntity;
+                        if (classEntity != null) {
+                            return classEntity;
+                        }
                     }
-                }
 
-                if (defaultAutoLoader != null) {
-                    defaultAutoLoader.load(tmp);
-                }
+                    if (defaultAutoLoader != null) {
+                        defaultAutoLoader.load(tmp);
+                    }
 
-                autoloadLocks.remove(lowerName);
-                return fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
+                    return fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
+                } finally {
+                    autoloadLocks.remove(lowerName);
+                }
             } else {
                 return null;
             }
@@ -790,6 +1036,7 @@ public class Environment {
     }
 
     private ClassEntity lookupClass(String name, boolean modern) {
+        if(modern) {ClassEntity builtin=scope.fetchPhp85Class(name);if(builtin!=null) return builtin;}
         ClassEntity entity = classMap.get(PhpClassNames.canonicalKey(name));
         return modern || PhpClassNames.isModern(entity) ? entity : legacyClassMap.get(name.toLowerCase());
     }
@@ -847,7 +1094,7 @@ public class Environment {
                     } catch (Throwable throwable) {
                         throw new CriticalException(throwable);
                     }
-                    if (shadow == null || shadow == entity) publishClass(entity.getName(), entity);
+                    if (!scope.isPhp85Builtin(entity) && (shadow == null || shadow == entity)) publishClass(entity.getName(), entity);
                     return entity;
                 }
 
@@ -865,6 +1112,7 @@ public class Environment {
     }
 
     public FunctionEntity fetchFunction(String name, String nameL) {
+        if(isModernClassLookup()) {FunctionEntity builtin=scope.fetchPhp85Function(name);if(builtin!=null) return builtin;}
         FunctionEntity r = functionMap.get(nameL);
         if (r == null) {
             r = scope.findUserFunction(name);
@@ -875,10 +1123,20 @@ public class Environment {
 
     public void registerFunction(FunctionEntity entity) {
         synchronized (functionMap) {
-            if (functionMap.containsKey(entity.getLowerName()))
+            if (functionMap.containsKey(entity.getLowerName()) || entity.getModule()!=null
+                    && entity.getModule().getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5 && scope.fetchPhp85Function(entity.getName())!=null)
                 exception("Function '%s' already registered", entity.getName());
 
             functionMap.put(entity.getLowerName(), entity);
+        }
+    }
+
+    /** Alias publication is local to this Environment and retains the actual declaration identity. */
+    public boolean registerClassAlias(String name,ClassEntity entity,PhpLanguageProfile profile) {
+        synchronized (classMap) {
+            if (hasClassCollision(name,entity) || fetchClass(name,false,profile)!=null) return false;
+            publishClass(name,entity);
+            return true;
         }
     }
 
@@ -904,9 +1162,16 @@ public class Environment {
         }
 
         CompileConstant constant = scope.findCompileConstant(name);
+        if (constant != null && "E_ALL".equals(name)) {
+            var frame = php.runtime.PhpPropertyWriteContext.current(this);
+            if (frame != null) constant = scope.findCompileConstant(name, moduleManager.getPhpLanguageProfile(frame.trace));
+        }
         if (constant != null)
             return constant.value;
 
+        ConstantEntity scoped = scope.findUserConstant(name);
+        if (scoped != null && (!scoped.caseSensitise || name.equals(scoped.getName())))
+            return scoped.getValue();
         return null;
     }
 
@@ -914,6 +1179,19 @@ public class Environment {
         return findConstant(name, name.toLowerCase());
     }
 
+    public boolean defineDeclaredConstant(String moduleName,String name,Memory value) {
+        ModuleEntity module=scope.getClassLoader().getModule(moduleName);
+        ConstantEntity declaration=module==null ? null : module.getDeferredGlobalConstantDeclaration(name);
+        if(declaration==null) throw new php.runtime.exceptions.CriticalException("Missing deferred global constant declaration");
+        if(findConstant(name)!=null) {
+            error(declaration.getTrace(), E_WARNING, "Constant %s already defined, this will be an error in PHP 9", name);
+            return false;
+        }
+        ConstantEntity constant=new ConstantEntity(name,value,true);
+        constant.setModule(module);constant.setContext(declaration.getContext());constant.setTrace(declaration.getTrace());
+        constant.setDocComment(declaration.getDocComment());constant.setPhpAttributes(declaration.getPhpAttributes());
+        constantMap.put(name.toLowerCase(java.util.Locale.ROOT),constant);return true;
+    }
     public boolean defineConstant(String name, Memory value, boolean caseSensitise) {
         Memory constant = findConstant(name);
         if (constant != null)
@@ -1054,7 +1332,8 @@ public class Environment {
     }
 
     public void setExceptionHandler(ExceptionHandler exceptionHandler) {
-        this.previousExceptionHandler = this.exceptionHandler;
+        if (previousExceptionHandlers == null) previousExceptionHandlers = new ArrayList<>();
+        previousExceptionHandlers.add(this.exceptionHandler);
         this.exceptionHandler = exceptionHandler == null ? ExceptionHandler.DEFAULT : exceptionHandler;
     }
 
@@ -1067,11 +1346,19 @@ public class Environment {
     }
 
     public ExceptionHandler getPreviousExceptionHandler() {
-        return previousExceptionHandler;
+        return previousExceptionHandlers == null || previousExceptionHandlers.isEmpty() ? null
+                : previousExceptionHandlers.get(previousExceptionHandlers.size() - 1);
+    }
+
+    /** Restore consumes one prior registration; an empty stack keeps the built-in handler. */
+    public void restoreExceptionHandler() {
+        exceptionHandler = previousExceptionHandlers == null || previousExceptionHandlers.isEmpty() ? ExceptionHandler.DEFAULT
+                : previousExceptionHandlers.remove(previousExceptionHandlers.size() - 1);
     }
 
     public ErrorHandler getPreviousErrorHandler() {
-        return previousErrorHandler;
+        return previousErrorHandlers == null || previousErrorHandlers.isEmpty() ? null
+                : previousErrorHandlers.get(previousErrorHandlers.size() - 1);
     }
 
     public ErrorHandler getErrorHandler() {
@@ -1216,10 +1503,20 @@ public class Environment {
         error(trace, E_ERROR, message, args);
     }
 
+
+    /** Trusted PHP85 lexer diagnostics are nonfatal and never invoke the PHP error handler. */
+    public void reportPhp85CompileWarning(SystemMessage diagnostic) {
+        if (diagnostic.getType() != E_COMPILE_WARNING)
+            throw new IllegalArgumentException("Expected lexical compile warning");
+        lastMessage = diagnostic;
+        if (errorReportHandler != null && isHandleErrors(E_COMPILE_WARNING))
+            errorReportHandler.onError(diagnostic);
+    }
+
     public void triggerMessage(SystemMessage message) {
         lastMessage = message;
         if (errorHandler != null) {
-            if (errorHandler.onError(this, message))
+            if (dispatchErrorHandler(message))
                 return;
         }
 
@@ -1284,6 +1581,11 @@ public class Environment {
 
     public void exception(TraceInfo trace, Class<? extends BaseBaseException> e, String message, Object... args) {
         ClassEntity entity = fetchClass(e);
+        var ownedExecution=php.runtime.PhpOwnershipExecution.current(this);
+        if(ownedExecution!=null && e==php.runtime.lang.exception.BaseTypeError.class) {
+            try {throw php.runtime.PhpOwnershipThrowables.typeError(ownedExecution,entity,trace,String.format(message,args));}
+            catch(Throwable failure) {Environment.<RuntimeException>throwThreadFailure(failure);return;}
+        }
         IObject object = entity.newObjectWithoutConstruct(this);
 
         if (object instanceof BaseException) {
@@ -1529,6 +1831,29 @@ public class Environment {
         }
     }
 
+    /** Successful FETCH_CONSTANT resolution is cached per emitted site and Environment, never per JVM class. */
+    public Memory __getConstant(String name, String lowerName, TraceInfo trace, boolean fallback, String siteKey) {
+        boolean cacheResolution = fallback && name.indexOf(Information.NAMESPACE_SEP_CHAR) >= 0;
+        Memory cached = cacheResolution ? getStatic(siteKey) : null;
+        if (cached != null) return findConstant(cached.toString());
+        String resolved = name;
+        Memory constant = findConstant(name, lowerName);
+        if (constant == null && fallback) {
+            int p = name.lastIndexOf(Information.NAMESPACE_SEP_CHAR);
+            if (p > -1) {
+                resolved = name.substring(p + 1);
+                constant = findConstant(resolved, lowerName.substring(p + 1));
+            }
+        }
+        if (constant == null) {
+            exception(trace, php.runtime.lang.exception.BaseError.class, "Undefined constant \"%s\"", name);
+            return Memory.NULL;
+        }
+        // Retain only the immutable resolved name, avoiding an extra owner of object/closure constants.
+        if (cacheResolution) getOrCreateStatic(siteKey, StringMemory.valueOf(resolved));
+        return constant;
+    }
+
     public Memory __getConstant(String name, String lowerName, TraceInfo trace) {
         Memory constant = findConstant(name, lowerName);
 
@@ -1661,9 +1986,12 @@ public class Environment {
                 throw new RuntimeException(throwable);
             }
 
-            WeakReference<IObject> wr = new WeakReference<>(object, gcObjectRefQueue);
-            gcObjects.add(wr);
+            synchronized (gcObjects) {
+                GcObjectReference reference = new GcObjectReference(object, gcObjectRefQueue);
+                gcObjects.add(reference);reference.index = gcObjects.size() - 1;
+            }
         }
+        runPendingFinalizers();
     }
 
     public Memory __newObject(String originName, String lowerName, TraceInfo trace, Memory[] args,
@@ -1744,6 +2072,87 @@ public class Environment {
             throw new CriticalException("Cannot find the module (" + moduleIndex + ") for getting a generator object");
 
         return moduleEntity.findGenerator(index);
+    }
+
+    public ClassEntity __getAnonymousClass(String moduleIndex, String name) {
+        if (php.runtime.PhpOwnershipExecution.current(this) != null)
+            throw new IllegalArgumentException("Anonymous declaration lacks its complete ownership protocol");
+        ModuleEntity module = scope.moduleIndexMap.get(moduleIndex);
+        ClassEntity entity = module == null ? null : module.findClass(name);
+        if (entity == null || !entity.isAnonymous())
+            throw new CriticalException("Invalid anonymous declaration in module " + moduleIndex);
+        synchronized (classMap) {
+            ClassEntity present = lookupClass(name, true);
+            if (present!=null && entity.isUnresolvedDeclaration() && present.getModule()==module) return present;
+            if (present != null && present != entity) throw new CriticalException("Anonymous class identity collision");
+            if (present == null) {
+                if (entity.isUnresolvedDeclaration()) return __declareClass(moduleIndex,name);
+                entity.initEnvironment(this);
+                publishClass(name, entity);
+            }
+        }
+        return entity;
+    }
+
+    public ClassEntity __defineClass(TraceInfo trace, String moduleIndex, int declarationId) {
+        if (php.runtime.PhpOwnershipExecution.current(this) != null)
+            throw new IllegalArgumentException("Deferred class declaration lacks its complete ownership protocol");
+        ModuleEntity module = scope.moduleIndexMap.get(moduleIndex);
+        ClassEntity template = module == null ? null : module.findDeferredClass(declarationId);
+        if (module == null || !moduleIndex.equals(module.getInternalName()) || template == null
+                || template.getModule() != module || template.getDeclarationId() != declarationId
+                || !template.isDeclarationTemplate() || template.isStatic() || template.isAnonymous())
+            throw new CriticalException("Invalid deferred class declaration ordinal");
+        return defineClassDeclaration(trace, moduleIndex, template);
+    }
+
+    public ClassEntity __declareClass(String moduleIndex, String name) {
+        if (php.runtime.PhpOwnershipExecution.current(this) != null)
+            throw new IllegalArgumentException("Deferred class declaration lacks its complete ownership protocol");
+        ModuleEntity module = scope.moduleIndexMap.get(moduleIndex);
+        ClassEntity template = module == null ? null : module.findClass(name);
+        if (template == null || template.getModule() != module || !template.isUnresolvedDeclaration())
+            throw new CriticalException("Invalid deferred class declaration");
+        return defineClassDeclaration(template.getTrace(), moduleIndex, template);
+    }
+
+    private boolean hasDeclarationCollision(String name, ClassEntity entity) {
+        return hasClassCollision(name, entity) || scope.hasClassDeclaration(name);
+    }
+
+    private ClassEntity defineClassDeclaration(TraceInfo trace, String moduleIndex, ClassEntity template) {
+        String name = template.getName();
+        synchronized (classMap) {
+            if (hasDeclarationCollision(name, template))
+                error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+        }
+        String pendingKey = "\0class-link:" + moduleIndex + ":"
+                + (template.isDeferredDeclaration() ? template.getDeclarationId() : name);
+        if (getUserValue(pendingKey, Boolean.class) != null)
+            exception(trace, php.runtime.lang.exception.BaseError.class, "Class \"%s\" not found", name);
+        setUserValue(pendingKey, Boolean.TRUE);
+        try {
+            String parentName = template.getDeferredParentName();
+            ClassEntity parent = parentName == null ? null
+                    : fetchClass(parentName, true, template.getModule().getPhpLanguageProfile());
+            if (parentName != null && parent == null)
+                exception(trace, php.runtime.lang.exception.BaseError.class, "Class \"%s\" not found", parentName);
+            synchronized (classMap) {
+                // Parent autoload can itself publish a competing declaration.
+                if (hasDeclarationCollision(name, template))
+                    error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+                ClassEntity bound = php.runtime.reflection.PhpClassDeclaration.bind(template, parent, this);
+                if (hasDeclarationCollision(name, bound))
+                    error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+                bound.initEnvironment(this);
+                if (hasDeclarationCollision(name, bound))
+                    error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+                publishClass(name, bound);
+                return bound;
+            }
+        } finally {
+            setUserValue(pendingKey, null);
+        }
     }
 
     public ClassEntity __getClosure(String moduleIndex, int index) {
@@ -2107,8 +2516,83 @@ public class Environment {
     }
 
     public void setErrorHandler(ErrorHandler handler) {
-        previousErrorHandler = errorHandler;
+        if (ownedErrorHandlersReleased && handler != null && handler.getOwnershipRegistration() != null)
+            throw new IllegalStateException("Owned error-handler registrations are finalized");
+        if (handler != null && handler.getOwnershipRegistration() != null) {
+            if (handler.getClass() != ErrorHandler.class) throw new IllegalArgumentException("Custom handler lacks an exact invocation contract");
+            handler.getOwnershipRegistration().install(this);
+        }
+        if (previousErrorHandlers == null) previousErrorHandlers = new ArrayList<>();
+        previousErrorHandlers.add(errorHandler);
         errorHandler = handler;
+    }
+
+    /** Restore the last registration; an empty stack stays empty. */
+    public void restoreErrorHandler() {
+        ErrorHandler removed=errorHandler;
+        errorHandler = previousErrorHandlers == null || previousErrorHandlers.isEmpty() ? null
+                : previousErrorHandlers.remove(previousErrorHandlers.size() - 1);
+        if (removed != errorHandler) releaseErrorHandler(removed);
+    }
+
+    private void releaseErrorHandler(ErrorHandler handler) {
+        if (handler != null && handler.getOwnershipRegistration() != null) {
+            try {handler.getOwnershipRegistration().close();}
+            catch (Throwable failure) {Environment.<RuntimeException>throwThreadFailure(failure);}
+        }
+    }
+
+    /** PHP suspends the active handler while it runs. A replacement remains active. */
+    private boolean dispatchErrorHandler(SystemMessage message) {
+        ErrorHandler selected=errorHandler;
+        if (selected == null) return false;
+        errorHandler=null;
+        Throwable primary=null;
+        try {return selected.onError(this,message);}
+        catch (RuntimeException | Error failure) {primary=failure;throw failure;}
+        finally {
+            if (errorHandler == null) errorHandler=selected;
+            else if (errorHandler != selected) {
+                try {releaseErrorHandler(selected);}
+                catch (Throwable cleanup) {
+                    Throwable composed=selected.getOwnershipRegistration() == null ? cleanup
+                            : selected.getOwnershipRegistration().composeFailure(primary,cleanup);
+                    Environment.<RuntimeException>throwThreadFailure(composed);
+                }
+            }
+        }
+    }
+
+    /** Release actual retained callables after shutdown/reporting and before the execution participant closes. */
+    /** Pure admission of the existing physical registry; no raw callback is adopted retrospectively. */
+    public void requireRuntimeErrorHandlerState(php.runtime.PhpRuntimeOwnership.Authority authority) {
+        if (authority.environment()!=this || ownedErrorHandlersReleased)throw new IllegalArgumentException("Error-handler registry is foreign or finalized");
+        if (errorHandler!=null && (errorHandler.getOwnershipRegistration()==null || !errorHandler.getOwnershipRegistration().belongsTo(authority)))throw new IllegalArgumentException("Active error handler lacks its actual ordinary FIELD");
+        if (previousErrorHandlers!=null)for(ErrorHandler handler:previousErrorHandlers)
+            if(handler!=null && (handler.getOwnershipRegistration()==null || !handler.getOwnershipRegistration().belongsTo(authority)))throw new IllegalArgumentException("Previous error handler lacks its actual ordinary FIELD");
+    }
+
+    public void releaseOwnedErrorHandlers() throws Throwable {
+        if (ownedErrorHandlersReleased) return;
+        boolean ownsHandler=errorHandler != null && errorHandler.getOwnershipRegistration() != null;
+        if (!ownsHandler && previousErrorHandlers != null)
+            for (ErrorHandler handler:previousErrorHandlers)
+                if (handler != null && handler.getOwnershipRegistration() != null) {ownsHandler=true;break;}
+        if (!ownsHandler) {ownedErrorHandlersReleased=true;return;}
+        List<ErrorHandler> releasing=previousErrorHandlers == null ? new ArrayList<>()
+                : new ArrayList<>(previousErrorHandlers);
+        if (errorHandler != null) releasing.add(errorHandler);
+        errorHandler=null;previousErrorHandlers=null;ownedErrorHandlersReleased=true;
+        Throwable failure=null;
+        for (int i=releasing.size()-1;i>=0;i--) {
+            ErrorHandler handler=releasing.get(i);
+            try {releaseErrorHandler(handler);}
+            catch (Throwable cleanup) {
+                failure=handler.getOwnershipRegistration() == null ? cleanup
+                        : handler.getOwnershipRegistration().composeFailure(failure,cleanup);
+            }
+        }
+        if (failure != null) throw failure;
     }
 
     public TraceInfo getTraceAppliedSourceMap(TraceInfo trace) {

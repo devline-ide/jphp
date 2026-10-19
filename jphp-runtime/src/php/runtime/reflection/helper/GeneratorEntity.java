@@ -58,6 +58,18 @@ public class GeneratorEntity extends ClassEntity {
         this.parameters = parameters;
     }
 
+    /** Generator lexical ids are not globally unique class ids; never use id equality for ownership. */
+    @Override
+    public java.util.List<php.runtime.reflection.MethodEntity> getOwnedMethods() {
+        java.util.List<php.runtime.reflection.MethodEntity> result = new java.util.ArrayList<>();
+        for (php.runtime.reflection.MethodEntity method : getMethods().values()) {
+            ClassEntity declaring = method.getClazz();
+            if (declaring == this || declaring != null && getData() != null && declaring.getData() == getData()
+                    && declaring.getModule() == getModule()) result.add(method);
+        }
+        return result;
+    }
+
     @Override
     public boolean equals(Object o) {
         return o instanceof GeneratorEntity;

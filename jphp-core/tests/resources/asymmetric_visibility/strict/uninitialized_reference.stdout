@@ -1,0 +1,4 @@
+foreignref:Error:Cannot indirectly modify private(set) property H::$x from global scope
+initialized:0
+own:1:null
+escaped:7

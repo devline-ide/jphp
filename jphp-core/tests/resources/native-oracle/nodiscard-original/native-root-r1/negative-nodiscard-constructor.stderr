@@ -1,0 +1,3 @@
+Fatal error: Method C::__construct cannot be #[\NoDiscard] in G:\DevLine-QA\jphp-attributes-20261013\native\negative-nodiscard-constructor.php on line 2
+Stack trace:
+#0 {main}

@@ -168,7 +168,7 @@ public class StaticAccessValueCompiler extends BaseExprCompiler<StaticAccessExpr
 
                 String name = "get";
                 if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
-                    name=token.isQuietRead() ? "isset" : token.isWriteAccess() ? "get" : "read";
+                    name=token.isQuietRead() ? "isset" : token.isDirectAssignment()?"direct":token.isWriteAccess()?"get":"read";
                 if (token instanceof StaticAccessUnsetExprToken)
                     name = "unset";
                 else if (token instanceof StaticAccessIssetExprToken)

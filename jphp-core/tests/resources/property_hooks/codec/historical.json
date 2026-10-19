@@ -1,0 +1,26 @@
+[
+  {
+    "abi": 18,
+    "resource": "resources/property_hooks/codec/actual18.phb",
+    "source": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\version-controls\\actual18.phb",
+    "sha256": "c83d77254e47aa9a76e5fc5b4c0f9c76a1d6e4e6dbf14febc8d77afc05cb0a19"
+  },
+  {
+    "abi": 19,
+    "resource": "resources/property_hooks/codec/actual19.phb",
+    "source": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\version-controls\\actual19.phb",
+    "sha256": "67e121b29c7969273fbf177fabb804c4918201a2ee1f7da98b6b7aa49a8dfc6b"
+  },
+  {
+    "abi": 20,
+    "resource": "resources/property_hooks/codec/actual20.phb",
+    "source": "G:\\DevLine-QA\\jphp-abi20-producer-20261013\\revision8-combined181\\runs\\final\\versions18-19-20\\actual20.phb",
+    "sha256": "dbef1084da7d740961630771edb7c6c0c4ac5fc144c3603333f7a673d46414bd"
+  },
+  {
+    "abi": 21,
+    "resource": "resources/property_hooks/codec/actual21.phb",
+    "source": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision63-final-physical-version-controls\\actual21.phb",
+    "sha256": "ea92b0619c726895a944ba8b55da1440f79d6d02af828e5e67c0df1ed8b7f72a"
+  }
+]

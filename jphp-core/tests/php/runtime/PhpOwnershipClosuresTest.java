@@ -56,9 +56,11 @@ public class PhpOwnershipClosuresTest extends JvmCompilerCase {
         for (boolean debug:new boolean[]{false,true}) for (boolean dumped:new boolean[]{false,true})
             try (var f=new Fixture(debug,dumped,"class HCCapture {function __destruct(){echo 'capture;';}} $v=0;return function()use($v){return $v;};")) {
                 var child=f.child("HCCapture");var childObject=child.object();var childNode=child.binding().node();
-                var closure=f.closures.allocate(f.provider(),f.env,scalar(f.domain,Memory.NULL),null,List.of(child.binding()));
+                var input=child.binding().view(new ObjectMemory(childObject));
+                var closure=f.closures.allocate(f.provider(),f.env,scalar(f.domain,Memory.NULL),null,List.of(input));
+                ((ObjectMemory)input.rawValue()).value=null;
                 child.close();assertEquals(1,childNode.incoming());assertSame(childObject,closure.closure().__invoke(f.env).toValue(ObjectMemory.class).value);
-                var exported=closure.closure().getUses();exported[0]=Memory.NULL;
+                var exported=closure.closure().getUses();((ObjectMemory)exported[0]).value=null;exported[0]=Memory.NULL;
                 assertSame(childObject,closure.closure().__invoke(f.env).toValue(ObjectMemory.class).value);
                 closure.close();assertEquals(PhpOwnership.State.DISPOSED,childNode.state());assertEquals("capture;",f.text());
             }
@@ -67,8 +69,11 @@ public class PhpOwnershipClosuresTest extends JvmCompilerCase {
         for (boolean debug:new boolean[]{false,true}) for (boolean dumped:new boolean[]{false,true})
             try (var f=new Fixture(debug,dumped,"class HCReceiver {function __destruct(){echo 'self;';}} return function(){return 7;};")) {
                 var child=f.child("HCReceiver");var node=child.binding().node();var object=child.object();
-                var closure=f.closures.allocate(f.provider(),f.env,child.binding(),"HCReceiver",List.of());child.close();
+                var input=child.binding().view(new ObjectMemory(object));
+                var closure=f.closures.allocate(f.provider(),f.env,input,"HCReceiver",List.of());child.close();
+                ((ObjectMemory)input.rawValue()).value=null;
                 assertFalse(f.entity.getOwnershipCapturePlan().usesThis());assertEquals(1,node.incoming());assertSame(object,closure.closure().getSelf().toValue(ObjectMemory.class).value);
+                ((ObjectMemory)closure.closure().getSelf()).value=null;assertSame(object,closure.closure().getSelf().toValue(ObjectMemory.class).value);
                 assertEquals(7,closure.closure().__invoke(f.env).toLong());closure.close();assertEquals("self;",f.text());
             }
     }
@@ -147,6 +152,34 @@ public class PhpOwnershipClosuresTest extends JvmCompilerCase {
                 try {allocation.closure().call(f.env,new ObjectMemory(allocation.closure()));fail("owned call copied stamp");}catch (IllegalStateException expected){}
                 allocation.close();assertEquals(PhpOwnership.State.LIVE,node.state());assertTrue(f.domain.collectCycles()>=3);assertEquals(PhpOwnership.State.DISPOSED,node.state());
                 reject(()->certificate.staticStorage());
+            }
+    }
+    @Test public void actualLoadedClassCannotReuseAReRecordedPlanForDifferentBytesSourceAndDump() throws Throwable {
+        for (boolean dumped:new boolean[]{false,true})
+            try (var f=new Fixture(false,dumped,"return function(){return 'markerAA';};")) {
+                byte[] data=f.entity.getData().clone();byte[] marker="markerAA".getBytes(StandardCharsets.US_ASCII);int found=-1;
+                outer:for (int i=0;i<=data.length-marker.length;i++) {for (int j=0;j<marker.length;j++) if (data[i+j] != marker[j]) continue outer;found=i;break;}
+                assertTrue("generated literal missing",found>=0);data[found+7]='B';
+                var changed=new ClosureEntity(new Context(""));changed.setInternalName(f.entity.getInternalName());changed.setData(data);
+                changed.setUses(f.entity.uses.clone());changed.setModule(f.entity.getModule());changed.setNativeClazz(f.entity.getNativeClass());
+                var old=f.entity.getOwnershipCapturePlan();changed.recordSourceCapturePlan(old.staticClosure(),old.usesThis());
+                assertTrue(changed.getOwnershipCapturePlan().emptyShellConstructorVerified());
+                int[] effects={0};reject(()->{
+                    try {f.closures.registerLexical(changed,changed.getNativeClass().getConstructor(Environment.class,ClassEntity.class,Memory.class,String.class,Memory[].class),(e,v)->effects[0]++);}
+                    catch (ReflectiveOperationException failure) {throw new AssertionError(failure);}
+                });assertEquals(0,effects[0]);
+            }
+    }
+    @Test public void staticCellCloneRejectsBeforeAllocationWithoutReferenceCaptureSourceAndDump() throws Throwable {
+        for (boolean dumped:new boolean[]{false,true})
+            try (var f=new Fixture(false,dumped,"return function(){static $x=3;return $x;};")) {
+                int[] factories={0};var provider=f.provider((e,v)->factories[0]++);
+                try (var closure=f.closures.allocate(provider,f.env,scalar(f.domain,Memory.NULL),null,List.of())) {
+                    assertEquals(3,closure.closure().__invoke(f.env).toLong());var slot=closure.certificate().staticStorage().slot("x");
+                    try (var promotion=slot.preparePromotion(slot.ownerPublisher().current())) {promotion.store();promotion.commit();}
+                    try {closure.certificate().cloneValues(f.env,scalar(f.domain,Memory.NULL),null);fail("static CELL clone guessed live owners");}catch (IllegalStateException expected){}
+                    assertEquals(1,factories[0]);assertEquals(3,closure.closure().__invoke(f.env).toLong());
+                }
             }
     }
     public static final class UntrustedClosure extends Closure {

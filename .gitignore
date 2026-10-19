@@ -2,6 +2,7 @@
 
 # Package Files #
 *.jar
+!/jphp-core/tests/resources/native-oracle/property-hook-old-readers/*.jar
 *.war
 *.ear
 *.iml

@@ -124,13 +124,19 @@ public class PhpOwnershipPublicationTest {
         var frame=new PhpOwnershipFrame(graph);var frameCleanup=new PhpFailure("frame-cleanup");frame.local("value").commit(object(graph,()->{throw frameCleanup;}),"value");
         try {frame.unwind(pending);fail();} catch (Throwable error) {assertSame(frameCleanup,error);assertSame(pending,frameCleanup.previous);assertEquals(0,error.getSuppressed().length);}
     }
-    @Test public void failedPinAcquisitionUsesConfiguredCleanupComposition() throws Throwable {
+    @Test public void pinAcquisitionDefersUnrelatedCleanupAndUsesConfiguredCompositionOnRealRelease() throws Throwable {
         var graph=phpPolicy();var cleanup=new PhpFailure("pin-cleanup");var pending=new PhpFailure("pending-cleanup");
-        var pinned=object(graph,()->{throw cleanup;});var first=graph.root();var second=graph.root();
-        first.replace(object(graph,()->graph.pin(pinned)));second.replace(object(graph,()->{throw pending;}));
+        var saved=new AtomicReference<PhpOwnership.Pin>();var log=new ArrayList<String>();
+        var pinned=object(graph,()->{log.add("pin-cleanup");throw cleanup;});var first=graph.root();var second=graph.root();
+        first.replace(object(graph,()->{log.add("acquire:start");saved.set(graph.pin(pinned));assertEquals(Collections.singletonList("acquire:start"),log);log.add("acquire:end");}));
+        second.replace(object(graph,()->{log.add("pending-cleanup");throw pending;}));
         try {graph.deferDestruction(()->{first.close();second.close();});fail();}
-        catch (Throwable error) {assertSame(cleanup,error);assertSame(pending,cleanup.previous);}
-        assertEquals(0,graph.liveNodes());
+        catch (Throwable error) {assertSame(pending,error);}
+        assertEquals(Arrays.asList("acquire:start","acquire:end","pending-cleanup"),log);
+        assertEquals(1,pinned.incoming());assertFalse(pinned.destructorStarted());assertSame(pinned,saved.get().target());
+        try {saved.get().close();fail();}
+        catch (Throwable error) {assertSame(cleanup,error);assertSame(cleanup,graph.composeFailure(pending,error));assertSame(pending,cleanup.previous);}
+        assertEquals(Arrays.asList("acquire:start","acquire:end","pending-cleanup","pin-cleanup"),log);assertEquals(0,graph.liveNodes());
     }
     @Test public void faultyCompositionPreservesBothFailuresAndAdapterError() throws Throwable {
         var adapter=new IllegalStateException("adapter");var graph=new PhpOwnership((pending,cleanup)->{throw adapter;});

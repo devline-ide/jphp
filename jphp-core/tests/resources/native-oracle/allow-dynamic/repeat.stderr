@@ -1,0 +1,3 @@
+Fatal error: Attribute "AllowDynamicProperties" must not be repeated in G:\DevLine-QA\jphp-attributes-implementation-20261013\revision14-allow-dynamic\native-extra\repeat.php on line 2
+Stack trace:
+#0 {main}

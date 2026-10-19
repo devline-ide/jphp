@@ -1,0 +1,15 @@
+# pinned PHP 8.5.11 weak/strict: label, wire, before, after y/1=99, warning severity, warning text
+scalar-R	a:3:{s:1:"x";i:1;s:1:"x";i:2;s:1:"y";R:2;}	a:2:{s:1:"x";i:2;s:1:"y";R:2;}	a:2:{s:1:"x";i:99;s:1:"y";R:2;}	0	
+cell-overwrite-R	a:4:{s:1:"x";i:1;s:1:"y";R:2;s:1:"x";i:2;s:1:"z";R:2;}	a:3:{s:1:"x";i:2;s:1:"y";i:1;s:1:"z";R:2;}	a:3:{s:1:"x";i:2;s:1:"y";i:99;s:1:"z";R:2;}	0	
+object-replace-r	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";O:8:"stdClass":1:{s:1:"n";i:2;}s:1:"y";r:2;}	a:2:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:2;}s:1:"y";r:2;}	a:2:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:2;}s:1:"y";i:99;}	0	
+object-replace-R	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";O:8:"stdClass":1:{s:1:"n";i:2;}s:1:"y";R:2;}	a:2:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:2;}s:1:"y";R:2;}	a:2:{s:1:"x";i:99;s:1:"y";R:2;}	0	
+object-scalar-r	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";i:7;s:1:"y";r:2;}	b:0;	b:0;	2	unserialize(): Error at offset 68 of 69 bytes
+object-scalar-R	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";i:7;s:1:"y";R:2;}	a:2:{s:1:"x";i:7;s:1:"y";R:2;}	a:2:{s:1:"x";i:99;s:1:"y";R:2;}	0	
+array-object-R	a:3:{s:1:"x";a:1:{i:0;i:1;}s:1:"x";O:8:"stdClass":1:{s:1:"n";i:2;}s:1:"y";R:2;}	a:2:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:2;}s:1:"y";R:2;}	a:2:{s:1:"x";i:99;s:1:"y";R:2;}	0	
+object-array-r	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";a:1:{i:0;i:9;}s:1:"y";r:2;}	b:0;	b:0;	2	unserialize(): Error at offset 78 of 79 bytes
+object-array-R	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";a:1:{i:0;i:9;}s:1:"y";R:2;}	a:2:{s:1:"x";a:1:{i:0;i:9;}s:1:"y";R:2;}	a:2:{s:1:"x";i:99;s:1:"y";R:2;}	0	
+array-removed-inner-R	a:3:{s:1:"x";a:1:{i:0;i:1;}s:1:"x";N;s:1:"y";R:3;}	a:2:{s:1:"x";N;s:1:"y";i:1;}	a:2:{s:1:"x";N;s:1:"y";i:99;}	0	
+object-removed-property-R	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";N;s:1:"y";R:3;}	a:2:{s:1:"x";N;s:1:"y";i:1;}	a:2:{s:1:"x";N;s:1:"y";i:99;}	0	
+object-removed-r	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";N;s:1:"y";r:2;}	b:0;	b:0;	2	unserialize(): Error at offset 66 of 67 bytes
+object-removed-R	a:3:{s:1:"x";O:8:"stdClass":1:{s:1:"n";i:1;}s:1:"x";N;s:1:"y";R:2;}	a:2:{s:1:"x";N;s:1:"y";R:2;}	a:2:{s:1:"x";i:99;s:1:"y";R:2;}	0	
+array-intkey-cell-overwrite	a:4:{i:0;i:1;i:1;R:2;i:0;i:2;i:2;R:2;}	a:3:{i:0;i:2;i:1;i:1;i:2;R:2;}	a:3:{i:0;i:2;i:1;i:99;i:2;R:2;}	0	

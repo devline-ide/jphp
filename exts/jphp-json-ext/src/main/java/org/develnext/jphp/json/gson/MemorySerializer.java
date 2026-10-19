@@ -21,6 +21,33 @@ import java.util.Set;
 public class MemorySerializer implements JsonSerializer<Memory> {
     protected boolean forceObject;
     protected boolean numericCheck;
+    private boolean usePhpArrayKeys;
+    public void setUsePhpArrayKeys(boolean value) {usePhpArrayKeys=value;}
+    /** Frozen per-encode policy; callbacks do not consult ambient scope/profile. */
+    protected boolean isJsonList(ArrayMemory array) {
+        if(forceObject)return false;
+        if(!usePhpArrayKeys)return array.isList();
+        var iterator=array.foreachIterator(false,false);
+        long index=0;
+        while(iterator.next()) {
+            Memory key=iterator.getMemoryKey();
+            if(key.getRealType()!=Memory.Type.INT || key.toLong()!=index++)return false;
+        }
+        return true;
+    }
+    private boolean enumPartialOutput;
+    private boolean enumError;
+    public void setEnumPartialOutput(boolean value) {enumPartialOutput=value;}
+    public boolean hasEnumError() {return enumError;}
+    protected Memory enumValue(php.runtime.lang.BaseEnum actual) {
+        if(actual.getReflection().getEnumBackingType()!=null)return actual.enumBackingValue();
+        enumError=true;
+        if(enumPartialOutput)return Memory.CONST_INT_0;
+        throw new NonBackedEnumException();
+    }
+    public static final class NonBackedEnumException extends RuntimeException {
+        public NonBackedEnumException(){super("Non-backed enums have no default serialization");}
+    }
     protected WeakReference<Environment> env;
 
     protected Map<Memory.Type, Handler> typeHandlers;
@@ -84,7 +111,7 @@ public class MemorySerializer implements JsonSerializer<Memory> {
                     JsonArray array = new JsonArray();
                     JsonObject object = new JsonObject();
 
-                    boolean isList = !forceObject && src.toValue(ArrayMemory.class).isList();
+                    boolean isList = isJsonList(src.toValue(ArrayMemory.class));
                     ForeachIterator iterator = src.toValue(ArrayMemory.class).foreachIterator(false, false);
                     while (iterator.next()) {
                         if (isList)
@@ -131,8 +158,11 @@ public class MemorySerializer implements JsonSerializer<Memory> {
                             } finally {
                                 env.popCall();
                             }
+                        } else if(object instanceof php.runtime.lang.BaseEnum actual) {
+                            return convert(enumValue(actual),used,useHandlers);
                         } else {
-                            ForeachIterator iterator = object.getProperties().foreachIterator(false, false);
+                            Environment host=getEnv();if(host==null)host=Environment.current();
+                            ForeachIterator iterator = php.runtime.PhpPropertyHookAccess.consumerProperties(object,host,host==null?php.runtime.env.TraceInfo.UNKNOWN:host.trace(),null,1);
                             JsonObject r = new JsonObject();
                             while (iterator.next()) {
                                 String key = iterator.getKey().toString();

@@ -1,0 +1,1 @@
+$a=hex2bin('c3a9');$x='Ж';return bin2hex($a.$x).':'.bin2hex($x.$a);

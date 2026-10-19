@@ -1,0 +1,4 @@
+Fatal error: Type of C::$x must be supertype of A (as in class I) in G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\strict\deferred\set_parameter_wider.php on line 1
+Stack trace:
+#0 G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\strict\deferred\set_parameter_wider.php(1): enter()
+#1 {main}

@@ -139,7 +139,8 @@ public class PrintR extends Printer {
     protected void printObject(ObjectMemory value, int level, Set<Integer> used) {
         ClassEntity classEntity = value.getReflection();
 
-        writeObjectHeader(classEntity.getName());
+        if(classEntity.isEnum())printer.write(classEntity.getName()+" Enum"+(classEntity.getEnumBackingType()==null?"":":"+classEntity.getEnumBackingType())+"\n");
+        else writeObjectHeader(classEntity.getName());
 
         if (used.contains(value.getPointer())){
             printer.write(" *RECURSION*");
@@ -151,7 +152,9 @@ public class PrintR extends Printer {
             used.add(value.getPointer());
 
             ArrayMemory props;
-            if (env != null && classEntity.methodMagicDebugInfo != null) {
+            if (value.value instanceof php.runtime.lang.PhpWeakReference weak) {
+                props = weak.weakDebugInfo();
+            } else if (env != null && classEntity.methodMagicDebugInfo != null) {
                 try {
                     Memory tmp = env.invokeMethod(value.value, classEntity.methodMagicDebugInfo.getName());
 

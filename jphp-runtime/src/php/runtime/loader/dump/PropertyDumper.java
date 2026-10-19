@@ -3,6 +3,7 @@ package php.runtime.loader.dump;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
 import php.runtime.loader.dump.io.DumpInputStream;
+import php.runtime.loader.dump.io.DumpException;
 import php.runtime.loader.dump.io.DumpOutputStream;
 import php.runtime.reflection.DocumentComment;
 import php.runtime.reflection.PropertyEntity;
@@ -12,6 +13,9 @@ import java.io.InputStream;
 import java.io.OutputStream;
 
 public class PropertyDumper extends Dumper<PropertyEntity> {
+    private boolean allowPhpHooks,allowPhpSet;
+    public void setAllowPhpSet(boolean value){allowPhpSet=value;}
+    public void setAllowPhpHooks(boolean value) {allowPhpHooks=value;}
     public PropertyDumper(Context context, Environment env, boolean debugInformation) {
         super(context, env, debugInformation);
     }
@@ -52,7 +56,7 @@ public class PropertyDumper extends Dumper<PropertyEntity> {
         print.writeMemory(entity.getDefaultValue());
 
         // raw
-        print.writeRawData(PropertyDeclarationDumper.save(entity));
+        print.writeRawData(PropertyDeclarationDumper.save(entity,new MethodDumper(context,env,debugInformation),print.isRawStringEnabled()),PropertyDeclarationDumper.MAX_HOOK_PROPERTY_BYTES);
     }
 
     @Override
@@ -73,8 +77,8 @@ public class PropertyDumper extends Dumper<PropertyEntity> {
         property.setDefault(data.readBoolean());
         property.setDefaultValue(data.readMemory());
 
-        byte[] raw = data.readRawData();
-        PropertyDeclarationDumper.load(property, raw);
+        byte[] raw = data.readRawData(allowPhpHooks?PropertyDeclarationDumper.MAX_HOOK_PROPERTY_BYTES:1024*200);
+        PropertyDeclarationDumper.load(property,raw,new MethodDumper(context,env,debugInformation),data.isRawStringEnabled(),allowPhpHooks,allowPhpSet);
         return property;
     }
 }

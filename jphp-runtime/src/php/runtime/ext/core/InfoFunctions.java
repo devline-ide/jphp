@@ -40,15 +40,31 @@ public class InfoFunctions extends FunctionsContainer {
         return phpversion(env, null);
     }
 
-    /** SKIP **/
-    public static int gc_collect_cycles(){
-        System.gc();
-        return 0;
-    }
+    /** Collects tracked JPHP graph nodes; physical heap reclamation belongs to the JVM. */
+    public static int gc_collect_cycles(Environment env) throws Throwable {return env.collectGarbage();}
+    public static void gc_disable(Environment env) {env.setGcEnabled(false);}
+    public static void gc_enable(Environment env) {env.setGcEnabled(true);}
+    public static boolean gc_enabled(Environment env) {return env.isGcEnabled();}
 
-    public static void gc_disable(){ /* NOP */ }
-    public static void gc_enable(){ /* NOP */ }
-    public static boolean gc_enabled(){ return true; }
+    // Preserve old JVM descriptors without exporting duplicate zero-argument PHP functions.
+    @php.runtime.annotation.Reflection.Ignore
+    public static int gc_collect_cycles() {
+        Environment env=legacyGcEnvironment();if(env==null)return 0;
+        try {return gc_collect_cycles(env);}catch(Throwable failure){return InfoFunctions.<RuntimeException,Integer>gcFailure(failure);}
+    }
+    @php.runtime.annotation.Reflection.Ignore
+    public static void gc_disable() {Environment env=legacyGcEnvironment();if(env!=null)gc_disable(env);}
+    @php.runtime.annotation.Reflection.Ignore
+    public static void gc_enable() {Environment env=legacyGcEnvironment();if(env!=null)gc_enable(env);}
+    @php.runtime.annotation.Reflection.Ignore
+    public static boolean gc_enabled() {Environment env=legacyGcEnvironment();return env==null || gc_enabled(env);}
+    @SuppressWarnings("deprecation")
+    private static Environment legacyGcEnvironment() {
+        var frame=php.runtime.PhpPropertyWriteContext.current(null);
+        return frame==null?Environment.current():frame.environment;
+    }
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable,R> R gcFailure(Throwable failure) throws T {throw (T)failure;}
 
     public static boolean get_magic_quotes_gpc(){ return false; }
     public static boolean get_magic_quotes_runtime(){ return false; }
@@ -61,6 +77,8 @@ public class InfoFunctions extends FunctionsContainer {
 
     public static Memory get_defined_constants(Environment env, boolean capitalize){
         Set<String> exists = new HashSet<String>();
+        boolean modern = capitalize && php.runtime.PhpPropertyWriteContext.current(env) != null
+                && php.runtime.common.PhpClassNames.isModern(env);
 
         ArrayMemory result = new ArrayMemory();
         for(String ext : env.scope.getExtensions()){
@@ -68,10 +86,11 @@ public class InfoFunctions extends FunctionsContainer {
 
             ArrayMemory item = result;
             if (capitalize)
-                item = (ArrayMemory) result.refOfIndex(ext).assign(new ArrayMemory());
+                item = (ArrayMemory) result.refOfIndex(modern ? extension.getName() : ext).assign(new ArrayMemory());
 
             for(CompileConstant constant : extension.getConstants().values()){
-                item.put(constant.name, constant.value);
+                item.put(constant.name, "E_ALL".equals(constant.name)
+                        ? env.findConstant(constant.name) : constant.value);
                 exists.add(constant.name);
             }
         }

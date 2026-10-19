@@ -78,7 +78,7 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
     @Override
     @Signature
     public Memory getNumberOfParameters(Environment env, Memory... args) {
-        if (functionEntity instanceof CompileFunctionEntity)
+        if (functionEntity instanceof CompileFunctionEntity && functionEntity.getParameters() == null)
             return LongMemory.valueOf(((CompileFunctionEntity) functionEntity).getCompileFunction().getMaxArgs());
         else
             return super.getNumberOfParameters(env, args);
@@ -87,7 +87,7 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
     @Override
     @Signature
     public Memory getNumberOfRequiredParameters(Environment env, Memory... args) {
-        if (functionEntity instanceof CompileFunctionEntity)
+        if (functionEntity instanceof CompileFunctionEntity && functionEntity.getParameters() == null)
             return LongMemory.valueOf(((CompileFunctionEntity) functionEntity).getCompileFunction().getMinArgs());
         else
             return super.getNumberOfRequiredParameters(env, args);
@@ -111,6 +111,10 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
         if (closure != null)
             return new ObjectMemory(closure);
 
+        if (functionEntity instanceof CompileFunctionEntity
+                && env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return php.runtime.invoke.PhpCallableFactory.fromCallable(
+                    new StringMemory(functionEntity.getName()), env, env.trace());
         return new ObjectMemory(functionEntity.getClosure(env));
     }
 
@@ -126,10 +130,20 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
                 closure == null ? functionEntity.getParameters() : closureEntity.parameters,
                 closure == null ? functionEntity.getName() : php.runtime.invoke.InvokeArgumentHelper.closureCallName(closure));
         boolean modern = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
-        if (closure != null)
-            return ObjectInvokeHelper.invokeMethod(
-                    closure, closureEntity.methodMagicInvoke, env, env.peekCall(0).trace, args, true, modern
-            );
+        if (closure != null) {
+            var trace = env.peekCall(0).trace;
+            var target = closure instanceof php.runtime.invoke.PhpCallableFactory.CapturedClosure
+                    ? ((php.runtime.invoke.PhpCallableFactory.CapturedClosure) closure).getFunction() : null;
+            var nativeContext = modern && target instanceof CompileFunctionEntity
+                    ? php.runtime.invoke.NativeFunctionContext.enterWeak(env, trace, target.getName()) : null;
+            try {
+                return ObjectInvokeHelper.invokeMethod(
+                        closure, closureEntity.methodMagicInvoke, env, trace, args, true, modern
+                );
+            } finally {
+                if (nativeContext != null) nativeContext.close();
+            }
+        }
         else {
             return InvokeHelper.call(env, env.peekCall(0).trace, functionEntity, args, modern);
         }
@@ -139,9 +153,15 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
     public Memory invokeArgs(Environment env, Memory... args) throws Throwable {
         ArrayMemory value = args[0].toValue(ArrayMemory.class);
 
-        Memory[] passed = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
-                ? value.valuesForCall() : value.values();
-        return invokeReflected(env, passed);
+        if (env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            var trace = env.peekCall(0).trace;
+            var frame = closure == null
+                    ? php.runtime.invoke.PhpCallFrame.resolvedFunction(env, trace, functionEntity, value.size())
+                    : php.runtime.invoke.PhpCallFrame.resolvedInvoker(env, trace,
+                            new php.runtime.invoke.DynamicMethodInvoker(env, trace, closure, closureEntity.methodMagicInvoke), value.size());
+            return frame.invokeKeyed(value, true);
+        }
+        return invokeReflected(env, value.values());
     }
 
     @Override
@@ -150,7 +170,7 @@ public class ReflectionFunction extends ReflectionFunctionAbstract {
         if (cachedParameters != null)
             return cachedParameters;
 
-        if (functionEntity instanceof CompileFunctionEntity)
+        if (functionEntity instanceof CompileFunctionEntity && functionEntity.getParameters() == null)
             exception(env, "Cannot get parameters for internal function %s()", functionEntity.getName());
 
         ParameterEntity[] parameters = closureEntity == null ? functionEntity.getParameters() : closureEntity.parameters;

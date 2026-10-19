@@ -1,0 +1,1 @@
+a:3:{i:0;a:2:{i:0;s:5:"Error";i:1;s:36:"Cannot unset readonly property R::$x";}i:1;a:2:{i:0;s:5:"Error";i:1;s:36:"Cannot unset readonly property R::$x";}i:2;i:3;}

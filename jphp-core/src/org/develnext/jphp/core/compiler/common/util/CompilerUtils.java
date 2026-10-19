@@ -7,6 +7,8 @@ import php.runtime.env.TraceInfo;
 import php.runtime.memory.DoubleMemory;
 import php.runtime.memory.LongMemory;
 import php.runtime.memory.StringMemory;
+import php.runtime.memory.PhpByteStringMemory;
+import java.nio.charset.StandardCharsets;
 import php.runtime.Memory;
 import php.runtime.PhpComparison;
 import php.runtime.common.PhpLanguageProfile;
@@ -29,7 +31,9 @@ final public class CompilerUtils {
         } else if (value instanceof DoubleExprToken){
             return DoubleMemory.valueOf(((DoubleExprToken) value).getValue());
         } else if (value instanceof StringExprToken && !((StringExprToken) value).isBinary()){
-            return StringMemory.valueOf(((StringExprToken) value).getValue());
+            StringExprToken string = (StringExprToken) value;
+            return string.hasRawBytes() ? new PhpByteStringMemory(string.getPhp85Bytes())
+                    : StringMemory.valueOf(string.getValue());
         } else if (value instanceof BooleanExprToken){
             return ((BooleanExprToken) value).getValue() ? Memory.TRUE : Memory.FALSE;
         } else if (value instanceof NullExprToken){
@@ -39,6 +43,12 @@ final public class CompilerUtils {
         }
 
         return null;
+    }
+
+    /** Modern constant transport retains byte values even when a historical operator returns BinaryMemory. */
+    public static Memory immutableConstant(Memory value, PhpLanguageProfile profile) {
+        return profile==PhpLanguageProfile.PHP_8_5 && value instanceof php.runtime.memory.BinaryMemory
+                ? new PhpByteStringMemory(value.getBinaryBytes(StandardCharsets.UTF_8)) : value;
     }
 
     public static Memory calcUnary(Environment env, TraceInfo trace, Memory o1, OperatorExprToken operator){
@@ -51,6 +61,11 @@ final public class CompilerUtils {
             throw new IllegalArgumentException("Operator is not unary");
 
         if (profile == PhpLanguageProfile.PHP_8_5) {
+            if(operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.StringCastExprToken) {
+                if(o1.isArray() || o1.isObject() || o1.type==Memory.Type.DOUBLE && Double.isNaN(o1.toDouble()))return null;
+                try{return php.runtime.PhpByteStrings.stringValue(o1,env,trace);}
+                catch(Throwable failure){throw new IllegalStateException("Constant string conversion failed",failure);}
+            }
             // Mutation and diagnostics must run against the actual target.
             if (operator instanceof IncExprToken || operator instanceof DecExprToken) return null;
             if (operator instanceof UnaryNumericExprToken) {
@@ -64,7 +79,7 @@ final public class CompilerUtils {
             if (operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.DoubleCastExprToken)
                 return DoubleMemory.valueOf(php.runtime.PhpNumericConversions.toDouble(o1, env, trace));
         }
-        return operator.calc(env, trace, o1, null);
+        return immutableConstant(operator.calc(env, trace, o1, null), profile);
     }
 
     public static Memory calcBinary(Environment env, TraceInfo trace, Memory o1, Memory o2, OperatorExprToken operator, boolean right){
@@ -83,6 +98,22 @@ final public class CompilerUtils {
             o2 = o;
         }
 
+        o1=immutableConstant(o1,profile);o2=immutableConstant(o2,profile);
+        if (profile == PhpLanguageProfile.PHP_8_5 && "concat".equals(operator.getCode())
+                && (o1 instanceof PhpByteStringMemory || o2 instanceof PhpByteStringMemory)) {
+            if(o1.isArray() || o2.isArray() || o1.isObject() || o2.isObject()
+                    || o1.type==Memory.Type.DOUBLE && Double.isNaN(o1.toDouble())
+                    || o2.type==Memory.Type.DOUBLE && Double.isNaN(o2.toDouble()))return null;
+            byte[] left;byte[] other;
+            try {
+                left=php.runtime.PhpByteStrings.stringValue(o1,env,trace).getBinaryBytes(StandardCharsets.UTF_8);
+                other=php.runtime.PhpByteStrings.stringValue(o2,env,trace).getBinaryBytes(StandardCharsets.UTF_8);
+            }catch(Throwable failure){throw new IllegalStateException("Scalar byte constant conversion failed",failure);}
+            byte[] joined = java.util.Arrays.copyOf(left, Math.addExact(left.length, other.length));
+            System.arraycopy(other, 0, joined, left.length, other.length);
+            return new PhpByteStringMemory(joined);
+        }
+
         if (profile == PhpLanguageProfile.PHP_8_5 && isPhpArithmetic(operator)) {
             String code = arithmeticCode(operator);
             return php.runtime.PhpArithmetic.canFold(code, o1, o2)
@@ -99,7 +130,7 @@ final public class CompilerUtils {
                 case "spaceshipCompare": return LongMemory.valueOf(PhpComparison.spaceshipCompare(o1, o2, env, trace));
             }
         }
-        return operator.calc(env, trace, o1, o2);
+        return immutableConstant(operator.calc(env, trace, o1, o2), profile);
     }
 
     public static boolean isPhpComparison(OperatorExprToken operator) {

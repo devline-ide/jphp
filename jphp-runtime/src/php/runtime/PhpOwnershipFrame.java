@@ -89,7 +89,7 @@ public final class PhpOwnershipFrame {
         public boolean isClosed() {return finished;}
         public void commit() throws Throwable {
             thread();if (finished) throw new IllegalStateException("Ownership frame publication was consumed");
-            destination.rawValue=value;
+            if (destination != null) destination.rawValue=value;
             if (source != null && source != destination) source.rawValue=null;
             finished=true;committed=true;pendingPublication=null;
             ownership.commit(); // Its barrier/state is cleared before deferred PHP callbacks run.
@@ -139,6 +139,21 @@ public final class PhpOwnershipFrame {
             if (destination.frame().graph != graph) throw new IllegalArgumentException("Ownership frames belong to different graphs");
             Publication publication=new Publication(this,destination,actualPublishedRaw);
             publication.ownership=root.prepareTransferTo(destination.root);pendingPublication=publication;return publication;
+        }
+        /** Exact adapter bridge; only a certified physical publisher supplies the destination edge. */
+        Publication prepareTransferToEdge(PhpOwnership.Slot destination) {
+            writable();Objects.requireNonNull(destination);
+            if (destination.owner() == null || destination.owner().graph() != graph)
+                throw new IllegalArgumentException("Ownership destination is not this graph's physical edge");
+            Publication publication=new Publication(this,null,null);
+            publication.ownership=root.prepareTransferTo(destination);pendingPublication=publication;return publication;
+        }
+        Publication prepareTransferFromEdge(PhpOwnership.Slot source,Object raw) {
+            writable();Objects.requireNonNull(source);
+            if (source.owner() == null || source.owner().graph() != graph || rawValue != null || root.target() != null)
+                throw new IllegalArgumentException("Cleanup destination or physical source is invalid");
+            Publication publication=new Publication(null,this,raw);
+            publication.ownership=source.prepareTransferTo(root);pendingPublication=publication;return publication;
         }
         /** Internal mirror only; live adapters use a raw callback or the explicit prepare/store/commit API. */
         public void commit(PhpOwnership.Node node,Object value) throws Throwable {commit(node,value,()->{});}

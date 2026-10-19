@@ -1,0 +1,1 @@
+D:ord(): Providing a string that is not one byte long is deprecated. Use ord($str[0]) instead|195|D:chr(): Providing a value not in-between 0 and 255 is deprecated, this is because a byte value must be in the [0, 255] interval. The value used will be constrained using % 256|00

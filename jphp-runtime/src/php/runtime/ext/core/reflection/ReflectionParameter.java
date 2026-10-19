@@ -33,6 +33,15 @@ public class ReflectionParameter extends Reflection implements Reflector {
         super(env, clazz);
     }
 
+    @php.runtime.annotation.Reflection.Signature({
+            @php.runtime.annotation.Reflection.Arg(value="name",type=php.runtime.common.HintType.STRING,
+                    nullable=true,optional=@php.runtime.annotation.Reflection.Optional("null")),
+            @php.runtime.annotation.Reflection.Arg(value="flags",type=php.runtime.common.HintType.INT,
+                    optional=@php.runtime.annotation.Reflection.Optional("0"))})
+    public Memory getAttributes(Environment env,Memory...args) {
+        return ReflectionAttribute.collect(env,entity,args[0],args[1],"ReflectionParameter");
+    }
+
     @Signature({@Arg("function"), @Arg("parameter")})
     public Memory __construct(Environment env, Memory... args) {
         ParameterEntity[] parameters = null;
@@ -126,6 +135,11 @@ public class ReflectionParameter extends Reflection implements Reflector {
 
     @Signature
     public Memory allowsNull(Environment env, Memory... args) {
+        if (functionEntity instanceof MethodEntity && entity.getType() == php.runtime.common.HintType.ANY) {
+            var member = ((MethodEntity) functionEntity).getNativeMethod();
+            if (member != null && member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class)
+                return member.getName().equals("__construct") && position == 0 ? Memory.FALSE : Memory.TRUE;
+        }
         return modern(env) && entity.getTypeChecker() == null || entity.isNullableOrDefaultNull() || entity.getTypeChecker() instanceof php.runtime.reflection.support.PhpTypeDeclaration
                 && ((php.runtime.reflection.support.PhpTypeDeclaration) entity.getTypeChecker()).allowsNull() ? Memory.TRUE : Memory.FALSE;
     }
@@ -138,6 +152,19 @@ public class ReflectionParameter extends Reflection implements Reflector {
 
     @Signature
     public Memory getType(Environment env, Memory... args) {
+        if (position == 0 && functionEntity instanceof MethodEntity) {
+            var member = ((MethodEntity) functionEntity).getNativeMethod();
+            if (member != null && member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class
+                    && member.getName().equals("__construct"))
+                return ObjectMemory.valueOf(ReflectionType.fromDeclaration(env, new php.runtime.reflection.support.PhpTypeDeclaration(
+                        java.util.List.of(java.util.List.of("object"), java.util.List.of("array")))));
+        }
+        if (functionEntity instanceof MethodEntity && entity.getType() == php.runtime.common.HintType.ANY) {
+            var member = ((MethodEntity) functionEntity).getNativeMethod();
+            if (member != null && member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class)
+                return ObjectMemory.valueOf(ReflectionType.fromDeclaration(env, new php.runtime.reflection.support.PhpTypeDeclaration(
+                        java.util.List.of(java.util.List.of("mixed")))));
+        }
         TypeChecker typeChecker = entity.getTypeChecker();
 
         if (typeChecker == null) {
@@ -257,6 +284,8 @@ public class ReflectionParameter extends Reflection implements Reflector {
         }
         return entity.isOptional() ? Memory.TRUE : Memory.FALSE;
     }
+
+    @Signature public Memory isPromoted(Environment env, Memory... args) {return entity.isPromoted() ? Memory.TRUE : Memory.FALSE;}
 
     @Signature
     public Memory isVariadic(Environment env, Memory... args) {

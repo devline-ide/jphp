@@ -1,0 +1,3 @@
+Fatal error: Cannot specify default value for virtual hooked property ChildDefault::$x in G:\DevLine-QA\jphp-property-hooks-20261013\inherited-default-r1-native\private-parent-invalid-weak\fixture.php on line 2
+Stack trace:
+#0 {main}

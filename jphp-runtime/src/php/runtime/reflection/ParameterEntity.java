@@ -28,6 +28,9 @@ public class ParameterEntity extends Entity {
     protected Memory defaultValue;
     protected String defaultValueConstName;
     private DefaultInitializer defaultInitializer;
+    private boolean promoted;
+    public boolean isPromoted() {return promoted;}
+    public void setPromoted(boolean value) {promoted=value;}
 
     /** An executable declaration-owned default, never a serialized Closure or PHP constant name. */
     public record DefaultInitializer(String moduleName, String javaClass, String method, String declarationScope) {
@@ -47,6 +50,11 @@ public class ParameterEntity extends Entity {
     public Memory evaluateDefault(Environment env) {
         if (defaultInitializer == null) return defaultValue;
         DefaultInitializer init = defaultInitializer;
+        php.runtime.PhpOwnershipExecution.Session session=php.runtime.PhpOwnershipExecution.current(env);
+        if (session != null) {
+            try {return session.invokeInitializer(this,trace);}
+            catch (Throwable failure) {return ParameterEntity.<RuntimeException,Memory>raiseOwnershipFailure(failure);}
+        }
         ModuleEntity module = env.getScope().getClassLoader().getModule(init.moduleName());
         if (module == null) throw new CriticalException("Parameter default module is not loaded");
         env.pushCall(trace, null, null, "{parameter-default}", init.declarationScope(), init.declarationScope());
@@ -57,6 +65,8 @@ public class ParameterEntity extends Entity {
         catch (ReflectiveOperationException failure) { throw new CriticalException(failure); }
         finally { env.popCall(); }
     }
+
+    @SuppressWarnings("unchecked") private static <E extends Throwable,T> T raiseOwnershipFailure(Throwable failure) throws E {throw (E)failure;}
 
     protected boolean isReference;
     protected TypeChecker typeChecker;

@@ -1,0 +1,6 @@
+W|512|The return value of method NullableHolder::marked() should either be used or intentionally ignored by casting it as (void)|nullsafe-method-result-use.php|19
+M|discarded
+M|used
+M|void
+R|used
+N|null

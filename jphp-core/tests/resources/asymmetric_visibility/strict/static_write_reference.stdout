@@ -1,0 +1,8 @@
+assign:Error:Cannot modify private(set) property H::$x from global scope
+inc:Error:Cannot indirectly modify private(set) property H::$x from global scope
+compound:Error:Cannot indirectly modify private(set) property H::$x from global scope
+dim:Error:Cannot indirectly modify protected(set) property H::$a from global scope
+ref:Error:Cannot indirectly modify private(set) property H::$x from global scope
+state:8:[1,2]
+flags:4145
+reflect:9

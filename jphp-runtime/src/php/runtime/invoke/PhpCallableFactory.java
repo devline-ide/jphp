@@ -63,6 +63,7 @@ public final class PhpCallableFactory {
 
     // CompileFunction has no PHP declaration metadata; preserve its actual arity/ref/variadic contract.
     private static ParameterEntity[] nativeParameters(php.runtime.reflection.CompileFunctionEntity function) {
+        if (function.getParameters() != null) return function.getParameters();
         var compiled = function.getCompileFunction();
         var method = compiled.find(compiled.getMaxArgs());
         if (method == null) method = compiled.find(compiled.getMinArgs());
@@ -85,7 +86,10 @@ public final class PhpCallableFactory {
     /** The native target borrows PHP reference arguments; wrapper cleanup must not unset caller cells. */
     private static final class NativeInvocation extends MethodEntity {
         private final php.runtime.reflection.CompileFunctionEntity target;
-        NativeInvocation(FunctionEntity function) { super(function); target = (php.runtime.reflection.CompileFunctionEntity) function; }
+        NativeInvocation(FunctionEntity function) {
+            super(function); target = (php.runtime.reflection.CompileFunctionEntity) function;
+            setParameters(null); // The target owns internal coercion, including null deprecations.
+        }
         @Override public void unsetArguments(Memory[] arguments) {
             if (arguments == null) return;
             var nativeMethod = target.getCompileFunction().find(arguments.length);
@@ -105,20 +109,12 @@ public final class PhpCallableFactory {
         }
     }
 
-    public static Memory fromCallable(Memory value, Environment env, TraceInfo trace) {
-        try { return PhpCallFrame.acquireFromCallable(value, env, trace).capture(); }
-        catch (php.runtime.lang.exception.BaseError failure) {
-            String reason = failure.getMessage(env).toString();
-            String missing = "Call to undefined function ";
-            if (reason.startsWith(missing)) reason = "function \"" + reason.substring(missing.length(), reason.length() - 2) + "\" not found or invalid function name";
-            else if (reason.startsWith("Call to private method ") || reason.startsWith("Call to protected method ")) {
-                String visibility = reason.startsWith("Call to private") ? "private" : "protected";
-                reason = "cannot access " + visibility + " method " + reason.substring(("Call to " + visibility + " method ").length(), reason.indexOf("() from")) + "()";
-            } else if (reason.startsWith("First array member")) reason = "first" + reason.substring(5);
-            else if (reason.startsWith("Second array member")) reason = "second" + reason.substring(6);
-            else if (reason.startsWith("Array callback must")) reason = "array callback must" + reason.substring(19);
-            env.exception(trace, php.runtime.lang.exception.BaseTypeError.class, "Failed to create closure from callable: %s", reason);
-            return Memory.NULL;
+    public static Memory fromCallable(Memory value, Environment env, TraceInfo trace) throws Throwable {
+        try (var frame=PhpCallFrame.acquireInternalClosureCallable(value,env,trace)) {
+            return frame.capture();
+        } catch (PhpMethodResolver.InvalidCallback invalid) {
+            throw invalid.typeError(env,trace,"Failed to create closure from callable"
+                    +(invalid.getMessage()==null ? "" : ": "+invalid.getMessage()));
         }
     }
 
@@ -160,9 +156,15 @@ public final class PhpCallableFactory {
         public String getCallName() { return function != null ? function.getName()
                 : method.getClazzName() + "::" + (magicName == null ? method.getName() : magicName.toString()); }
 
-        @Override
-        public Memory __invoke(Environment env, Memory... args) throws Throwable {
-            TraceInfo trace = env.trace();
+        /** Called by the exact bound frame; bypass the wrapper's second argument-preparation pass. */
+        public Memory invokeBound(Environment env, TraceInfo trace, BoundArguments bound, boolean internalCall) throws Throwable {
+            return invokeBound(env,trace,bound,internalCall,false);
+        }
+        public Memory invokeBound(Environment env, TraceInfo trace, BoundArguments bound, boolean internalCall,boolean discarded) throws Throwable {
+            Memory[] args = bound.arguments();
+            Object target = isMagicCapture() ? this : getTarget();
+            if (BoundArguments.current(env, args, target) != bound)
+                throw new IllegalArgumentException("Captured invocation has no exact bound target scope");
             if (function instanceof php.runtime.reflection.CompileFunctionEntity) {
                 var compiled = ((php.runtime.reflection.CompileFunctionEntity) function).getCompileFunction();
                 int minimum = compiled.getMinArgs(), maximum = compiled.getMaxArgs();
@@ -180,10 +182,39 @@ public final class PhpCallableFactory {
                                 "Cannot call %s() dynamically", function.getName());
                 }
             }
-            if (function != null) return InvokeHelper.call(env, trace, function, args);
+            if (function != null) return InvokeHelper.call(env, trace, function, args, internalCall,discarded);
+            Memory[] actual = magicName == null ? args : new Memory[]{magicName,
+                    PhpNamedArgumentTarget.magicArguments(env, args, this)};
+            return method.isStatic() ? InvokeHelper.callStatic(env, trace, method, getCalledClass(), actual, false, internalCall,discarded)
+                    : ObjectInvokeHelper.invokeMethod(getSelf().toObject(IObject.class), method, env, trace, actual, false, internalCall,discarded);
+        }
+
+        @Override
+        public Memory __invoke(Environment env, Memory... args) throws Throwable {
+            return invokePrepared(env,env.trace(),args,false,false);
+        }
+        public Memory invokePrepared(Environment env,TraceInfo trace,Memory[] args,boolean internalCall,boolean discarded) throws Throwable {
+            if (function instanceof php.runtime.reflection.CompileFunctionEntity) {
+                var compiled = ((php.runtime.reflection.CompileFunctionEntity) function).getCompileFunction();
+                int minimum = compiled.getMinArgs(), maximum = compiled.getMaxArgs();
+                if (args.length < minimum || args.length > maximum) {
+                    String range = minimum == maximum ? "exactly " + minimum
+                            : args.length < minimum ? "at least " + minimum : "at most " + maximum;
+                    env.exception(trace, php.runtime.lang.exception.BaseArgumentCountError.class,
+                            "%s() expects %s argument%s, %d given", function.getName(), range,
+                            (args.length < minimum ? minimum : maximum) == 1 ? "" : "s", args.length);
+                }
+                var nativeMethod = compiled.find(args.length);
+                if (nativeMethod != null) for (int i = 0; i < nativeMethod.parameterTypes.length; i++) {
+                    if (nativeMethod.isPresentAnnotationOfParam(i, php.runtime.annotation.Runtime.GetLocals.class))
+                        env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                                "Cannot call %s() dynamically", function.getName());
+                }
+            }
+            if (function != null) return InvokeHelper.call(env, trace, function, args,internalCall,discarded);
             Memory[] actual = magicName == null ? args : new Memory[]{magicName, new ArrayMemory(false, args)};
-            return method.isStatic() ? InvokeHelper.callStatic(env, trace, method, getCalledClass(), actual, false)
-                    : ObjectInvokeHelper.invokeMethod(getSelf().toObject(IObject.class), method, env, trace, actual, false);
+            return method.isStatic() ? InvokeHelper.callStatic(env, trace, method, getCalledClass(), actual, false,internalCall,discarded)
+                    : ObjectInvokeHelper.invokeMethod(getSelf().toObject(IObject.class), method, env, trace, actual, false,internalCall,discarded);
         }
 
         @Override

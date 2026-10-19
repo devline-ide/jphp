@@ -12,6 +12,7 @@ import java.util.List;
 public class CallExprToken extends ValueExprToken implements CallableExprToken {
     private ExprToken name;
     private List<ExprStmtToken> parameters;
+    private List<CallArgument> arguments;
     private boolean firstClassCallable;
 
     protected CallExprToken(TokenMeta meta, TokenType type) {
@@ -31,6 +32,19 @@ public class CallExprToken extends ValueExprToken implements CallableExprToken {
 
     public void setParameters(List<ExprStmtToken> parameters) {
         this.parameters = parameters;
+        this.arguments = null;
+    }
+
+    public List<CallArgument> getArguments() { return arguments; }
+
+    public void setArguments(List<CallArgument> arguments) {
+        this.arguments = List.copyOf(arguments);
+        this.parameters = new java.util.ArrayList<>(arguments.size());
+        for (CallArgument argument : arguments) this.parameters.add(argument.getExpression());
+    }
+
+    public boolean hasNamedArguments() {
+        return arguments != null && arguments.stream().anyMatch(argument -> argument.getKind() == CallArgument.Kind.NAMED);
     }
 
     public void setName(ExprToken name) {

@@ -1,0 +1,2 @@
+<?php function ro_result($f){try{return ["ok",$f()];}catch(Throwable $e){return [get_class($e),$e->getMessage()];}}
+class R{public readonly int $x;}$r=new R;$p=new ReflectionProperty(R::class,"x");echo serialize([$p->isReadOnly(),$p->getModifiers(),$p->isInitialized($r),ro_result(function()use($r,$p){$p->setValue($r,"3");}),$p->isInitialized($r),$p->getValue($r),ro_result(function()use($r,$p){$p->setValue($r,4);})]);

@@ -126,15 +126,17 @@ public class Launcher {
 
         if (externalConfig != null) {
             try {
-                FileInputStream inStream = new FileInputStream(externalConfig);
-                config.load(inStream);
-                inStream.close();
+                try (FileInputStream inStream = new FileInputStream(externalConfig)) {
+                    config.load(inStream);
+                }
 
                 for (String name : config.stringPropertyNames()) {
                     compileScope.configuration.put(name, new StringMemory(config.getProperty(name)));
                 }
             } catch (IOException e) {
-                throw new LaunchException("Unable to load the config -Djphp.config=" + externalConfig);
+                LaunchException failure = new LaunchException("Unable to load the config -Djphp.config=" + externalConfig);
+                failure.initCause(e);
+                throw failure;
             }
         }
 
@@ -143,8 +145,8 @@ public class Launcher {
         resource = getResource(pathToConf);
 
         if (resource != null) {
-            try {
-                config.load(resource);
+            try (InputStream input = resource) {
+                config.load(input);
 
                 for (String name : config.stringPropertyNames()) {
                     compileScope.configuration.put(name, new StringMemory(config.getProperty(name)));
@@ -161,7 +163,9 @@ public class Launcher {
                         getConfigValue("env.phpProfile", PhpLanguageProfile.JPHP_LEGACY.name()).toString().toUpperCase(Locale.ROOT)
                 ));
             } catch (IOException e) {
-                throw new LaunchException(e.getMessage());
+                LaunchException failure = new LaunchException(e.getMessage());
+                failure.initCause(e);
+                throw failure;
             }
         }
     }
@@ -287,6 +291,7 @@ public class Launcher {
                 ModuleEntity bootstrap = loadFrom(file);
 
                 if (bootstrap == null) {
+                    if (!mustBootstrap && !config.containsKey("bootstrap.file")) return;
                     throw new IOException();
                 }
 
@@ -312,19 +317,25 @@ public class Launcher {
                 CallStackItem stackItem = new CallStackItem(bootstrap.getTrace());
                 environment.pushCall(stackItem);
                 try {
-                    bootstrap.includeNoThrow(environment);
+                    if (mustBootstrap) {
+                        bootstrap.includeNoThrow(environment);
+                    } else {
+                        bootstrap.include(environment);
+                    }
                 } finally {
-                    Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-                        compileScope.triggerProgramShutdown(environment);
+                    if (mustBootstrap) {
+                        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+                            compileScope.triggerProgramShutdown(environment);
 
-                        if (StringMemory.valueOf(config.getProperty("env.doFinal", "1")).toBoolean()) {
-                            try {
-                                environment.doFinal();
-                            } catch (Throwable throwable) {
-                                throw new LaunchException(throwable);
+                            if (StringMemory.valueOf(config.getProperty("env.doFinal", "1")).toBoolean()) {
+                                try {
+                                    environment.doFinal();
+                                } catch (Throwable throwable) {
+                                    throw new LaunchException(throwable);
+                                }
                             }
-                        }
-                    }));
+                        }));
+                    }
 
                     afterIncludeBootstrap();
 

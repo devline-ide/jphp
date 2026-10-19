@@ -343,8 +343,14 @@ public class ClassWrapper {
         onWrapGetterSetterProperty(entity, method);
     }
 
+    private static String effectivePhpName(Method method) {
+        Reflection.Name name = method.getAnnotation(Reflection.Name.class);
+        return name == null ? method.getName() : name.value();
+    }
+
     protected MethodEntity onWrapWrapCompileMethod(ClassEntity classEntity, Method method, Method interfaceMethod, boolean skipConflicts) {
-        MethodEntity _entity = classEntity.findMethod(method.getName().toLowerCase());
+        String name = effectivePhpName(interfaceMethod.isAnnotationPresent(Reflection.Property.class) ? method : interfaceMethod);
+        MethodEntity _entity = classEntity.findMethod(name.toLowerCase(java.util.Locale.ROOT));
 
         WrapCompileMethodEntity entity;
         if (_entity instanceof WrapCompileMethodEntity) {
@@ -354,6 +360,7 @@ public class ClassWrapper {
         }
 
         entity.addMethod(method, skipConflicts);
+        entity.setName(name);
         if (_entity == null) {
             entity.setClazz(classEntity);
             classEntity.addMethod(entity, null);
@@ -366,9 +373,9 @@ public class ClassWrapper {
 
 
     protected void onWrapCompileMethod(ClassEntity classEntity, Method method) {
-        String name = method.getName();
+        String name = effectivePhpName(method);
 
-        MethodEntity _entity = classEntity.findMethod(name.toLowerCase());
+        MethodEntity _entity = classEntity.findMethod(name.toLowerCase(java.util.Locale.ROOT));
 
         CompileMethodEntity entity;
         if (_entity instanceof CompileMethodEntity) {
@@ -382,7 +389,10 @@ public class ClassWrapper {
             entity.setAbstract(false);
         }
 
-        entity.addMethod(method, false);
+        if (entity instanceof WrapCompileMethodEntity)
+            ((WrapCompileMethodEntity) entity).addDirectMethod(method, false);
+        else
+            entity.addMethod(method, false);
 
         if (_entity == null) {
             entity.setClazz(classEntity);
@@ -424,10 +434,15 @@ public class ClassWrapper {
             for (Class _interface : wrapInterfaces) {
                 for (Method method : _interface.getMethods()) {
 
-                    // A declared PHP signature owns this exact overload; do not bind it twice.
+                    // PHP native overload selection is by arity. Explicit signatures own only their slot.
                     boolean overridden = Arrays.stream(nativeClass.getDeclaredMethods()).anyMatch(declared ->
-                            getSignature(declared) != null && declared.getName().equals(method.getName()) &&
-                            Arrays.equals(declared.getParameterTypes(), method.getParameterTypes()));
+                            getSignature(declared) != null &&
+                            effectivePhpName(declared).equalsIgnoreCase(effectivePhpName(method)) &&
+                            (declared.getName().equals(method.getName()) &&
+                                    Arrays.equals(declared.getParameterTypes(), method.getParameterTypes()) ||
+                                    !method.isAnnotationPresent(Reflection.Property.class) &&
+                                            !declared.isVarArgs() && !method.isVarArgs() &&
+                                            CompileMethodEntity.getPhpArgumentCount(declared) == CompileMethodEntity.getPhpArgumentCount(method)));
                     if (overridden) continue;
 
                     try {
@@ -540,8 +555,84 @@ public class ClassWrapper {
                 } else {
                     onWrapCompileMethod(classEntity, method);
                 }
+                if (signature != null && nativeClass.isAnnotationPresent(Reflection.NativePhpSignature.class)) {
+                    Reflection.Name named = method.getAnnotation(Reflection.Name.class);
+                    MethodEntity wrapped = classEntity.findMethod((named == null ? method.getName() : named.value()).toLowerCase(java.util.Locale.ROOT));
+                    Reflection.Arg[] arguments=signature.value();
+                    boolean explicitParameters=java.util.Arrays.stream(arguments).anyMatch(arg->!arg.typeDeclaration().isEmpty());
+                    if(explicitParameters) {
+                        ParameterEntity[] parameters=wrapped.getParameters();
+                        if(parameters==null || parameters.length!=arguments.length)
+                            throw new IllegalArgumentException("Explicit native PHP parameters require exact declared method arity");
+                        for(int i=0;i<arguments.length;i++) if(!arguments[i].typeDeclaration().isEmpty()) {
+                            Reflection.Arg argument=arguments[i];
+                            if(argument.type()!=HintType.ANY || !argument.typeClass().isEmpty()
+                                    || argument.typeEnum()!=Enum.class || argument.nativeType()!=IObject.class)
+                                throw new IllegalArgumentException("Conflicting explicit native PHP parameter type");
+                            var declaration=nativeSignatureDeclaration(argument.typeDeclaration(),false);
+                            parameters[i].setTypeChecker(php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(declaration,argument.nullable()));
+                        }
+                    }
+                    Reflection.Arg result = signature.result();
+                    String explicit=signature.returnType().isEmpty()?result.typeDeclaration():signature.returnType();
+                    if(!signature.returnType().isEmpty() && !result.typeDeclaration().isEmpty())
+                        throw new IllegalArgumentException("Conflicting explicit native PHP return type");
+                    if(!explicit.isEmpty()) {
+                        if(result.type()!=HintType.ANY || !result.typeClass().isEmpty() || result.typeEnum()!=Enum.class || result.nativeType()!=IObject.class)
+                            throw new IllegalArgumentException("Conflicting explicit native PHP return type");
+                        wrapped.setReturnTypeChecker(php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(nativeSignatureDeclaration(explicit,true),result.nullable()));
+                        wrapped.setReturnTypeNullable(result.nullable());
+                    } else if (result.type() != HintType.ANY || !result.typeClass().isEmpty()) {
+                        var checker=result.typeClass().isEmpty()?php.runtime.reflection.support.TypeChecker.of(result.type())
+                                :php.runtime.reflection.support.TypeChecker.of(result.typeClass());
+                        wrapped.setReturnTypeChecker(php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(checker,result.nullable()));
+                        wrapped.setReturnTypeNullable(result.nullable());
+                    }
+                }
             }
         }
+    }
+
+    /** Annotation names are already resolved; parse their complete PHP union/intersection shape before relation checks. */
+    private static php.runtime.reflection.support.PhpTypeDeclaration nativeSignatureDeclaration(String text,boolean result) {
+        if(text==null || text.isEmpty() || text.length()>32768)throw new IllegalArgumentException("Invalid native PHP type declaration");
+        text=text.trim();boolean nullable=text.startsWith("?");if(nullable)text=text.substring(1);
+        String[] branches=text.split("\\|",-1);
+        if(branches.length>64 || nullable && (branches.length!=1 || text.indexOf('&')>=0))
+            throw new IllegalArgumentException("Invalid native PHP nullable type shape");
+        java.util.List<java.util.List<String>> alternatives=new java.util.ArrayList<>();java.util.Set<String> seen=new java.util.HashSet<>();
+        for(String raw:branches) {
+            String branch=raw.trim();boolean grouped=branch.startsWith("(") && branch.endsWith(")");
+            if(grouped)branch=branch.substring(1,branch.length()-1).trim();
+            String[] members=branch.split("&",-1);
+            if(members.length>32 || grouped && (branches.length<2 || members.length<2) || !grouped && branches.length>1 && members.length>1)
+                throw new IllegalArgumentException("Invalid native PHP DNF type shape");
+            java.util.List<String> conjunction=new java.util.ArrayList<>();java.util.Set<String> names=new java.util.HashSet<>();
+            for(String value:members) {
+                String name=value.trim();
+                if(!name.matches("\\\\?[a-zA-Z_\\x80-\\uFFFF][a-zA-Z0-9_\\x80-\\uFFFF]*(?:\\\\[a-zA-Z_\\x80-\\uFFFF][a-zA-Z0-9_\\x80-\\uFFFF]*)*"))
+                    throw new IllegalArgumentException("Invalid native PHP resolved type name");
+                if(name.startsWith("\\"))name=name.substring(1);
+                String lower=name.toLowerCase(java.util.Locale.ROOT);
+                if(php.runtime.reflection.support.PhpTypeDeclaration.BUILTINS.contains(lower) || lower.equals("self") || lower.equals("parent") || lower.equals("static"))name=lower;
+                if(!names.add(php.runtime.common.PhpClassNames.canonicalKey(name)))throw new IllegalArgumentException("Duplicate native PHP intersection type");
+                boolean builtin=php.runtime.reflection.support.PhpTypeDeclaration.BUILTINS.contains(name);
+                if(members.length>1 && (builtin || name.equals("self") || name.equals("parent") || name.equals("static")))
+                    throw new IllegalArgumentException("Invalid native PHP intersection member");
+                if((name.equals("mixed") || name.equals("void") || name.equals("never")) && (branches.length>1 || nullable)
+                        || nullable && name.equals("null")
+                        || !result && (name.equals("void") || name.equals("never") || name.equals("static")))
+                    throw new IllegalArgumentException("Invalid native PHP declaration type context");
+                conjunction.add(name);
+            }
+            java.util.List<String> identity=new java.util.ArrayList<>(names);java.util.Collections.sort(identity);
+            if(!seen.add(String.join("&",identity)))throw new IllegalArgumentException("Duplicate native PHP union type");
+            alternatives.add(conjunction);
+        }
+        var declaration=new php.runtime.reflection.support.PhpTypeDeclaration(alternatives);
+        if(declaration.has("true") && declaration.has("false") || declaration.has("bool") && (declaration.has("true") || declaration.has("false")))
+            throw new IllegalArgumentException("Redundant native PHP boolean union");
+        return php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(declaration,nullable);
     }
 
     protected void onWrapExtend(ClassEntity classEntity) {
@@ -578,7 +669,13 @@ public class ClassWrapper {
             if (entity == null)
                 return;
 
-            ClassEntity.ImplementsResult result = classEntity.addInterface(entity);
+            boolean fullNativeSignature = nativeClass.isAnnotationPresent(Reflection.NativePhpSignature.class)
+                    && entity.getNativeClass() != null
+                    && entity.getNativeClass().isAnnotationPresent(Reflection.NativePhpSignature.class);
+            ClassEntity.ImplementsResult result = fullNativeSignature
+                    ? classEntity.addInterface(entity, (implementation, contract) -> implementation.isPublic()
+                            && php.runtime.reflection.support.PhpMethodCompatibility.compatibleNative(implementation, contract, scope))
+                    : classEntity.addInterface(entity);
             result.check(null);
         }
     }

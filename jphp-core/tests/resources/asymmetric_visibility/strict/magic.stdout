@@ -1,0 +1,6 @@
+initialized_assign:Error:Cannot modify private(set) property H::$x from global scope
+initialized_unset:Error:Cannot unset private(set) property H::$x from global scope
+magic-set:x:4
+unset_assign:ok:null
+magic-unset:x
+unset_unset:ok:null

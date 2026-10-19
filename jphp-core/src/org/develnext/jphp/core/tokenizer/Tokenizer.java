@@ -40,6 +40,49 @@ public class Tokenizer {
 
     protected Map<String, Directive> directives = new HashMap<String, Directive>();
 
+    private php.runtime.env.Environment compileEnvironment;
+    private List<php.runtime.env.message.SystemMessage> compileWarnings;
+
+    public void setCompileEnvironment(php.runtime.env.Environment environment) {
+        compileEnvironment = environment;
+    }
+
+    public List<php.runtime.env.message.SystemMessage> getCompileWarnings() {
+        return compileWarnings == null ? java.util.Collections.emptyList() : List.copyOf(compileWarnings);
+    }
+
+    private TraceInfo escapeTrace(int start, int end) {
+        int lineStart = code.lastIndexOf('\n', start - 1) + 1;
+        return new TraceInfo(context, currentLine, currentLine, start - lineStart, end - lineStart);
+    }
+
+    private void octalOverflow(int start, int end, String spelling) {
+        TraceInfo trace = escapeTrace(start, end);
+        String message = "Octal escape sequence overflow \\" + spelling + " is greater than \\377";
+        var diagnostic = new php.runtime.env.message.CustomSystemMessage(
+                php.runtime.exceptions.support.ErrorType.E_COMPILE_WARNING,
+                new php.runtime.env.CallStackItem(trace), new Messages.Item(message));
+        if (compileWarnings == null) compileWarnings = new ArrayList<>();
+        compileWarnings.add(diagnostic);
+        if (compileEnvironment != null) compileEnvironment.reportPhp85CompileWarning(diagnostic);
+    }
+
+    private static int asciiHex(char digit) {
+        if (digit >= '0' && digit <= '9') return digit - '0';
+        if (digit >= 'a' && digit <= 'f') return digit - 'a' + 10;
+        if (digit >= 'A' && digit <= 'F') return digit - 'A' + 10;
+        return -1;
+    }
+
+    private static java.util.BitSet markByte(java.util.BitSet positions, int offset, int value) {
+        if (value >= 128) {
+            if (positions == null) positions = new java.util.BitSet();
+            positions.set(offset);
+        }
+        return positions;
+    }
+
+
     public Tokenizer(Context context) throws IOException {
         this.context = context;
         this.code = context.getContent();
@@ -68,6 +111,7 @@ public class Tokenizer {
             this.relativePosition = 0;
 
         this.directives.clear();
+        compileWarnings = null;
     }
 
     public boolean hasDirective(String name){
@@ -92,12 +136,47 @@ public class Tokenizer {
 
     protected final static Map<Class<?>, Constructor> tokenConstructors = new ConcurrentHashMap<Class<?>, Constructor>();
 
+    private static final ClassValue<Constructor<?>> extensionTokenConstructors = new ClassValue<Constructor<?>>() {
+        @Override
+        protected Constructor<?> computeValue(Class<?> type) {
+            try {
+                return type.getConstructor(TokenMeta.class);
+            } catch (NoSuchMethodException exception) {
+                throw new TokenConstructorLookupFailure(exception);
+            }
+        }
+    };
+
+    private static final class TokenConstructorLookupFailure extends RuntimeException {
+        private final NoSuchMethodException exception;
+
+        private TokenConstructorLookupFailure(NoSuchMethodException exception) {
+            this.exception = exception;
+        }
+    }
+
+    private static Constructor<?> extensionTokenConstructor(Class<?> type) throws NoSuchMethodException {
+        try {
+            return extensionTokenConstructors.get(type);
+        } catch (TokenConstructorLookupFailure failure) {
+            throw failure.exception;
+        }
+    }
+
+
     @SuppressWarnings("unchecked")
     protected <T extends Token> T buildToken(Class<T> clazz, TokenMeta meta){
+        if (clazz == org.develnext.jphp.core.tokenizer.token.expr.value.NameToken.class
+                && phpLanguageProfile == PhpLanguageProfile.PHP_8_5 && meta.getWord().equalsIgnoreCase("match"))
+            return (T)(prevToken = new org.develnext.jphp.core.tokenizer.token.expr.value.MatchExprToken(meta));
         Constructor<T> constructor = tokenConstructors.get(clazz);
         if (constructor == null){
             try {
-                tokenConstructors.put(clazz, constructor = clazz.getConstructor(TokenMeta.class));
+                if (clazz.getClassLoader() == Tokenizer.class.getClassLoader()) {
+                    tokenConstructors.put(clazz, constructor = clazz.getConstructor(TokenMeta.class));
+                } else {
+                    constructor = (Constructor<T>) extensionTokenConstructor(clazz);
+                }
             } catch (NoSuchMethodException e) {
                 throw new RuntimeException(e);
             }
@@ -214,14 +293,75 @@ public class Tokenizer {
         return checkNewLine(ch, false);
     }
 
+    /** Set the original origin of a freshly created interpolation lexer without rewriting its source. */
+    public void setSourceOrigin(int line, int position) {
+        if (currentPosition != -1 || line < 0 || position < 0) throw new IllegalArgumentException("Interpolation lexer has already advanced");
+        currentLine = line;
+        relativePosition = position;
+        startRelativePosition = position;
+    }
+
+    private int findDocTerminator(int start, String label) {
+        for (int line = start; line < codeLength;) {
+            int token = line;
+            while (token < codeLength && (code.charAt(token) == ' ' || code.charAt(token) == '\t')) token++;
+            if (isDocTerminator(token, label)) return token;
+            int newline = code.indexOf('\n', token);
+            if (newline < 0) break;
+            line = newline + 1;
+        }
+        return -1;
+    }
+
+    private void validateDocIndent(int body, int closing, int indentation, int bodyLine) {
+        int closingLine = code.lastIndexOf('\n', closing - 1) + 1;
+        char type = code.charAt(closingLine);
+        for (int at = closingLine; at < closing; at++)
+            if (code.charAt(at) != type) throw new ParseException("Invalid indentation - tabs and spaces cannot be mixed",
+                    new TraceInfo(context, bodyLine, bodyLine, 0, indentation));
+        int sourceLine = bodyLine;
+        for (int line = body; line < closingLine; sourceLine++) {
+            int at = line, removed = 0;
+            while (at < closingLine && removed < indentation && (code.charAt(at) == ' ' || code.charAt(at) == '\t')) {
+                if (code.charAt(at) != type) throw new ParseException("Invalid indentation - tabs and spaces cannot be mixed",
+                        new TraceInfo(context, sourceLine, sourceLine, at - line, at - line + 1));
+                at++; removed++;
+            }
+            boolean blank = at >= codeLength || code.charAt(at) == '\n' || code.charAt(at) == '\r' && at + 1 < codeLength && code.charAt(at + 1) == '\n';
+            if (removed < indentation && !blank) throw new ParseException("Invalid body indentation level (expecting an indentation level of at least " + indentation + ")",
+                    new TraceInfo(context, sourceLine, sourceLine, 0, removed));
+            int newline = code.indexOf('\n', at);
+            if (newline < 0) break;
+            line = newline + 1;
+        }
+    }
+
+    private StringExprToken.Segment stringSegment(int from, int to, boolean variable, int sourceIndex, int sourceLine, boolean doc) {
+        return doc ? new StringExprToken.SourceSegment(from, to, variable, sourceLine, sourceIndex - code.lastIndexOf('\n', sourceIndex - 1) - 1)
+                : new StringExprToken.Segment(from, to, variable);
+    }
+
+    private boolean isDocTerminator(int start, String label) {
+        if (!code.startsWith(label, start)) return false;
+        int end = start + label.length();
+        if (phpLanguageProfile == PhpLanguageProfile.PHP_8_5)
+            return end == codeLength || !TokenizeGrammarUtils.isNameChar(code.charAt(end));
+        if (end < codeLength && code.charAt(end) == ';') end++;
+        return end == codeLength || code.charAt(end) == '\n'
+                || code.charAt(end) == '\r' && end + 1 < codeLength && code.charAt(end + 1) == '\n';
+    }
+
     protected ValueExprToken readString(StringExprToken.Quote quote, int startPosition, int startLine){
         int i = currentPosition + 1, pos = relativePosition + 1;
         StringExprToken.Quote ch_quote = null;
         boolean slash = false;
         StringBuilder sb = new StringBuilder();
+        boolean php85 = phpLanguageProfile == PhpLanguageProfile.PHP_8_5;
+        java.util.BitSet rawBytes = null;
 
         boolean isMagic = quote != null && quote.isMagic();
         String endString = null;
+        int docTerminator = -1, docIndentation = 0, docBody = -1;
 
         int startIndex = currentPosition + 1;
 
@@ -236,20 +376,26 @@ public class Tokenizer {
                 if (docType == null && TokenizeGrammarUtils.isQuote(ch) != null) {
                     docType = TokenizeGrammarUtils.isQuote(ch);
                 } else if (docType != null && docType == TokenizeGrammarUtils.isQuote(ch)) {
-                    if (i + 1 >= codeLength || !TokenizeGrammarUtils.isNewline(code.charAt(i + 1))) {
+                    int newline = i + 1;
+                    if (newline + 1 < codeLength && code.charAt(newline) == '\r' && code.charAt(newline + 1) == '\n') newline++;
+                    if (newline >= codeLength || !TokenizeGrammarUtils.isNewline(code.charAt(newline))) {
                         throw new ParseException(
                                 Messages.ERR_PARSE_UNEXPECTED_END_OF_STRING.fetch(),
                                 new TraceInfo(context, currentLine, currentLine, pos + 1, pos + 1)
                         );
                     }
-                    i += 1;
+                    i = newline;
+                    checkNewLine(code.charAt(i));
+                    pos = 0;
                     break;
-                    // nop
                 } else if (tmp.length() == 0 && (ch == ' ' || ch == '\t')) {
                     //nop
                 } else if (TokenizeGrammarUtils.isEngLetter(ch) || ch == '_' || (tmp.length() != 0 && Character.isDigit(ch))){
                     tmp.append(ch);
-                } else if (tmp.length() > 0 && checkNewLine(ch)){
+                } else if (tmp.length() > 0 && (TokenizeGrammarUtils.isNewline(ch)
+                        || ch == '\r' && i + 1 < codeLength && code.charAt(i + 1) == '\n')) {
+                    if (ch == '\r') i++;
+                    checkNewLine(code.charAt(i));
                     pos = 0;
                     break;
                 } else {
@@ -269,14 +415,33 @@ public class Tokenizer {
 
             isMagic = (docType == null || docType.isMagic());
             endString = tmp.toString();
+            if (php85) {
+                docBody = i;
+                docTerminator = findDocTerminator(i, endString);
+                if (docTerminator >= 0) {
+                    docIndentation = docTerminator - code.lastIndexOf('\n', docTerminator - 1) - 1;
+                    if (docIndentation > 0) validateDocIndent(docBody, docTerminator, docIndentation, currentLine);
+                }
+            }
         }
 
         List<StringExprToken.Segment> segments = new ArrayList<StringExprToken.Segment>();
 
 
         for(; i < codeLength; i++){
+            if (php85 && docIndentation > 0 && (i == docBody || i > 0 && code.charAt(i - 1) == '\n')) {
+                int removed = 0;
+                while (removed < docIndentation && i < codeLength && (code.charAt(i) == ' ' || code.charAt(i) == '\t')) { i++; removed++; }
+                pos += removed;
+            }
             char ch = code.charAt(i);
 
+            if (endString != null && (php85 ? i == docTerminator : i == currentPosition + 1 && isDocTerminator(i, endString))) {
+                currentPosition = i + endString.length() - 1;
+                relativePosition = docIndentation + endString.length();
+                ch_quote = StringExprToken.Quote.DOC;
+                break;
+            }
             pos++;
             ch_quote = TokenizeGrammarUtils.isQuote(ch);
             if (endString == null && (ch_quote == quote && !slash)){
@@ -288,16 +453,12 @@ public class Tokenizer {
             if (checkNewLine(ch)) {
                 pos = 0;
                 if (endString != null){
-                    int end = i + 1 + endString.length();
-                    if (end < codeLength){
-                        if (code.substring(i + 1, end).equals(endString)) {
-                            if ((code.charAt(end) == ';' && TokenizeGrammarUtils.isNewline(code.charAt(end + 1))) || TokenizeGrammarUtils.isNewline(code.charAt(end))) {
-                                currentPosition = i + endString.length();
-                                relativePosition = endString.length();
-                                ch_quote = StringExprToken.Quote.DOC;
-                                break;
-                            }
-                        }
+                    if (php85 ? i + 1 + docIndentation == docTerminator : isDocTerminator(i + 1, endString)) {
+                        if (i > 0 && code.charAt(i - 1) == '\r') sb.setLength(sb.length() - 1);
+                        currentPosition = i + docIndentation + endString.length();
+                        relativePosition = docIndentation + endString.length();
+                        ch_quote = StringExprToken.Quote.DOC;
+                        break;
                     }
                 }
             }
@@ -329,6 +490,7 @@ public class Tokenizer {
                 if (dynamic > 0) {
                     if (dynamic == 2 ||  i + 1 < codeLength && code.charAt(i + 1) == '$') {
                         slash = false;
+                        int segmentLine = currentLine;
                         int opened = dynamic == 2 ? 0 : 1;
                         int j;
                         for(j = i + 1; j < codeLength; j++){
@@ -349,14 +511,64 @@ public class Tokenizer {
                             );
 
                         String sub = code.substring(i, j + 1);
-                        segments.add(new StringExprToken.Segment(
-                                sb.length(), sb.length() + sub.length(), dynamic == 2
-                        ));
+                        segments.add(stringSegment(sb.length(), sb.length() + sub.length(), dynamic == 2, i, segmentLine, php85 && endString != null));
                         /*segments.add(new StringExprToken.Segment(
                                 i - currentPosition - 1, j - currentPosition, dynamic == 2
                         ));*/
                         sb.append(sub);
                         i = j;
+                        continue;
+                    }
+                }
+
+                if (slash && php85) {
+                    if (ch >= '0' && ch <= '7') {
+                        int end = i, decoded = 0;
+                        while (end < codeLength && end < i + 3 && code.charAt(end) >= '0' && code.charAt(end) <= '7')
+                            decoded = (decoded << 3) | (code.charAt(end++) - '0');
+                        if (decoded > 255) octalOverflow(i - 1, end, code.substring(i, end));
+                        int value = decoded & 255;
+                        rawBytes = markByte(rawBytes, sb.length(), value);
+                        sb.append((char) value);
+                        pos += end - i - 1; i = end - 1; slash = false;
+                        continue;
+                    }
+                    if (ch == 'x' || ch == 'X') {
+                        int end = i + 1, decoded = 0;
+                        while (end < codeLength && end < i + 3 && asciiHex(code.charAt(end)) >= 0)
+                            decoded = (decoded << 4) | asciiHex(code.charAt(end++));
+                        if (end == i + 1) sb.append('\\').append(ch);
+                        else {
+                            rawBytes = markByte(rawBytes, sb.length(), decoded);
+                            sb.append((char) decoded);
+                        }
+                        pos += end - i - 1; i = end - 1; slash = false;
+                        continue;
+                    }
+                    if (ch == 'u' && i + 1 < codeLength && code.charAt(i + 1) == '{') {
+                        int end = i + 2, decoded = 0; boolean tooLarge = false;
+                        while (end < codeLength && asciiHex(code.charAt(end)) >= 0) {
+                            if (decoded > (0x10FFFF - asciiHex(code.charAt(end))) / 16) tooLarge = true;
+                            if (!tooLarge) decoded = decoded * 16 + asciiHex(code.charAt(end));
+                            end++;
+                        }
+                        if (end == i + 2 || end >= codeLength || code.charAt(end) != '}')
+                            throw new ParseException("Invalid UTF-8 codepoint escape sequence", escapeTrace(i - 1, end));
+                        if (tooLarge) throw new ParseException("Invalid UTF-8 codepoint escape sequence: Codepoint too large", escapeTrace(i - 1, end + 1));
+                        if (decoded >= 0xD800 && decoded <= 0xDFFF) {
+                            int first = 0xE0 | (decoded >>> 12), second = 0x80 | ((decoded >>> 6) & 63), third = 0x80 | (decoded & 63);
+                            rawBytes = markByte(rawBytes, sb.length(), first); sb.append((char) first);
+                            rawBytes = markByte(rawBytes, sb.length(), second); sb.append((char) second);
+                            rawBytes = markByte(rawBytes, sb.length(), third); sb.append((char) third);
+                        } else sb.appendCodePoint(decoded);
+                        pos += end - i; i = end; slash = false;
+                        continue;
+                    }
+                    boolean recognized = ch == 'r' || ch == 'n' || ch == 't' || ch == 'e' || ch == 'v' || ch == 'f'
+                            || ch == '\\' || ch == '$' || ch == '"' && quote == StringExprToken.Quote.DOUBLE;
+                    if (!recognized) {
+                        if (ch != '`' || quote != StringExprToken.Quote.SHELL) sb.append('\\');
+                        sb.append(ch); slash = false;
                         continue;
                     }
                 }
@@ -483,7 +695,7 @@ public class Tokenizer {
                                     );
 
                                 String s = code.substring(i, k);
-                                segments.add(new StringExprToken.Segment(sb.length(), sb.length() + s.length(), true));
+                                segments.add(stringSegment(sb.length(), sb.length() + s.length(), true, i, currentLine, php85 && endString != null));
                                 sb.append(s);
                             } else
                                 sb.append(ch);
@@ -505,10 +717,10 @@ public class Tokenizer {
         }
 
         TokenMeta meta = buildMeta(startPosition + 1, startLine);
-        meta.setStartIndex(startIndex - 1);
+        meta.setStartIndex(php85 && quote == StringExprToken.Quote.DOC ? startPosition : startIndex - 1);
 
         if (quote == StringExprToken.Quote.DOC) {
-            meta.setEndIndex(currentPosition + 3);
+            meta.setEndIndex(currentPosition + (php85 ? 1 : 3));
         } else {
             meta.setEndIndex(currentPosition + 1);
         }
@@ -517,6 +729,7 @@ public class Tokenizer {
 
         StringExprToken expr = new StringExprToken(meta, quote);
         expr.setSegments(segments);
+        if (rawBytes != null) expr.setRawBytePositions(rawBytes);
         return expr;
     }
 
@@ -753,8 +966,10 @@ public class Tokenizer {
                 // comments
                 if (ch == '#' && currentPosition + 1 < codeLength && code.charAt(currentPosition + 1) == '['
                         && phpLanguageProfile == PhpLanguageProfile.PHP_8_5) {
-                    throw new ParseException("Attributes are not yet supported by the PHP_8_5 profile",
-                            new TraceInfo(context, currentLine, currentLine, relativePosition, relativePosition + 2));
+                    currentPosition++;
+                    relativePosition++;
+                    return new org.develnext.jphp.core.tokenizer.token.stmt.AttributeStartToken(
+                            new TokenMeta("#[", startLine, currentLine, startRelativePosition, relativePosition));
                 }
                 comment = CommentToken.Kind.isComment(ch, prev_ch);
                 if (comment != null) {

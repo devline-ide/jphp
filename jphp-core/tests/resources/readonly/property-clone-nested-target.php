@@ -1,0 +1,2 @@
+<?php function ro_result($f){try{return ["ok",$f()];}catch(Throwable $e){return [get_class($e),$e->getMessage()];}}
+class R{public static $other;public readonly int $x;function __construct($v){$this->x=$v;}function __clone(){if(self::$other){$o=self::$other;self::$other=null;$c=clone $o;$this->x=$c->x+1;}else{$this->x=7;}}}$a=new R(3);$b=new R(4);R::$other=$b;$c=clone $a;echo serialize([$a->x,$b->x,$c->x]);

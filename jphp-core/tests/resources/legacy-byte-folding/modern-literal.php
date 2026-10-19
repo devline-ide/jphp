@@ -1,0 +1,1 @@
+<?php set_error_handler(function($code,$message){echo 'D:'.$message.'|';});echo ord('é'),'|',bin2hex(chr(256));

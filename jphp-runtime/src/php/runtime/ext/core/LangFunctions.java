@@ -185,11 +185,24 @@ public class LangFunctions extends FunctionsContainer {
 
     public static Memory set_error_handler(Environment env, TraceInfo trace, @Reference Memory handler,
                                            int flags) {
+        if (handler.toValue().isNull() && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            ErrorHandler last=env.getErrorHandler();
+            env.setErrorHandler(null);
+            return php.runtime.PhpOwnershipNativeCalls.previousHandlerResult(env,last);
+        }
         Invoker invoker = expectingCallback(env, trace, 1, handler);
         if (invoker != null) {
             ErrorHandler last = env.getErrorHandler();
-            env.setErrorHandler(new ErrorHandler(invoker, handler.toImmutable(), flags));
-            return last == null ? Memory.NULL : last.invokerMemory;
+            Memory callable=handler.toValue().toImmutable();
+            php.runtime.PhpOwnershipNativeCalls.Registration registration;
+            try {registration=php.runtime.PhpOwnershipNativeCalls.retainHandler(env,invoker,callable);}
+            catch (Throwable failure) {throw LangFunctions.<RuntimeException>raiseHandlerFailure(failure);}
+            try {env.setErrorHandler(new ErrorHandler(invoker,callable,flags,registration));}
+            catch (Throwable failure) {
+                if (registration != null) try {registration.close();} catch (Throwable cleanup) {failure=registration.composeFailure(failure,cleanup);}
+                throw LangFunctions.<RuntimeException>raiseHandlerFailure(failure);
+            }
+            return php.runtime.PhpOwnershipNativeCalls.previousHandlerResult(env,last);
         } else
             return Memory.FALSE;
     }
@@ -198,12 +211,20 @@ public class LangFunctions extends FunctionsContainer {
         return set_error_handler(env, trace, handler, ErrorType.E_ALL.value | ErrorType.E_STRICT.value);
     }
 
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> RuntimeException raiseHandlerFailure(Throwable failure) throws T {throw (T)failure;}
+
     public static boolean restore_error_handler(Environment env) {
-        env.setErrorHandler(env.getPreviousErrorHandler());
+        env.restoreErrorHandler();
         return true;
     }
 
     public static Memory set_exception_handler(Environment env, TraceInfo trace, @Reference Memory handler) {
+        if (handler.toValue().isNull() && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            ExceptionHandler last=env.getExceptionHandler();
+            env.setExceptionHandler(null);
+            return last == null || last.invoker == null ? Memory.NULL : last.invokerMemory;
+        }
         Invoker invoker = expectingCallback(env, trace, 1, handler);
         if (invoker != null) {
             ExceptionHandler eh = env.getExceptionHandler();
@@ -214,7 +235,7 @@ public class LangFunctions extends FunctionsContainer {
     }
 
     public static boolean restore_exception_handler(Environment env) {
-        env.setExceptionHandler(env.getPreviousExceptionHandler());
+        env.restoreExceptionHandler();
         return true;
     }
 
@@ -578,32 +599,58 @@ public class LangFunctions extends FunctionsContainer {
     }
 
     private static Memory _call_user_func(Environment env, TraceInfo trace, Memory function, Memory... args)
-            throws Throwable {
-        Invoker invoker = expectingCallback(env, trace, 1, function);
-        if (invoker == null) {
-            return Memory.FALSE;
-        }
-        invoker.setTrace(trace);
+            throws Throwable {return _call_user_func(env,trace,function,false,args);}
 
+    private static Memory _call_user_func(Environment env, TraceInfo trace, Memory function, boolean discarded,Memory... args)
+            throws Throwable {
         if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
-            String name = invoker instanceof php.runtime.invoke.DynamicMethodInvoker
-                    && ((php.runtime.invoke.DynamicMethodInvoker) invoker).getObject() instanceof php.runtime.lang.Closure
-                    ? php.runtime.invoke.InvokeArgumentHelper.closureCallName(
-                            (php.runtime.lang.Closure) ((php.runtime.invoke.DynamicMethodInvoker) invoker).getObject())
-                    : invoker instanceof php.runtime.invoke.DynamicMethodInvoker
-                    ? ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod().getClazzName() + "::"
-                        + ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod().getName()
-                    : invoker instanceof php.runtime.invoke.StaticMethodInvoker
-                        ? ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod().getClazzName() + "::"
-                            + ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod().getName()
-                        : invoker.getName();
-            args = php.runtime.invoke.InvokeArgumentHelper.prepareIndirectArguments(env, trace, args,
-                    invoker.getParameters(), name);
+            try (var frame = nativeCallbackFrame(env, trace, function, "call_user_func")) {
+                if (!php.runtime.invoke.NativeFunctionContext.isStrict(env, trace, "call_user_func")) {
+                    return discarded ? frame.invokeInternalDiscarded(args==null ? new Memory[0] : args)
+                            : frame.invokeInternal(args==null ? new Memory[0] : args);
+                }
+                Invoker invoker = frame.resolvedTarget();
+                String name = invoker instanceof php.runtime.invoke.DynamicMethodInvoker
+                        && ((php.runtime.invoke.DynamicMethodInvoker) invoker).getObject() instanceof php.runtime.lang.Closure
+                        ? php.runtime.invoke.InvokeArgumentHelper.closureCallName(
+                                (php.runtime.lang.Closure) ((php.runtime.invoke.DynamicMethodInvoker) invoker).getObject())
+                        : invoker instanceof php.runtime.invoke.DynamicMethodInvoker
+                        ? ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod().getClazzName() + "::"
+                            + ((php.runtime.invoke.DynamicMethodInvoker) invoker).getMethod().getName()
+                        : invoker instanceof php.runtime.invoke.StaticMethodInvoker
+                            ? ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod().getClazzName() + "::"
+                                + ((php.runtime.invoke.StaticMethodInvoker) invoker).getMethod().getName()
+                            : invoker.getName();
+                args = php.runtime.invoke.InvokeArgumentHelper.prepareIndirectArguments(env, trace, args,
+                        invoker.getParameters(), name);
+                return discarded ? frame.invokePreparedDiscarded(args) : frame.invokePrepared(args);
+            }
+        }
+        Invoker invoker = expectingCallback(env, trace, 1, function);
+        if (invoker == null) return Memory.FALSE;
+        invoker.setTrace(trace);
+        if(discarded || invoker instanceof php.runtime.invoke.RunnableInvoker) {
+            try(var frame=php.runtime.invoke.PhpCallFrame.resolvedInvoker(env,trace,invoker,args==null ? 0 : args.length)) {
+                return discarded ? frame.invokePreparedDiscarded(args) : frame.invokePrepared(args);
+            }
         }
         return invoker.call(args);
     }
 
+    @Reflection.Signature(value = {
+            @Reflection.Arg(value = "callback", type = php.runtime.common.HintType.CALLABLE),
+            @Reflection.Arg(value = "args", type = php.runtime.common.HintType.MIXED, variadic = true)
+    }, namedVariadic = true, result = @Reflection.Arg(type = php.runtime.common.HintType.MIXED))
+    @php.runtime.annotation.PhpNativeResultBridge(discarded="call_user_funcDiscarded")
     public static Memory call_user_func(Environment env, TraceInfo trace, Memory function, Memory... args)
+            throws Throwable {return callUserFunc(env,trace,function,
+                    false,args);}
+
+    @Reflection.Ignore
+    public static Memory call_user_funcDiscarded(Environment env,TraceInfo trace,Memory function,Memory...args)
+            throws Throwable {return callUserFunc(env,trace,function,true,args);}
+
+    private static Memory callUserFunc(Environment env,TraceInfo trace,Memory function,boolean discarded,Memory...args)
             throws Throwable {
         Memory[] passed;
         if (args == null) {
@@ -616,7 +663,26 @@ public class LangFunctions extends FunctionsContainer {
 
         env.pushCall(trace, null, passed, "call_user_func", null, null);
         try {
-            return _call_user_func(env, trace, function,
+            if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                var bound = php.runtime.invoke.BoundArguments.currentNativeVariadic(env, args,
+                        NamedNativeMembers.CALL_USER_FUNC);
+                if (bound != null && !bound.namedExtras().isEmpty()) {
+                    try (var frame = nativeCallbackFrame(env, trace, function, "call_user_func")) {
+                        // CUF always forwards VALUEs; a by-reference callback warns and receives a temporary.
+                        for (Memory value : args) {
+                            frame.preparePositional();
+                            frame.sendIndirect(value.toValue().toImmutable(), php.runtime.invoke.PhpCallFrame.VALUE);
+                        }
+                        for (var entry : bound.namedExtras().entrySet()) {
+                            frame.prepareNamed(entry.getKey());
+                            frame.sendIndirect(entry.getValue().toValue().toImmutable(), php.runtime.invoke.PhpCallFrame.VALUE);
+                        }
+                        var actual=frame.finishBinding();
+                        return discarded ? frame.invokeBoundDiscarded(actual,true) : frame.invokeBound(actual,true);
+                    }
+                }
+            }
+            return _call_user_func(env, trace, function,discarded,
                     env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
                             ? php.runtime.invoke.InvokeArgumentHelper.argumentsByValue(args) : args);
         } finally {
@@ -624,16 +690,52 @@ public class LangFunctions extends FunctionsContainer {
         }
     }
 
+    private static php.runtime.invoke.PhpCallFrame nativeCallbackFrame(Environment env, TraceInfo trace,
+            Memory callback, String api) throws Throwable {
+        try {
+            return php.runtime.invoke.PhpCallFrame.acquireInternalDispatcherCallable(callback, env, trace);
+        } catch (php.runtime.invoke.PhpMethodResolver.InvalidCallback invalid) {
+            throw invalid.typeError(env,trace,api+"(): Argument #1 ($callback) must be a valid callback, "
+                    +(invalid.getMessage()==null ? "(null)" : invalid.getMessage()));
+        }
+    }
+
+    private static final class NamedNativeMembers {
+        static final java.lang.reflect.Method CALL_USER_FUNC = callUserFunc();
+        private static java.lang.reflect.Method callUserFunc() {
+            try {return LangFunctions.class.getDeclaredMethod("call_user_func", Environment.class,
+                    TraceInfo.class, Memory.class, Memory[].class);}
+            catch (NoSuchMethodException impossible) {throw new ExceptionInInitializerError(impossible);}
+        }
+    }
+
+    @Reflection.Signature(value = {
+            @Reflection.Arg(value = "callback", type = php.runtime.common.HintType.CALLABLE),
+            @Reflection.Arg(value = "args", type = php.runtime.common.HintType.ARRAY)
+    }, result = @Reflection.Arg(type = php.runtime.common.HintType.MIXED))
+    @php.runtime.annotation.PhpNativeResultBridge(discarded="call_user_func_arrayDiscarded")
     public static Memory call_user_func_array(Environment env, TraceInfo trace, Memory function, Memory args)
+            throws Throwable {return callUserFuncArray(env,trace,function,args,
+                    false);}
+
+    @Reflection.Ignore
+    public static Memory call_user_func_arrayDiscarded(Environment env,TraceInfo trace,Memory function,Memory args)
+            throws Throwable {return callUserFuncArray(env,trace,function,args,true);}
+
+    private static Memory callUserFuncArray(Environment env,TraceInfo trace,Memory function,Memory args,boolean discarded)
             throws Throwable {
         if (expecting(env, trace, 2, args, Memory.Type.ARRAY)) {
             Memory[] passed = new Memory[]{function, args};
             env.pushCall(trace, null, passed, "call_user_func_array", null, null);
             try {
                 ArrayMemory values = args.toValue(ArrayMemory.class);
-                return _call_user_func(env, trace, function,
-                        env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
-                                ? values.valuesForCall() : values.values(false));
+                if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    try (var frame = nativeCallbackFrame(env, trace, function, "call_user_func_array")) {
+                        boolean internal=!php.runtime.invoke.NativeFunctionContext.isStrict(env,trace,"call_user_func_array");
+                        return discarded ? frame.invokeKeyedDiscarded(values,internal) : frame.invokeKeyed(values,internal);
+                    }
+                }
+                return _call_user_func(env, trace, function, values.values(false));
             } finally {
                 env.popCall();
             }
@@ -653,7 +755,7 @@ public class LangFunctions extends FunctionsContainer {
                 break;
 
             CallStackItem item = env.peekCall(i);
-            ArrayMemory el = item.toArray(provideObject, ignoreArgs);
+            ArrayMemory el = item.toArray(env,provideObject, ignoreArgs);
             result.add(el);
         }
 
@@ -974,7 +1076,7 @@ public class LangFunctions extends FunctionsContainer {
             ClassEntity entity = o.getReflection();
 
             ClassEntity context = env.getLastClassOnStack();
-            ForeachIterator iterator = props.foreachIterator(false, false);
+            ForeachIterator iterator = php.runtime.PhpPropertyHookAccess.consumerProperties(o.value,env,trace,context,2);
 
             ArrayMemory result = new ArrayMemory();
             boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5

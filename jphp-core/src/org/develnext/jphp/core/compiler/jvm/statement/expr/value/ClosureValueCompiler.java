@@ -11,6 +11,10 @@ import org.objectweb.asm.Type;
 import org.objectweb.asm.tree.InsnNode;
 import org.objectweb.asm.tree.MethodInsnNode;
 import org.objectweb.asm.tree.TypeInsnNode;
+import org.objectweb.asm.tree.LabelNode;
+import org.objectweb.asm.tree.JumpInsnNode;
+import org.objectweb.asm.tree.VarInsnNode;
+import php.runtime.PhpOwnershipClosures;
 import php.runtime.Memory;
 import php.runtime.env.Environment;
 import php.runtime.lang.IObject;
@@ -30,7 +34,8 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
         super(exprCompiler);
     }
 
-    protected void writePushUses(Collection<ArgumentStmtToken> parameters){
+    protected void writePushUses(Collection<ArgumentStmtToken> parameters){writePushUses(parameters,null);}
+    protected void writePushUses(Collection<ArgumentStmtToken> parameters,ClosureEntity closure){
         if (parameters.isEmpty()){
             add(new InsnNode(ACONST_NULL));
             expr.stackPush(Memory.Type.REFERENCE);
@@ -60,7 +65,9 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
                 expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "exportReference", Memory.class, Memory.class);
             }
 
-            add(new InsnNode(AASTORE));
+            InsnNode store=new InsnNode(AASTORE);add(store);
+            if(closure!=null&&local!=null&&compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                method.primitiveCells().captureStore(store,i,param.isReference(),local.index,closure.getInternalName());
             expr.stackPop();
             expr.stackPop();
             expr.stackPop();
@@ -69,8 +76,9 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
     }
 
     protected void writeContext() {
-        if (method.isInitializer() && method.clazz.getEntity().isTrait()
-                && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+        if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && (method.clazz.getEntity().isTrait()
+                || method.clazz.getClassContext() != null && method.clazz.getClassContext().isTrait())) {
             expr.writePushEnv();
             expr.writePushTraceInfo(method.clazz.statement);
             expr.writeSysDynamicCall(Environment.class, "__getSelf", String.class, php.runtime.env.TraceInfo.class);
@@ -91,6 +99,60 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
         }
     }
 
+    /** Do not define a cached CV only in the connected branch and reuse it in its passive sibling. */
+    private void writeRuntimeThis() {
+        if (method.clazz.isClosure() || method.getGeneratorEntity() != null) {
+            expr.writePushThis();
+        } else if (methodStatement.isStatic()) {
+            expr.writePushNull();
+        } else {
+            LabelNode receiver=new LabelNode(),end=new LabelNode();
+            expr.writeVarLoad("~this");
+            expr.writeSysDynamicCall(IObject.class,"isMock",Boolean.TYPE);
+            add(new JumpInsnNode(IFEQ,receiver));expr.stackPop();
+            expr.writePushMemory(Memory.UNDEFINED);expr.stackPop();add(new JumpInsnNode(GOTO,end));
+            add(receiver);expr.writeVarLoad("~this");
+            expr.writeSysStaticCall(ObjectMemory.class,"valueOf",Memory.class,IObject.class);
+            add(end);
+        }
+    }
+
+    /** The physical empty shell owns its EVAL before any capture read can run a notice handler. */
+    private LabelNode writeRuntimeProducer(ClosureStmtToken closure,ClosureEntity entity,boolean thisExists,int evalId) {
+        LabelNode passive=new LabelNode(),end=new LabelNode();
+        method.ownership().runtimeFallback(passive,end);
+        add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));add(new JumpInsnNode(IFNULL,passive));
+        LocalVariable allocation=method.addLocalVariable("~runtimeClosure"+evalId,null,Object.class);
+        add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));expr.stackPush(Memory.Type.REFERENCE);
+        expr.writePushConstInt(evalId);expr.writePushEnv();
+        expr.writePushConstString(compiler.getModule().getInternalName());expr.writePushConstInt((int)entity.getId());
+        expr.writeSysDynamicCall(Environment.class,"__getClosure",ClassEntity.class,String.class,Integer.TYPE);
+        MethodInsnNode lookup=(MethodInsnNode)node.instructions.getLast();
+        add(new TypeInsnNode(CHECKCAST,Type.getInternalName(ClosureEntity.class)));
+        expr.writeSysStaticCall(PhpOwnershipClosures.class,"prepareRuntime",PhpOwnershipClosures.RuntimeAllocation.class,
+                php.runtime.PhpRuntimeOwnership.Frame.class,Integer.TYPE,ClosureEntity.class);
+        MethodInsnNode prepare=(MethodInsnNode)node.instructions.getLast();
+        method.ownership().runtimeClosureLiteral(evalId,entity.getInternalName(),compiler.getModule().getInternalName(),(int)entity.getId(),lookup,prepare);
+        add(new VarInsnNode(ASTORE,allocation.index));expr.stackPop();
+        add(new VarInsnNode(ALOAD,allocation.index));expr.stackPush(Memory.Type.REFERENCE);
+        if (thisExists)writeRuntimeThis();else expr.writePushNull();
+        writeContext();
+        expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"self",void.class,Memory.class,String.class);
+        int index=0;
+        for (ArgumentStmtToken parameter:closure.getFunction().getUses()) {
+            add(new VarInsnNode(ALOAD,allocation.index));expr.stackPush(Memory.Type.REFERENCE);expr.writePushConstInt(index++);
+            LocalVariable local=method.getLocalVariable(parameter.getName().getName());
+            if (local == null)expr.writePushNull();else expr.writeVarLoad(local);
+            expr.writePopBoxing(!parameter.isReference());
+            if (parameter.isReference())expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class,"exportReference",Memory.class,Memory.class);
+            expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"capture",void.class,Integer.TYPE,Memory.class);
+        }
+        add(new VarInsnNode(ALOAD,allocation.index));expr.stackPush(Memory.Type.REFERENCE);
+        expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"complete",Memory.class);
+        // Both branches leave exactly one semantic Closure VALUE at the common continuation.
+        expr.stackPop();add(new JumpInsnNode(GOTO,end));add(passive);return end;
+    }
+
     @Override
     public void write(ClosureStmtToken closure, boolean returnValue) {
         if (returnValue){
@@ -99,6 +161,9 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
             boolean staticExists = closure.getFunction().isStaticExists();
             boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
             if (modern) thisExists = !closure.isStaticClosure() && (thisExists || closure.getOwnerClass() != null);
+            int runtimeEval=modern && method.ownership().runtimeEnabled() ? method.ownership().reserveRuntimeEval() : -1;
+            if (runtimeEval >= 0)method.ownership().runtimeProducer(runtimeEval,"CLOSURE_LITERAL");
+            LabelNode runtimeEnd=runtimeEval < 0 ? null : writeRuntimeProducer(closure,entity,thisExists,runtimeEval);
 
             if (compiler.getModule().getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5
                     && closure.getFunction().getUses().isEmpty() && !thisExists && !staticExists
@@ -131,7 +196,7 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
 
                 writeContext();
 
-                writePushUses(closure.getFunction().getUses());
+                writePushUses(closure.getFunction().getUses(),entity);
                 add(new MethodInsnNode(
                         INVOKESPECIAL, entity.getInternalName(), Constants.INIT_METHOD,
                         Type.getMethodDescriptor(
@@ -161,6 +226,13 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
                     expr.writeSysDynamicCall(Closure.class, "setUsesThis", void.class, Boolean.TYPE);
                 }
                 expr.writeSysStaticCall(ObjectMemory.class, "valueOf", Memory.class, IObject.class);
+                if(compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                    method.primitiveCells().closureWrapper((MethodInsnNode)node.instructions.getLast());
+            }
+            if (runtimeEnd != null) {
+                add(runtimeEnd);expr.stackPeek().runtimeEvaluationId=runtimeEval;
+                expr.stackPeek().runtimeClosureInternalName=entity.getInternalName();
+                expr.stackPeek().runtimeClosureProducerId=runtimeEval;
             }
             expr.setStackPeekAsImmutable();
         }

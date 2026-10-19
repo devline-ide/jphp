@@ -61,6 +61,7 @@ public class LambdaGenerator extends Generator<LambdaStmtToken> {
 
     public LambdaStmtToken getToken(Token current, ListIterator<Token> iterator, Separator separator, BraceExprToken.Kind braceKind) {
         if (current instanceof LambdaStmtToken) {
+            FunctionStmtToken parentFunction=analyzer.getFunction();
             LambdaStmtToken lambda = (LambdaStmtToken) current;
 
             iterator.previous();
@@ -139,7 +140,7 @@ public class LambdaGenerator extends Generator<LambdaStmtToken> {
             iterator.next();
 
             lambda.setFunction(func);
-            lambda.setParentFunction(peekClosure);
+            lambda.setParentFunction(parentFunction);
 
             return lambda;
         }

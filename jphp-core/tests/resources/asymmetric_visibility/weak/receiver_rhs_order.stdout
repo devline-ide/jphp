@@ -1,0 +1,6 @@
+receiver
+rhs
+assign:Error:Cannot modify private(set) property H::$x from global scope
+receiver
+rhs
+compound:TypeError:Unsupported operand types: int + array

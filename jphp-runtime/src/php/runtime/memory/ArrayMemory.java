@@ -36,11 +36,14 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         // Empty ordinary arrays pay for one field, like the previous pin counter.
         // Active leases form a private chain whose tail carries the allocation stamp.
         Object authority;
-        Object ownership() {
+        private Object allocation() {
             Object current=authority;
             while (current instanceof WriteFetchLease) current=((WriteFetchLease)current).previous;
             return current;
         }
+        Object ownership() {Object value=allocation();return value instanceof RuntimeStorage ? null : value;}
+        RuntimeStorage runtime() {Object value=allocation();return value instanceof RuntimeStorage ? (RuntimeStorage)value : null;}
+        php.runtime.PhpRuntimeOwnership.ArrayOrigin runtimeOrigin() {RuntimeStorage value=runtime();return value == null ? null : value.origin;}
         void ownership(Object certificate) {
             WriteFetchLease previous=null;Object current=authority;
             while (current instanceof WriteFetchLease) {
@@ -50,9 +53,245 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             else previous.previous=certificate;
         }
     }
+    // Ordinary origin/frontier metadata exists only after an explicitly staged producer.
+    private static final class RuntimeStorage {
+        final php.runtime.PhpRuntimeOwnership.ArrayOrigin origin;
+        boolean initialized;
+        RuntimeStorage(php.runtime.PhpRuntimeOwnership.ArrayOrigin origin) {this.origin=origin;}
+    }
     private transient ArrayStorage storage;
 
+    @FunctionalInterface public interface NativeGlobalCarrierProtocol {
+        void validateCarrier(ReferenceMemory actual);
+    }
+    /** Structural native-table metadata: no ARRAY node, value owner, copy or COW authority. */
+    public final NativeGlobals prepareNativeGlobals(Environment environment, NativeGlobalCarrierProtocol protocol) {
+        Objects.requireNonNull(environment);Objects.requireNonNull(protocol);
+        if (environment.getRuntimeGlobalsTable()!=this || getClass()!=ArrayMemory.class || map==null || _list!=null)
+            throw new IllegalArgumentException("Native globals do not identify their actual Environment table");
+        Object existing=storage.ownership();
+        if (existing instanceof NativeGlobals) {
+            NativeGlobals result=(NativeGlobals)existing;result.validate(environment);
+            for(ReferenceMemory carrier:this)protocol.validateCarrier(carrier);
+            return result;
+        }
+        if (existing!=null || storage.runtimeOrigin()!=null)
+            throw new IllegalArgumentException("Native globals cannot adopt PHP ARRAY storage authority");
+        for(ReferenceMemory carrier:this)protocol.validateCarrier(carrier);
+        NativeGlobals prepared=new NativeGlobals(environment,map.sealNativeGlobals());
+        storage.ownership(prepared);return prepared;
+    }
+    public final class NativeGlobals {
+        private final Environment environment;
+        private final ArrayStorage identity=storage;
+        private final ArrayMemoryMap actualMap=map;
+        private final ArrayMemoryMap.NativeGlobalSlots slots;
+        private NativeGlobals(Environment environment,ArrayMemoryMap.NativeGlobalSlots slots){this.environment=environment;this.slots=slots;}
+        public ArrayMemory actual(){return ArrayMemory.this;}
+        public void validate(Environment expected) {
+            if(expected!=environment || expected.getRuntimeGlobalsTable()!=ArrayMemory.this || storage!=identity
+                    || storage.ownership()!=this || map!=actualMap || _list!=null || size!=actualMap.size())
+                throw new IllegalArgumentException("Native global table layout or Environment changed");
+        }
+        public ArrayMemoryMap.NativeGlobalSlot slot(Object normalizedKey){validate(environment);return slots.slot(normalizedKey);}
+        public NativeGlobalPlacement prepareLink(ArrayMemoryMap.NativeGlobalSlot slot){validate(environment);return new NativeGlobalPlacement(slots.prepareLink(slot),1);}
+        public NativeGlobalPlacement prepareUnlink(ArrayMemoryMap.NativeGlobalSlot slot){validate(environment);return new NativeGlobalPlacement(slots.prepareUnlink(slot),-1);}
+        public NativeGlobalPlacement prepareSyntheticRetirement(ArrayMemoryMap.NativeGlobalSlot slot,Environment.SyntheticGlobalsOrigin origin){
+            validate(environment);return new NativeGlobalPlacement(slots.prepareSyntheticRetirement(slot,origin),-1);
+        }
+        public final class NativeGlobalPlacement implements AutoCloseable {
+            private final ArrayMemoryMap.NativeGlobalPlacement placement;
+            private final int delta,beforeSize=size;
+            private final long beforeLast=lastLongIndex,beforeNext=nextFreeElement;
+            private final Long integerKey;
+            private boolean begun,stored;
+            private NativeGlobalPlacement(ArrayMemoryMap.NativeGlobalPlacement placement,int delta){
+                this.placement=placement;this.delta=delta;Object key=placement.slot().key();
+                integerKey=delta>0 && key instanceof LongMemory ? ((LongMemory)key).toLong() : null;
+            }
+            public ArrayMemoryMap.NativeGlobalSlot slot(){return placement.slot();}
+            public void validate(){
+                NativeGlobals.this.validate(environment);placement.validate();
+                if(stored || size!=beforeSize || lastLongIndex!=beforeLast || nextFreeElement!=beforeNext)
+                    throw new IllegalArgumentException("Native global table mirror changed before publication");
+            }
+            public void beginStore(){validate();placement.beginStore();begun=true;}
+            /** Pure layout/mirror stores; all address and payload checks precede the raw interval. */
+            public void store(){
+                if(!begun || stored)throw new IllegalStateException("Native global placement is not ready");
+                placement.store();size=beforeSize+delta;
+                if(integerKey!=null){lastLongIndex=Math.max(beforeLast,integerKey);recordIntegerKey(integerKey);}
+                foreachIterator=null;stored=true;
+            }
+            @Override public void close(){placement.close();}
+        }
+    }
+
     public final Object getStorageIdentity() { return storage; }
+
+    public final php.runtime.PhpRuntimeOwnership.ArrayOrigin getRuntimeOrigin() {return storage.runtimeOrigin();}
+
+    /** Fresh producer protocol: normalize its actual empty/unpublished layout before stamping storage. */
+    public final php.runtime.PhpRuntimeOwnership.ArrayOrigin prepareRuntimeOrigin(php.runtime.PhpRuntimeOwnership.Authority authority) {
+        if (this instanceof PhpObjectProperties || storage.ownership() != null || storage.runtimeOrigin() != null
+                || original != null || copies != 0)
+            throw new IllegalArgumentException("Runtime ARRAY origin requires a fresh allocation producer");
+        for (ReferenceMemory carrier:this) {
+            if (carrier.getRuntimeHolder() != null || carrier.getOwnershipEntry() != null || carrier.getRuntimeCell() != null)
+                throw new IllegalArgumentException("Fresh ARRAY contains an already published carrier");
+            Memory raw=carrier.getRawValue();
+            authority.value(raw,raw instanceof ReferenceMemory ? php.runtime.PhpRuntimeOwnership.Role.CELL : php.runtime.PhpRuntimeOwnership.Role.VALUE);
+        }
+        if (map == null) convertToMap();
+        final ArrayMemoryMap actualMap=map;final int actualSize=size;
+        var origin=authority.arrayOrigin(this,this,actual->{
+            if (actual != this || map != actualMap || _list != null || size != actualSize || storage.runtimeOrigin() != null)
+                throw new IllegalArgumentException("Fresh ARRAY physical layout changed before origin registration");
+        });
+        storage.ownership(new RuntimeStorage(origin));return origin;
+    }
+
+    /** EVAL is already real before physical child holders are attached. */
+    public final void initializeRuntimeEntries(php.runtime.PhpRuntimeOwnership.ArrayOrigin origin,
+                                               php.runtime.PhpRuntimeOwnership.Holder producer) throws Throwable {
+        if (origin == null || origin != storage.runtimeOrigin() || storage.runtime().initialized || map == null || _list != null
+                || producer == null || producer.domain() != origin.authority().domain() || producer.node() != origin.node()
+                || producer.role() != php.runtime.PhpRuntimeOwnership.Role.VALUE
+                || !(producer.raw() instanceof ArrayMemory) || ((ArrayMemory)producer.raw()).storage != storage)
+            throw new IllegalArgumentException("Runtime ARRAY construction needs its exact fresh EVAL producer");
+        origin.validate(this);
+        producer.requireProducerEvaluation();
+        for (ReferenceMemory carrier:this) {
+            Memory raw=carrier.getRawValue();
+            var role=raw instanceof ReferenceMemory ? php.runtime.PhpRuntimeOwnership.Role.CELL : php.runtime.PhpRuntimeOwnership.Role.VALUE;
+            origin.authority().physical(origin.node(),carrier,origin.authority().value(raw,role));
+        }
+        storage.runtime().initialized=true;
+    }
+
+    /** Exact prepared insertion: the prospective edge is empty until this token links its carrier. */
+    public final class RuntimeInsertion {
+        private final php.runtime.PhpRuntimeOwnership.ArrayOrigin origin=storage.runtimeOrigin();
+        private final ArrayMemoryMap actualMap=map;
+        private final int actualSize=size;
+        private final Object key;
+        private final ArrayMemoryMap.OwnershipInsertion insertion;
+        private final php.runtime.PhpRuntimeOwnership.Holder holder;
+        private boolean linked;
+        private RuntimeInsertion(Object key) throws Throwable {
+            if (origin == null || !storage.runtime().initialized || map == null || _list != null)
+                throw new IllegalStateException("Insertion needs its complete physical ARRAY origin");
+            origin.validate(ArrayMemory.this);this.key=key;
+            insertion=map.prepareRuntimeInsertion(this,key);
+            holder=origin.authority().physical(origin.node(),insertion.carrier(),
+                    origin.authority().value(Memory.NULL,php.runtime.PhpRuntimeOwnership.Role.VALUE));
+        }
+        public php.runtime.PhpRuntimeOwnership.Holder holder() {return holder;}
+        public ReferenceMemory carrier() {return insertion.carrier();}
+        public void validateMapPreparation(ArrayMemoryMap actual) {
+            if (linked || actual != actualMap || map != actualMap || size != actualSize || storage.runtimeOrigin() != origin)
+                throw new IllegalArgumentException("Prepared runtime insertion no longer identifies its physical table");
+        }
+        public void consumeMapInsertion(ArrayMemoryMap actual,ArrayMemoryMap.OwnershipInsertion prepared,
+                                        php.runtime.PhpRuntimeOwnership.Publication publication) {
+            validateMapPreparation(actual);
+            if (prepared != insertion || publication.holder() != holder || insertion.carrier().getRawValue() != publication.next())
+                throw new IllegalArgumentException("Runtime insertion does not identify its exact carrier publication");
+            linked=true;
+        }
+        public void checkHolder(php.runtime.PhpRuntimeOwnership.Holder actual,ReferenceMemory carrier) {
+            validateMapPreparation(actualMap);insertion.validate();
+            if (actual != holder || carrier != insertion.carrier() || carrier.getRuntimeHolder() != holder)
+                throw new IllegalArgumentException("Runtime insertion requires its exact prospective address holder");
+        }
+        private ReferenceMemory publish(Memory value) throws Throwable {
+            return publish(value,null,-1);
+        }
+        private ReferenceMemory publish(Memory value,php.runtime.PhpRuntimeOwnership.Frame frame,int evalId) throws Throwable {
+            try (var publication=frame == null ? holder.prepareArrayInsertion(this,value)
+                    : frame.prepareArrayInsertion(this,value,evalId)) {
+                insertion.validate();validateMapPreparation(actualMap);
+                publication.storeRuntimeInsertion(this);
+                insertion.storeRuntime(this,publication);
+                size=actualSize+1;
+                if (key instanceof LongMemory) {long index=((LongMemory)key).value;if(index>lastLongIndex)lastLongIndex=index;recordIntegerKey(index);}
+                foreachIterator=null;publication.commit();return insertion.carrier();
+            } finally {if (!linked) holder.close();}
+        }
+    }
+
+    /** An existing bucket's VALUE assignment targets its payload, never rebinds its CELL facet. */
+    public final class RuntimeValueAssignment {
+        private final php.runtime.PhpRuntimeOwnership.ArrayOrigin origin=storage.runtimeOrigin();
+        private final ArrayMemoryMap actualMap=map;
+        private final Object key;
+        private final ReferenceMemory bucket;
+        private final Memory bucketBefore;
+        private final php.runtime.PhpRuntimeOwnership.Holder facet;
+        private final php.runtime.PhpRuntimeOwnership.Holder holder;
+        private final ReferenceMemory carrier;
+        private final php.runtime.PhpRuntimeOwnership.CellOrigin cell;
+        private boolean consumed;
+        private RuntimeValueAssignment(Object key,ReferenceMemory bucket) {
+            if (origin == null || !storage.runtime().initialized || map == null || _list != null)
+                throw new IllegalStateException("VALUE assignment needs its complete physical ARRAY origin");
+            origin.validate(ArrayMemory.this);this.key=key;this.bucket=bucket;
+            facet=bucket.getRuntimeHolder();bucketBefore=bucket.getRawValue();
+            if (facet == null || !facet.matches(bucket))throw new IllegalArgumentException("Actual ARRAY bucket has no exact publisher");
+            if (facet.role() == php.runtime.PhpRuntimeOwnership.Role.CELL) {
+                if (!(bucketBefore instanceof ReferenceMemory) || ((ReferenceMemory)bucketBefore).getRuntimeCell() == null)
+                    throw new IllegalArgumentException("Existing certified CELL needs its same-publisher payload protocol");
+                carrier=(ReferenceMemory)bucketBefore;cell=carrier.getRuntimeCell();holder=cell.payload();
+            } else {carrier=bucket;cell=null;holder=facet;}
+        }
+        public php.runtime.PhpRuntimeOwnership.Holder holder() {return holder;}
+        public ReferenceMemory carrier() {return carrier;}
+        /** Pure identity checks also run inside the private raw publication barrier. */
+        public void checkHolder(php.runtime.PhpRuntimeOwnership.Holder actual,ReferenceMemory actualCarrier) {
+            if (consumed || storage.runtimeOrigin() != origin || map != actualMap || actualMap.getEntry(key) != bucket
+                    || bucket.getRawValue() != bucketBefore || bucket.getRuntimeHolder() != facet
+                    || actual != holder || actualCarrier != carrier || cell != null && carrier.getRuntimeCell() != cell)
+                throw new IllegalArgumentException("VALUE permit no longer identifies its exact physical ARRAY bucket/payload");
+        }
+        private Memory publish(Memory value,php.runtime.PhpRuntimeOwnership.Frame frame,int evalId) throws Throwable {
+            try (var publication=frame.prepareArrayValue(this,value,evalId)) {
+                checkHolder(holder,carrier);carrier.publishRuntimeRaw(publication);consumed=true;
+                publication.commit();return publication.next();
+            }
+        }
+    }
+    /** A compiler-witnessed VALUE producer moves into the actual addressed ARRAY entry. */
+    public final Memory assignRuntimeEntry(Memory key,Memory value,php.runtime.PhpRuntimeOwnership.Frame frame,int evalId,
+                                           Environment env,TraceInfo trace) throws Throwable {
+        if (frame == null || frame.authority().currentFrame() != frame || storage.runtimeOrigin() == null
+                || storage.runtimeOrigin().authority().domain() != frame.authority().domain())
+            throw new IllegalArgumentException("ARRAY entry transfer needs its exact current producer frame and storage");
+        if (value instanceof ReferenceMemory)throw new IllegalArgumentException("VALUE entry transfer cannot publish a Java address as CELL");
+        frame.requireArrayValue(evalId,value);
+        storage.runtimeOrigin().validate(this);checkCopied();
+        Object actualKey;
+        if (key == null) {
+            if (!canAppendPhp8())env.exception(trace,BaseError.class,"Cannot add element to the array as the next element is already occupied");
+            actualKey=LongMemory.valueOf(nextFreeElement == Long.MIN_VALUE ? 0 : nextFreeElement);
+        } else actualKey=toKey(key);
+        ReferenceMemory existing=map.getEntry(actualKey);
+        if (existing != null)return new RuntimeValueAssignment(actualKey,existing).publish(value,frame,evalId);
+        ReferenceMemory stored=new RuntimeInsertion(actualKey).publish(value,frame,evalId);
+        return stored.getRawValue();
+    }
+
+    private ReferenceMemory runtimePut(Object key,Memory value) {
+        var origin=storage.runtimeOrigin();origin.validate(this);checkCopied();
+        ReferenceMemory existing=map.getEntry(key);
+        if (existing != null) {
+            if (existing.getRuntimeHolder() == null) throw new IllegalStateException("Actual ARRAY entry has no physical publisher");
+            if (value instanceof ReferenceMemory) existing.assignRef(value);else existing.assign(value);
+            return existing;
+        }
+        try {return new RuntimeInsertion(key).publish(value);}
+        catch(Throwable failure){return runtimeFailure(failure);}
+    }
+    @SuppressWarnings("unchecked") private static <T,E extends Throwable>T runtimeFailure(Throwable failure)throws E{throw (E)failure;}
 
     /** Explicit adapters stamp the actual backing allocation, never an individual Java view. */
     public final php.runtime.PhpOwnershipArrays.StorageCertificate getOwnershipStorage() {
@@ -72,6 +311,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         storage.ownership(certificate);
     }
     public final void attachOwnershipStorage(php.runtime.PhpOwnershipArrays.StorageCertificate certificate) {
+        if (storage.runtimeOrigin() != null) throw new IllegalArgumentException("Runtime storage requires exact publisher adoption, not a second edge set");
         certificate.validateAttachment(this);
         var current=storage.ownership();
         if (current != null && current != certificate)
@@ -80,10 +320,14 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
     public final boolean hasWriteFetchPins() { return storage.authority instanceof WriteFetchLease; }
 
-    protected boolean hasOwnershipMutationAuthority() { return storage.ownership() != null; }
+    protected boolean hasOwnershipMutationAuthority() { return storage.ownership() != null || storage.runtimeOrigin() != null; }
 
     protected void rejectUnmanagedOwnershipMutation() {
+        if (storage.runtimeOrigin() != null)
+            throw new IllegalStateException("ARRAY mutation lacks its complete physical runtime publisher protocol");
         Object authority=storage.ownership();
+        if (authority instanceof NativeGlobals)
+            throw new IllegalStateException("Native global table mutation requires its exact named-slot publisher");
         if (authority instanceof php.runtime.PhpOwnershipArrays.StorageCertificate)
             ((php.runtime.PhpOwnershipArrays.StorageCertificate)authority).checkMutation(this);
         else if (authority instanceof php.runtime.PhpOwnershipObjects.PropertiesCertificate)
@@ -93,9 +337,67 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public static final class WriteFetchLease implements AutoCloseable {
         private final ArrayStorage captured;
         private Object previous;
-        private boolean closed;
-        private WriteFetchLease(ArrayStorage captured) {
-            this.captured=captured;previous=captured.authority;captured.authority=this;
+        private final php.runtime.PhpRuntimeOwnership.Diagnostic diagnostic;
+        private boolean closed,copiedDuringDiagnostic;
+        private WriteFetchLease(ArrayMemory actual) {
+            captured=actual.storage;
+            try {
+                diagnostic=captured.runtimeOrigin() == null ? null
+                        : captured.runtimeOrigin().authority().currentFrame().pinDiagnostic(actual);
+            } catch(Throwable failure){throw ArrayMemory.<RuntimeException,RuntimeException>runtimeFailure(failure);}
+            previous=captured.authority;captured.authority=this;
+        }
+        /** After the diagnostic temporary is discounted, resolve the sole actual storage publisher. */
+        public ArrayMemory continuation(Memory current) {
+            if (closed) throw new IllegalStateException("Diagnostic EVAL was released");
+            if (captured.runtimeOrigin() != null)
+                return captured.runtimeOrigin().writableLayoutAfterDiagnostic(diagnostic.holder());
+            return isAttached(current) ? current.toValue(ArrayMemory.class) : null;
+        }
+        /** A witnessed extra published VALUE is enough to reject a shared write; this is not a full owner census. */
+        public ArrayMemory continuation(Memory current,Environment env) {
+            ArrayMemory writer=continuation(current);
+            if(captured.runtimeOrigin()!=null || !copiedDuringDiagnostic || env==null)return writer;
+            return solePublishedWriter(writer,env);
+        }
+        private ArrayMemory solePublishedWriter(ArrayMemory writer,Environment env) {
+            Deque<Memory> pending=new ArrayDeque<>();Set<Memory> seen=Collections.newSetFromMap(new IdentityHashMap<>());
+            pending.add(env.getRuntimeGlobalsTable());
+            var handler=env.getErrorHandler();if(handler!=null && handler.invokerMemory!=null)pending.add(handler.invokerMemory);
+            var previousHandler=env.getPreviousErrorHandler();if(previousHandler!=null && previousHandler.invokerMemory!=null)pending.add(previousHandler.invokerMemory);
+            Set<Object> objects=Collections.newSetFromMap(new IdentityHashMap<>());
+            while(!pending.isEmpty()) {
+                Memory value=pending.removeFirst();if(!seen.add(value))continue;
+                if(value instanceof ReferenceMemory) {
+                    Memory raw=((ReferenceMemory)value).getRawValue();if(raw!=null)pending.add(raw);
+                }else if(value instanceof ArrayMemory) {
+                    ArrayMemory array=(ArrayMemory)value;
+                    if(array.storage==captured) {
+                        if(writer!=null && array!=writer)return null;
+                        writer=array;
+                    }
+                    // Direct storage traversal changes neither cursors nor user-visible values.
+                    if(array.map!=null) {var entries=array.map.entriesIterator();while(entries.hasNext())pending.add((Memory)entries.next());}
+                    else if(array._list!=null)pending.addAll(array._list);
+                }else if(value instanceof ObjectMemory) {
+                    Object object=((ObjectMemory)value).value;if(!objects.add(object))continue;
+                    if(object instanceof php.runtime.lang.BaseObject) {
+                        ArrayMemory properties=((php.runtime.lang.BaseObject)object).peekProperties();if(properties!=null)pending.add(properties);
+                    }
+                    if(object instanceof php.runtime.lang.Closure)((php.runtime.lang.Closure)object).appendMemoryRoots(pending);
+                }
+            }
+            return writer;
+        }
+        private void recordValueCopy() {
+            WriteFetchLease lease=this;
+            while(true) {lease.copiedDuringDiagnostic=true;if(!(lease.previous instanceof WriteFetchLease))return;lease=(WriteFetchLease)lease.previous;}
+        }
+        /** ASSIGN_DIM continues through the current CV only while the converted allocation survives. */
+        public boolean hasSurvivingValueOwners() {
+            if (closed || diagnostic == null || captured.runtimeOrigin() == null)
+                throw new IllegalStateException("ARRAY owner census requires its actual diagnostic publisher");
+            return captured.runtimeOrigin().hasOwnersAfterDiagnostic(diagnostic.holder());
         }
         public boolean isAttached(Memory current) {
             current = current.toValue();
@@ -111,11 +413,13 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             if (parent == null) captured.authority=previous;
             else parent.previous=previous;
             closed=true;previous=null;
+            if (diagnostic != null) try {diagnostic.close();}
+            catch(Throwable failure){ArrayMemory.<Object,RuntimeException>runtimeFailure(failure);}
         }
     }
 
     public WriteFetchLease pinWriteFetch() {
-        return new WriteFetchLease(storage);
+        return new WriteFetchLease(this);
     }
 
 
@@ -288,7 +592,8 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             return set;
         }
 
-        return map.keySet();
+        Set<Object> keys=map.keySet();
+        return storage.runtimeOrigin() != null ? Collections.unmodifiableSet(keys) : keys;
     }
 
     public ArrayMemory duplicate() {
@@ -323,9 +628,16 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ArrayMemory checkCopied() {
+        if (storage.runtimeOrigin() != null) {
+            storage.runtimeOrigin().validate(this);
+            if (!storage.runtime().initialized || storage.runtimeOrigin().node().incoming() > 1)
+                throw new IllegalStateException("Shared ARRAY write requires its actual writer publication");
+            return null;
+        }
         rejectUnmanagedOwnershipMutation();
         boolean copied = original != null || copies > 0;
         if (copied || hasWriteFetchPins()) {
+            ArrayStorage shared = storage;
             ArrayMemory dup = duplicate();
             storage = dup.storage;
             this.map = dup.map;
@@ -335,9 +647,9 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
             if (copied) {
                 if (this.original == null) {
-                    this.copies--;
+                    this.copies = 0;
                 } else {
-                    this.original.copies--;
+                    if (this.original.storage == shared) this.original.copies--;
                     this.original = null;
                     this.copies = 0;
                 }
@@ -350,6 +662,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public static Object toKey(Memory key) {
         switch (key.type) {
             case STRING: {
+                if (key instanceof PhpByteStringMemory) return ((PhpByteStringMemory) key).toArrayKey();
                 String key1 = key.toString();
                 Memory number = integerKey(key1);
                 if (number == null)
@@ -448,6 +761,9 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory getByScalarOrCreate(Object sKey, Memory initValue) {
+        if (storage.runtimeOrigin() != null) {
+            ReferenceMemory existing=getByScalar(sKey);return existing == null ? runtimePut(sKey,initValue) : existing;
+        }
         rejectUnmanagedOwnershipMutation();
         ReferenceMemory value = getByScalar(sKey);
 
@@ -459,18 +775,19 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory getByScalarOrCreateAsShortcut(Object sKey) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         ReferenceMemory value = getByScalarOrCreate(sKey);
         return value.getReferenceForBinding();
     }
 
     public ReferenceMemory getByScalarOrCreate(Object sKey) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         return getByScalarOrCreate(sKey, UNDEFINED);
     }
 
     public ReferenceMemory getByScalar(Object key) {
         if (_list != null) {
+            if (key instanceof PhpByteStringMemory) return null;
             if (key instanceof Memory) {
                 long numericKey = ((Memory) key).toLong();
                 if (numericKey < 0 || numericKey >= _list.size()) return null;
@@ -518,6 +835,12 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory add(Memory value) {
+        if (storage.runtimeOrigin() != null) {
+            if (value instanceof KeyValueMemory) {
+                KeyValueMemory pair=(KeyValueMemory)value;return runtimePut(pair.getArrayKey(),pair.getValue());
+            }
+            return runtimePut(LongMemory.valueOf(lastLongIndex+1),value);
+        }
         rejectUnmanagedOwnershipMutation();
         if (value instanceof KeyValueMemory) {
             KeyValueMemory keyValue = (KeyValueMemory) value;
@@ -565,6 +888,67 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         size--;foreachIterator=null;
     }
 
+    /** Native parser arrays start mixed before any view is published, keeping physical addresses stable. */
+    public void initializeOwnershipRestorationMixed(php.runtime.PhpOwnershipArrays.RestorationAssembly assembly) {
+        assembly.validateFreshLayout(this);if (map == null) {map=new ArrayMemoryMap();_list=null;}
+    }
+    /** Prepared physical layout, never an independently owning PHP copy. */
+    public final class OwnershipRestorationLayout {
+        private final ArrayMemoryMap beforeMap=map;
+        private final ArrayMemoryList<ReferenceMemory> beforeList=_list;
+        private final int beforeSize=size;
+        private final Object key;
+        private final ReferenceMemory oldCarrier,carrier;
+        private final ArrayMemoryMap replacement;
+        private final ArrayMemoryList<ReferenceMemory> preparedList;
+        private final ArrayMemoryMap.OwnershipInsertion insertion;
+        private final IdentityHashMap<ReferenceMemory,ReferenceMemory> relocations=new IdentityHashMap<>();
+        private OwnershipRestorationLayout(php.runtime.PhpOwnershipArrays.RestorationPublication publication,Object key) {
+            this.key=key;oldCarrier=publication.existingCarrier();
+            long numeric=key instanceof LongMemory ? ((LongMemory)key).value : -1;
+            if (map != null) {
+                replacement=null;preparedList=null;
+                insertion=oldCarrier == null ? map.prepareOwnershipInsertion(publication,key) : null;
+                carrier=insertion == null ? oldCarrier : insertion.carrier();
+            } else if (key instanceof LongMemory && numeric >= 0 && numeric <= size) {
+                replacement=null;insertion=null;
+                preparedList=_list == null ? new ArrayMemoryList<>(size+1) : _list;
+                preparedList.ensureCapacity(size+1);
+                carrier=oldCarrier == null || oldCarrier.isCanonicalReferenceCell() ? new ReferenceMemory(Memory.NULL) : oldCarrier;
+                if (carrier != oldCarrier && oldCarrier != null) relocations.put(oldCarrier,carrier);
+            } else {
+                preparedList=null;insertion=null;replacement=new ArrayMemoryMap();int index=0;
+                if (_list != null) for (ReferenceMemory existing:_list) {
+                    ReferenceMemory fresh=replacement.putWithEntry(LongMemory.valueOf(index++),publication.relocationValue(existing)).getB();
+                    relocations.put(existing,fresh);
+                }
+                carrier=replacement.putWithEntry(key,Memory.NULL).getB();
+            }
+        }
+        public ReferenceMemory carrier() {return carrier;}
+        public IdentityHashMap<ReferenceMemory,ReferenceMemory> relocations() {return relocations;}
+        public void validate() {
+            if (map != beforeMap || _list != beforeList || size != beforeSize)
+                throw new IllegalArgumentException("Prepared actual array layout is stale");
+            if (insertion != null) insertion.validate();
+        }
+        public void store(php.runtime.PhpOwnershipArrays.RestorationPublication publication) {
+            publication.consumeLayout(ArrayMemory.this,this);
+            if (replacement != null) {map=replacement;_list=null;}
+            else if (insertion != null) insertion.store(publication);
+            else if (map == null) {
+                _list=preparedList;
+                int index=(int)((LongMemory)key).value;
+                if (oldCarrier == null) _list.add(carrier);else if (carrier != oldCarrier) _list.set(index,carrier);
+            }
+            if (oldCarrier == null) size++;
+            if (key instanceof LongMemory) {long index=((LongMemory)key).value;if (index > lastLongIndex) lastLongIndex=index;recordIntegerKey(index);}
+            foreachIterator=null;
+        }
+    }
+    public OwnershipRestorationLayout prepareOwnershipRestorationLayout(php.runtime.PhpOwnershipArrays.RestorationPublication publication,Object key) {
+        publication.validateArrayPreparation(this);return new OwnershipRestorationLayout(publication,key);
+    }
     public void unpack(Memory source, Environment env, TraceInfo trace) {
         rejectUnmanagedOwnershipMutation();
         unpack(source, env, trace, env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5);
@@ -591,9 +975,9 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             if (key.getRealType() == Type.INT) {
                 if (php8) addPhp8(entry, env, trace); else add(entry);
             } else if (key.isString()) {
-                Memory numericKey = integerKey(key.toString());
-                if (numericKey == null) {
-                    putAsKeyString(key.toString(), entry);
+                Object normalizedKey = toKey(key);
+                if (!(normalizedKey instanceof LongMemory)) {
+                    put(normalizedKey, entry);
                 } else {
                     if (php8) addPhp8(entry, env, trace); else add(entry);
                 }
@@ -748,6 +1132,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory putAsKeyString(String key, Memory value) {
+        if (storage.runtimeOrigin() != null) return runtimePut(key,value);
         rejectUnmanagedOwnershipMutation();
         if (map == null) {
             convertToMap();
@@ -763,6 +1148,8 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory put(Object key, Memory value) {
+        if (key instanceof PhpByteStringMemory) key = ((PhpByteStringMemory) key).toArrayKey();
+        if (storage.runtimeOrigin() != null) return runtimePut(key instanceof LongMemory || key instanceof String || key instanceof PhpByteStringMemory ? key : key.toString(),value);
         rejectUnmanagedOwnershipMutation();
         if (key instanceof LongMemory) {
             ReferenceMemory mem = new ReferenceMemory(value);
@@ -792,7 +1179,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                     convertToMap();
             }
         } else {
-            if (!(key instanceof String))
+            if (!(key instanceof String) && !(key instanceof PhpByteStringMemory))
                 key = key.toString();
 
             if (map == null) {
@@ -810,6 +1197,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public Memory removeByScalar(Object key) {
+        if (storage.runtimeOrigin() != null) return runtimeRemove(key instanceof Memory ? toKey((Memory)key) : key);
         rejectUnmanagedOwnershipMutation();
         if (map == null) {
             long numericKey = -1;
@@ -865,6 +1253,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public Memory remove(Memory key) {
+        if (storage.runtimeOrigin() != null) return runtimeRemove(toKey(key));
         rejectUnmanagedOwnershipMutation();
         Object _key = toKey(key);
         if (map == null) {
@@ -896,6 +1285,48 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
             return memory;
         }
+    }
+
+    /** Only the exact array publisher may unlink this physical address; the CELL payload stays intact. */
+    public final class RuntimeRemoval {
+        private final ArrayMemoryMap actualMap=map;
+        private final int actualSize=size;
+        private final Object key;
+        private final ReferenceMemory carrier;
+        private final php.runtime.PhpRuntimeOwnership.Holder holder;
+        private boolean unlinked;
+        private RuntimeRemoval(Object key,ReferenceMemory carrier) {
+            this.key=key;this.carrier=carrier;holder=carrier.getRuntimeHolder();
+            if (storage.runtimeOrigin() == null || holder == null || !holder.matches(carrier))
+                throw new IllegalStateException("Actual ARRAY entry has no physical publisher");
+        }
+        public ReferenceMemory mapEntry(ArrayMemoryMap actual) {
+            if (unlinked || actual != actualMap || map != actualMap || size != actualSize
+                    || actualMap.getEntry(key) != carrier || carrier.getRuntimeHolder() != holder)
+                throw new IllegalArgumentException("Runtime unlink no longer identifies its physical address");
+            return carrier;
+        }
+        public void checkHolder(php.runtime.PhpRuntimeOwnership.Holder actual,ReferenceMemory address) {
+            if (mapEntry(actualMap) != address || actual != holder)
+                throw new IllegalArgumentException("Runtime removal requires its exact actual address holder");
+        }
+        public void consumeMap(ArrayMemoryMap actual,ReferenceMemory wanted) {
+            if (mapEntry(actual) != wanted) throw new IllegalArgumentException("Runtime unlink has another bucket");
+            unlinked=true;
+        }
+    }
+    private Memory runtimeRemove(Object key) {
+        storage.runtimeOrigin().validate(this);checkCopied();
+        ReferenceMemory carrier=map.getEntry(key);
+        if (carrier == null) return null;
+        RuntimeRemoval removal=new RuntimeRemoval(key,carrier);Memory raw=carrier.getRawValue();
+        try {
+            try (var publication=removal.holder.prepareArrayRemoval(removal)) {
+                publication.storeRuntimeRemoval(removal);
+                map.publishRuntimeUnlink(removal);size--;foreachIterator=null;publication.commit();
+            }
+            removal.holder.close();return raw;
+        } catch(Throwable failure){return runtimeFailure(failure);}
     }
 
     public int size() {
@@ -937,7 +1368,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         } else {
             for (Map.Entry<Object, Memory> entry : map.entrySet()) {
                 Memory value = entry.getValue();
-                if (entry.getKey() instanceof String) result.put(entry.getKey(), value);
+                if (entry.getKey() instanceof String || entry.getKey() instanceof PhpByteStringMemory) result.put(entry.getKey(), value);
                 else result.add(value);
             }
         }
@@ -1006,6 +1437,17 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         return value.toValue();
     }
 
+    /** Carrier-preserving permutation for unmanaged object property tables. */
+    public void reorderKeys(java.util.List<Object> keys) {
+        rejectUnmanagedOwnershipMutation();
+        if (map == null) {
+            if (keys.size() != size) throw new IllegalArgumentException("Incomplete table permutation");
+            for (int i = 0; i < size; i++) if (!LongMemory.valueOf(i).equals(keys.get(i)))
+                throw new IllegalArgumentException("A list permutation requires keyed storage");
+        } else map.reorderKeys(keys);
+        foreachIterator = null;
+    }
+
     public Memory peekKey() {
         if (size < 1)
             return null;
@@ -1036,8 +1478,8 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             }
 
             Object key = keys.next();
-            if (key instanceof LongMemory)
-                return (LongMemory) key;
+            if (key instanceof Memory)
+                return (Memory) key;
             else
                 return new StringMemory((String) key);
         }
@@ -1148,14 +1590,17 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public Memory toImmutable() {
         if (copies >= 0) {
             ArrayMemory mem = new ArrayMemory(storage);
+            if(storage.authority instanceof WriteFetchLease)((WriteFetchLease)storage.authority).recordValueCopy();
             mem._list = _list;
-            mem.original = this;
+            // All VALUE views of this backing charge its still-attached origin, not a mutable intermediate view.
+            ArrayMemory origin = original != null && original.storage == storage ? original : this;
+            mem.original = origin;
             mem.size = size;
             mem._list = _list;
             mem.map = map;
             mem.lastLongIndex = lastLongIndex;
             mem.nextFreeElement = nextFreeElement;
-            copies++;
+            origin.copies++;
             reset();
             return mem;
         } else {
@@ -1386,7 +1831,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public void unset() {
         rejectUnmanagedOwnershipMutation();
         if (original != null) {
-            original.copies--;
+            if (original.storage == storage) original.copies--;
             original = null;
         } else
             copies--;
@@ -1460,7 +1905,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public Memory refOfPush(TraceInfo trace) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         checkCopied();
         return add(UNDEFINED);
     }
@@ -1475,6 +1920,11 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ReferenceMemory addPhp8(Memory value, Environment env, TraceInfo trace) {
+        if (value instanceof KeyValueMemory) {
+            Memory key = ((KeyValueMemory) value).key.toValue();
+            if (key.isArray() || key.isObject()) env.exception(trace, php.runtime.lang.exception.BaseTypeError.class,
+                    "Cannot access offset of type %s on array", php.runtime.reflection.support.PhpTypeDeclaration.valueType(key));
+        }
         checkCopied();
         if (value instanceof KeyValueMemory) return add(value);
         if (!canAppendPhp8()) env.exception(trace, BaseError.class,
@@ -1484,6 +1934,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public static Memory appendReferencePhp8(Memory root, Environment env, TraceInfo trace) {
+        if(root instanceof ReferenceMemory) ((ReferenceMemory)root).checkPhpReadonlyArrayWrite();
         Memory actual = root.toValue();
         if (actual.isNull() || actual.getRealType() == Memory.Type.BOOL && !actual.toBoolean()) {
             if (!actual.isNull()) env.error(trace, php.runtime.exceptions.support.ErrorType.E_DEPRECATED,
@@ -1520,7 +1971,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, Memory index) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         switch (index.getRealType()) {
             case OBJECT:
             case ARRAY:
@@ -1532,27 +1983,27 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, long index) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         checkCopied();
         return getOrCreate(LongMemory.valueOf(index));
     }
 
     @Override
     public Memory refOfIndex(TraceInfo trace, double index) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         return refOfIndex(null, LongMemory.valueOf((long) index));
     }
 
     @Override
     public Memory refOfIndex(TraceInfo trace, boolean index) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         checkCopied();
         return getOrCreate(index ? CONST_INT_1 : CONST_INT_0);
     }
 
     @Override
     public Memory refOfIndex(TraceInfo trace, String index) {
-        rejectUnmanagedOwnershipMutation();
+        if (storage.runtimeOrigin() == null) rejectUnmanagedOwnershipMutation();
         checkCopied();
         Memory number = integerKey(index);
         return number == null ? getByScalarOrCreate(index) : getByScalarOrCreate(number);

@@ -1,0 +1,1 @@
+{"result":["ok",[["throw","TypeError","H::$x::set(): Argument #1 ($value) must be of type int, string given, called in G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\weak_strict_parameter.php on line 6"],["ok",0]]],"warnings":[]}

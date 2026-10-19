@@ -3,6 +3,9 @@ package org.develnext.jphp.zend.ext.standard;
 import org.develnext.jphp.zend.ext.support.NaturalOrderComparator;
 import php.runtime.Memory;
 import php.runtime.PhpComparison;
+import php.runtime.PhpByteStrings;
+import php.runtime.memory.PhpByteStringMemory;
+import java.nio.charset.StandardCharsets;
 import php.runtime.annotation.Runtime;
 import php.runtime.annotation.Runtime.Reference;
 import php.runtime.common.Callback;
@@ -689,7 +692,11 @@ public class ArrayFunctions extends FunctionsContainer {
             ForeachIterator iterator = input.getNewIterator(env, false, false);
             while (iterator.next()) {
                 Object key = iterator.getKey();
-                if (key instanceof String) {
+                if (NativeScalarArguments.modern(env, trace) && iterator.getMemoryKey().isString()) {
+                    byte[] bytes = iterator.getMemoryKey().getBinaryBytes(StandardCharsets.UTF_8);
+                    foldAscii(bytes, _case != 0);
+                    result.put(new PhpByteStringMemory(bytes), iterator.getValue().toImmutable());
+                } else if (key instanceof String) {
                     String str = (String) key;
                     str = _case == 0 ? str.toLowerCase() : str.toUpperCase();
                     result.put(str, iterator.getValue().toImmutable());
@@ -966,10 +973,54 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     public static Memory array_unique(Environment env, TraceInfo trace, Memory array) {
-        return array_unique(env, trace, array, 0);
+        return array_unique(env, trace, array, NativeScalarArguments.modern(env, trace) ? SORT_STRING : 0);
     }
 
     public static Memory array_unique(Environment env, TraceInfo trace, Memory array, int flag) {
+        if (NativeScalarArguments.modern(env, trace)) {
+            if (!expecting(env, trace, 1, array, ARRAY)) return Memory.NULL;
+            ArrayMemory input = array.toValue(ArrayMemory.class);
+            if (input.size() <= 1) return input.toImmutable();
+            if (flag == SORT_STRING) {
+                Set<PhpByteStringMemory> seen = new HashSet<>();
+                ArrayMemory result = new ArrayMemory();
+                ForeachIterator iterator = array.getNewIterator(env);
+                while (iterator.next()) {
+                    Memory value = iterator.getValue();
+                    if (seen.add(stringKey(value, env, trace, false)))
+                        result.put(iterator.getMemoryKey(), value.isReference() ? value : value.toImmutable());
+                }
+                return result.toConstant();
+            }
+            List<UniqueBucket> original = new ArrayList<>();
+            ForeachIterator iterator = array.getNewIterator(env);
+            while (iterator.next()) {
+                Memory value = iterator.getValue();
+                original.add(new UniqueBucket(iterator.getMemoryKey(),
+                        value.isReference() ? value : value.toImmutable(), original.size()));
+            }
+            boolean[] keep = new boolean[original.size()];
+            Arrays.fill(keep, true);
+            int mode = flag & ~SORT_FLAG_CASE;
+            // The numeric comparator casts to double on every comparison, including warnings.
+            Comparator<Memory> comparator = mode == SORT_NUMERIC ? (left, right) -> {
+                double a = uniqueDouble(left, env, trace), b = uniqueDouble(right, env, trace);
+                return a == b ? 0 : a < b ? -1 : 1;
+            } : makeComparatorForSort(env, trace, flag, false);
+            List<UniqueBucket> sorted = new ArrayList<>(original);
+            php.runtime.common.PhpArraySort.sortUnstable(sorted,
+                    (left, right) -> comparator.compare(left.value, right.value));
+            UniqueBucket last = sorted.get(0);
+            for (int i = 1; i < sorted.size(); i++) {
+                UniqueBucket item = sorted.get(i);
+                if (comparator.compare(last.value, item.value) != 0) last = item;
+                else if (last.ordinal > item.ordinal) { keep[last.ordinal] = false; last = item; }
+                else keep[item.ordinal] = false;
+            }
+            ArrayMemory result = new ArrayMemory();
+            for (UniqueBucket item : original) if (keep[item.ordinal]) result.put(item.key, item.value);
+            return result.toConstant();
+        }
         if (expecting(env, trace, 1, array, ARRAY)) {
             Set<Object> keys = new TreeSet<>();
             ArrayMemory newArray = new ArrayMemory();
@@ -1006,6 +1057,20 @@ public class ArrayFunctions extends FunctionsContainer {
         return Memory.NULL;
     }
 
+    private static final class UniqueBucket {
+        final Memory key, value;
+        final int ordinal;
+        UniqueBucket(Memory key, Memory value, int ordinal) {
+            this.key = key; this.value = value; this.ordinal = ordinal;
+        }
+    }
+
+    private static double uniqueDouble(Memory value, Environment env, TraceInfo trace) {
+        value = value.toValue();
+        return value.isString() ? php.runtime.PhpNumericString.leadingDouble(PhpByteStrings.numericText(value))
+                : php.runtime.PhpNumericConversions.toDouble(value, env, trace);
+    }
+
     public static Memory array_replace(Environment env, TraceInfo trace, Memory array, Memory replacement, Memory... replacements) {
         if (expecting(env, trace, 1, array, ARRAY) && expecting(env, trace, 2, replacement, ARRAY)) {
             ArrayMemory result = array.toValue(ArrayMemory.class).duplicate();
@@ -1030,6 +1095,55 @@ public class ArrayFunctions extends FunctionsContainer {
         }
 
         return Memory.NULL;
+    }
+
+    private static void foldAscii(byte[] bytes, boolean upper) {
+        for (int at = 0; at < bytes.length; at++) {
+            int value = bytes[at] & 255;
+            if (upper ? value >= 'a' && value <= 'z' : value >= 'A' && value <= 'Z')
+                bytes[at] = (byte)(upper ? value - 32 : value + 32);
+        }
+    }
+
+    private static PhpByteStringMemory stringKey(Memory value, Environment env, TraceInfo trace, boolean foldCase) {
+        try {
+            byte[] bytes = PhpByteStrings.stringValue(value, env, trace).getBinaryBytes(StandardCharsets.UTF_8);
+            if (foldCase) foldAscii(bytes, false);
+            return new PhpByteStringMemory(bytes);
+        } catch (Throwable failure) {
+            ArrayFunctions.<RuntimeException>throwSortFailure(failure);
+            return null;
+        }
+    }
+
+    /** PHP value diff converts right arrays first; assoc diff converts only matching exact keys. */
+    private static Memory byteArrayDiff(Environment env, TraceInfo trace, Memory first, Memory second, Memory[] tail, boolean assoc) {
+        if (!expecting(env, trace, 1, first, ARRAY) || !expecting(env, trace, 2, second, ARRAY)) return Memory.NULL;
+        List<ArrayMemory> others = new ArrayList<>(); others.add(second.toValue(ArrayMemory.class));
+        for (int at = 0; tail != null && at < tail.length; at++) {
+            if (!expecting(env, trace, at + 3, tail[at], ARRAY)) return Memory.NULL;
+            others.add(tail[at].toValue(ArrayMemory.class));
+        }
+        ArrayMemory result = new ArrayMemory();
+        if (first.toValue(ArrayMemory.class).size() == 0) return result.toConstant();
+        Set<PhpByteStringMemory> excluded = new HashSet<>();
+        if (!assoc) for (ArrayMemory other : others) {
+            ForeachIterator values = other.getNewIterator(env);
+            while (values.next()) excluded.add(stringKey(values.getValue(), env, trace, false));
+        }
+        ForeachIterator iterator = first.getNewIterator(env);
+        while (iterator.next()) {
+            Memory value = iterator.getValue(); boolean exists = false;
+            if (assoc) for (ArrayMemory other : others) {
+                Memory comparable = other.get(iterator.getMemoryKey());
+                if (comparable != null && stringKey(value, env, trace, false).equals(stringKey(comparable, env, trace, false))) {
+                    exists = true; break;
+                }
+            }
+            else exists = excluded.contains(stringKey(value, env, trace, false));
+            if (!exists) result.put(iterator.getKey(), value.toImmutable());
+        }
+        return result.toConstant();
     }
 
     interface ArrayDiffCallback {
@@ -1080,6 +1194,7 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     public static Memory array_diff(Environment env, TraceInfo trace, Memory array1, Memory array, Memory... arrays) throws Throwable {
+        if (NativeScalarArguments.modern(env, trace)) return byteArrayDiff(env, trace, array1, array, arrays, false);
         return _array_diff_impl(env, trace, array1, array, arrays, new ArrayDiffCallback() {
             @Override
             public boolean apply(Memory keyValue, Memory value, Memory keyComparable, Memory comparable) {
@@ -1098,6 +1213,7 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     public static Memory array_diff_assoc(Environment env, TraceInfo trace, Memory array1, Memory array, Memory... arrays) throws Throwable {
+        if (NativeScalarArguments.modern(env, trace)) return byteArrayDiff(env, trace, array1, array, arrays, true);
         return _array_diff_impl(env, trace, array1, array, arrays, new ArrayDiffCallback() {
             @Override
             public boolean apply(Memory keyValue, Memory value, Memory keyComparable, Memory comparable) {
@@ -1182,12 +1298,153 @@ public class ArrayFunctions extends FunctionsContainer {
         };
     }
 
+    private static boolean modernSort(Environment env, TraceInfo trace) {
+        return env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
+    }
+
+    private static final class UserSortComparator implements Comparator<Memory> {
+        private final Environment env;
+        private final TraceInfo trace;
+        private final String function;
+        private final php.runtime.invoke.PhpCallFrame callback;
+        private boolean warnedBoolean;
+        private Throwable failure;
+
+        private UserSortComparator(Environment env, TraceInfo trace, String function, Memory callable) {
+            this.env = env;
+            this.trace = trace;
+            this.function = function;
+            php.runtime.invoke.PhpCallFrame acquired = null;
+            try {
+                acquired = php.runtime.invoke.PhpCallFrame.acquireInternalCallable(callable, env, trace);
+            } catch (php.runtime.invoke.PhpMethodResolver.InvalidCallback invalid) {
+                env.exception(php.runtime.lang.exception.BaseTypeError.class,
+                        "%s(): Argument #2 ($callback) must be a valid callback, %s", function, invalid.getMessage());
+            }
+            callback = acquired;
+        }
+
+        @Override
+        public int compare(Memory left, Memory right) {
+            if (failure != null) return 0;
+            Memory result;
+            try {
+                result = callback.invokeInternal(new Memory[]{left, right}).toValue();
+            } catch (Throwable thrown) {
+                failure = thrown;
+                return 0;
+            }
+            if (result.type == Memory.Type.BOOL) {
+                if (!warnedBoolean) {
+                    warnedBoolean = true;
+                    try {
+                        env.error(trace, php.runtime.exceptions.support.ErrorType.E_DEPRECATED,
+                                "%s(): Returning bool from comparison function is deprecated, return an integer less than, equal to, or greater than zero",
+                                function);
+                    } catch (Throwable thrown) {
+                        failure = thrown;
+                    }
+                }
+                if (!result.toBoolean()) {
+                    if (failure != null) return 0;
+                    try {
+                        return -Long.compare(callback.invokeInternal(new Memory[]{right, left}).toLong(), 0);
+                    } catch (Throwable thrown) {
+                        failure = thrown;
+                        return 0;
+                    }
+                }
+            }
+            return Long.compare(result.toLong(), 0);
+        }
+    }
+
+    private static final class SortBucket {
+        final Object key;
+        final Memory comparisonKey;
+        final Memory value;
+        SortBucket(Object key, Memory comparisonKey, Memory value) {
+            this.key = key;
+            this.comparisonKey = comparisonKey;
+            this.value = value;
+        }
+    }
+
+    /** PHP sorts a private bucket snapshot, then publishes it even with a pending comparator exception. */
+    private static boolean sortModern(Environment env, TraceInfo trace, Memory array,
+                                      Comparator<Memory> comparator, boolean byKey, boolean renumber) {
+        if (!expecting(env, trace, 1, array, ARRAY)) return false;
+        ArrayMemory original = array.toValue(ArrayMemory.class);
+        if (original.size() == 0) return true;
+        boolean userComparator = comparator instanceof UserSortComparator;
+        if (!userComparator) original.checkCopied();
+        List<SortBucket> buckets = new ArrayList<>(original.size());
+        ForeachIterator iterator = original.getNewIterator(env, false, false);
+        while (iterator.next()) {
+            Memory value = iterator.getValue();
+            Memory key = renumber ? null : iterator.getMemoryKey();
+            buckets.add(new SortBucket(renumber ? null : ArrayMemory.toKey(key), byKey ? key : null,
+                    value.isReference() ? value : value.toImmutable()));
+        }
+        final Throwable[] failure = {null};
+        php.runtime.common.PhpArraySort.sort(buckets, (left, right) -> {
+            if (failure[0] != null) return 0;
+            try {
+                return comparator.compare(byKey ? left.comparisonKey : left.value.toValue(),
+                        byKey ? right.comparisonKey : right.value.toValue());
+            } catch (Throwable thrown) {
+                failure[0] = thrown;
+                return 0;
+            }
+        });
+        if (userComparator) {
+            boolean listed = true;
+            if (!renumber) for (int i = 0; i < buckets.size(); i++) {
+                Object key = buckets.get(i).key;
+                if (!(key instanceof LongMemory) || ((LongMemory) key).value != i) {
+                    listed = false;
+                    break;
+                }
+            }
+            ArrayMemory sorted = listed ? ArrayMemory.createListed(buckets.size()) : ArrayMemory.createHashed(buckets.size());
+            for (SortBucket bucket : buckets) {
+                if (renumber) sorted.add(bucket.value);
+                else sorted.put(bucket.key, bucket.value);
+            }
+            array.assign(sorted);
+        } else {
+            // Built-in sorts operate on the captured storage; callback rebinding must survive.
+            original.clear();
+            for (SortBucket bucket : buckets) {
+                if (renumber) original.add(bucket.value);
+                else original.put(bucket.key, bucket.value);
+            }
+        }
+        Throwable pending = failure[0];
+        if (comparator instanceof UserSortComparator && ((UserSortComparator) comparator).failure != null)
+            pending = ((UserSortComparator) comparator).failure;
+        if (pending != null) ArrayFunctions.<RuntimeException>throwSortFailure(pending);
+        return true;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static <E extends Throwable> void throwSortFailure(Throwable failure) throws E {
+        throw (E) failure;
+    }
+
     protected static Comparator makeComparatorForSort(int flags, final boolean revert) {
         return makeComparatorForSort(null, null, flags, revert);
     }
 
     protected static Comparator makeComparatorForSort(final Environment env, final TraceInfo trace, int flags, final boolean revert) {
         final boolean php8 = env != null && env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
+        if (php8 && (flags == SORT_STRING || flags == (SORT_STRING | SORT_FLAG_CASE))) {
+            return (Comparator<Memory>) (left, right) -> {
+                PhpByteStringMemory a = stringKey(left, env, trace, (flags & SORT_FLAG_CASE) != 0);
+                PhpByteStringMemory b = stringKey(right, env, trace, (flags & SORT_FLAG_CASE) != 0);
+                return PhpByteStringMemory.compareBytes(a, b) * (revert ? -1 : 1);
+            };
+        }
         switch (flags) {
             case ArrayConstants.SORT_NUMERIC:
                 return new Comparator<Memory>() {
@@ -1249,6 +1506,7 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _sort_impl(Environment env, TraceInfo trace, @Reference Memory array, Comparator comparator) {
+        if (modernSort(env, trace)) return sortModern(env, trace, array, comparator, false, true);
         if (expecting(env, trace, 1, array, ARRAY)) {
             ArrayMemory arrayMemory = array.toValue(ArrayMemory.class);
 
@@ -1278,10 +1536,34 @@ public class ArrayFunctions extends FunctionsContainer {
         }
     }
 
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY, reference = true),
+            @php.runtime.annotation.Reflection.Arg(value = "flags", type = php.runtime.common.HintType.INT,
+                    optional = @php.runtime.annotation.Reflection.Optional(value = "0", type = php.runtime.common.HintType.INT, constantName = "SORT_REGULAR"))},
+            returnType = "true")
     public static boolean sort(Environment env, TraceInfo trace, @Reference Memory array) {
-        return sort(env, trace, array, 0);
+        return sort(env, trace, array, LongMemory.valueOf(SORT_REGULAR));
     }
 
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY, reference = true),
+            @php.runtime.annotation.Reflection.Arg(value = "flags", type = php.runtime.common.HintType.INT,
+                    optional = @php.runtime.annotation.Reflection.Optional(value = "0", type = php.runtime.common.HintType.INT, constantName = "SORT_REGULAR"))},
+            returnType = "true")
+    public static boolean sort(Environment env, TraceInfo trace, @Reference Memory array, Memory flags) {
+        if (!NativeScalarArguments.modern(env, trace)) return sort(env, trace, array, flags.toInteger());
+        Memory value = array.toValue();
+        if (!value.isArray()) Php85Functions.invalid(env, trace, "sort", 1, "array", "array", value);
+        long supplied = NativeScalarArguments.integer(env, trace, "sort", 2, "flags", flags);
+        long base = supplied & ~(long) SORT_FLAG_CASE;
+        // Preserve PHP's full-width flag comparison. Unknown modes use regular comparison.
+        int effective = base == SORT_STRING || base == SORT_NATURAL
+                ? (int) base | (int) (supplied & SORT_FLAG_CASE)
+                : base == SORT_NUMERIC || base == SORT_LOCALE_STRING ? (int) base : SORT_REGULAR;
+        return _sort_impl(env, trace, array, effective, false);
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
     public static boolean sort(Environment env, TraceInfo trace, @Reference Memory array, int flags) {
         return _sort_impl(env, trace, array, flags, false);
     }
@@ -1299,6 +1581,7 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _asort_impl(Environment env, TraceInfo trace, @Reference Memory array, Comparator comparator) {
+        if (modernSort(env, trace)) return sortModern(env, trace, array, comparator, false, false);
         if (expecting(env, trace, 1, array, ARRAY)) {
             ArrayMemory arrayMemory = array.toValue(ArrayMemory.class);
 
@@ -1359,6 +1642,7 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _ksort_impl(Environment env, TraceInfo trace, @Reference Memory array, Comparator comparator) {
+        if (modernSort(env, trace)) return sortModern(env, trace, array, comparator, true, false);
         if (expecting(env, trace, 1, array, ARRAY)) {
             ArrayMemory arrayMemory = array.toValue(ArrayMemory.class);
 
@@ -1409,6 +1693,8 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _usort_impl(Environment env, TraceInfo trace, @Reference Memory array, Memory callback) {
+        if (modernSort(env, trace)) return sortModern(env, trace, array,
+                new UserSortComparator(env, trace, "usort", callback), false, true);
         Invoker invoker = expectingCallback(env, trace, 2, callback);
 
         if (invoker != null) {
@@ -1423,6 +1709,8 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _uasort_impl(Environment env, TraceInfo trace, @Reference Memory array, Memory callback) {
+        if (modernSort(env, trace)) return sortModern(env, trace, array,
+                new UserSortComparator(env, trace, "uasort", callback), false, false);
         Invoker invoker = expectingCallback(env, trace, 2, callback);
 
         if (invoker != null) {
@@ -1437,6 +1725,8 @@ public class ArrayFunctions extends FunctionsContainer {
     }
 
     protected static boolean _uksort_impl(Environment env, TraceInfo trace, @Reference Memory array, Memory callback) {
+        if (modernSort(env, trace)) return sortModern(env, trace, array,
+                new UserSortComparator(env, trace, "uksort", callback), true, false);
         Invoker invoker = expectingCallback(env, trace, 2, callback);
 
         if (invoker != null) {

@@ -1,0 +1,2 @@
+<?php function ro_result($f){try{return ["ok",$f()];}catch(Throwable $e){return [get_class($e),$e->getMessage()];}}
+final readonly class R{function __construct(public int $x=3){}}readonly abstract class P{public int $x;}readonly class C extends P{function __construct(){$this->x=4;}}$r=new R;$c=new C;echo serialize([(new ReflectionClass(R::class))->getModifiers(),(new ReflectionClass(P::class))->getModifiers(),$r->x,$c->x]);

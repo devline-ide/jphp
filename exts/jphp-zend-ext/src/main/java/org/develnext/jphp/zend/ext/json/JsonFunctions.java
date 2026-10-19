@@ -61,6 +61,7 @@ public class JsonFunctions extends FunctionsContainer {
             case JsonConstants.JSON_ERROR_STATE_MISMATCH: return new StringMemory("Underflow or the modes mismatch");
             case JsonConstants.JSON_ERROR_SYNTAX: return new StringMemory("Syntax error, malformed JSON");
             case JsonConstants.JSON_ERROR_UTF8: return new StringMemory("Malformed UTF-8 characters, possibly incorrectly encoded");
+            case JsonConstants.JSON_ERROR_NON_BACKED_ENUM: return new StringMemory("Non-backed enums have no default serialization");
             case JsonConstants.JSON_ERROR_CTRL_CHAR: return new StringMemory("Unexpected control character found");
             default:
                 return Memory.NULL;

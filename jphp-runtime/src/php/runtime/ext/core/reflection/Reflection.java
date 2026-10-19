@@ -43,7 +43,10 @@ abstract public class Reflection extends BaseObject {
 
     @Signature
     final public Memory __clone(Environment env, Memory... args){
-        env.error(ErrorType.E_ERROR, "Trying to clone an uncloneable object of class %s", getReflection().getName());
+        if(env.getScope().isPhp85Builtin(getReflection())
+                || env.getModuleManager().getPhpLanguageProfile(env.trace())==php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            env.exception(php.runtime.lang.exception.BaseError.class,"Trying to clone an uncloneable object of class %s",getReflection().getName());
+        else env.error(ErrorType.E_ERROR, "Trying to clone an uncloneable object of class %s", getReflection().getName());
         return null;
     }
 

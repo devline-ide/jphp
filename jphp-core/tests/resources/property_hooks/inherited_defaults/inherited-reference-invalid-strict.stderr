@@ -1,0 +1,3 @@
+Fatal error: Get hook of backed property ChildDefault::x with set hook may not return by reference in G:\DevLine-QA\jphp-property-hooks-20261013\inherited-default-r1-native\inherited-reference-invalid-strict\fixture.php on line 3
+Stack trace:
+#0 {main}

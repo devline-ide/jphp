@@ -1,0 +1,3 @@
+Fatal error: Attribute "NoDiscard" cannot target class (allowed targets: function, method) in G:\DevLine-QA\jphp-attributes-implementation-20261013\revision16-nodiscard\native\negative-target.php on line 2
+Stack trace:
+#0 {main}

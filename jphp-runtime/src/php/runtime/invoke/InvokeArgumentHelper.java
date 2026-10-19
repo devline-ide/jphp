@@ -97,7 +97,8 @@ public class InvokeArgumentHelper {
                 int required = requiredCount(parameters);
                 int fixedCount = parameters.length - (parameters[parameters.length - 1].isVariadic() ? 1 : 0);
                 boolean minimum = required < fixedCount;
-                String location = internalCall || trace == null ? ""
+                String location = trace == null || trace.isUnknown() || trace.getFile() == null
+                        || internalMethodParameter(env, originClassName, originMethodName, param) ? ""
                         : " in " + trace.getFileName() + " on line " + (trace.getStartLine() + 1);
                 env.exception(trace, php.runtime.lang.exception.BaseArgumentCountError.class,
                         "Too few arguments to function %s(), %d passed%s and %s %d expected",
@@ -141,7 +142,7 @@ public class InvokeArgumentHelper {
             }
 
             return env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
-                    ? ReferenceMemory.exportReference(arg) : arg;
+                    ? php.runtime.PhpPrimitiveCellRuntime.exportArgument(arg,param,index) : arg;
         } else {
             return param.isMutable() ? arg.toImmutable() : arg.toValue();
         }
@@ -219,6 +220,91 @@ public class InvokeArgumentHelper {
         return arg;
     }
 
+    /** Native SPL members retain caller strictness and internal diagnostic formatting. */
+    public static Memory[] makeArguments(Environment env, Memory[] args, MethodEntity method,
+                                         ParameterEntity[] parameters, String originClassName, String originMethodName,
+                                         String staticClassName, TraceInfo trace, boolean internalCall) {
+        if(php.runtime.PhpEnums.generatedMethod(method)) {
+            var bound=BoundArguments.current(env,args,method);
+            if(bound!=null && bound.signature().completeNames())bound.requirePreparation(parameters);
+            args=unpackArgs(env,trace,args,parameters);
+            Memory[] passed=php.runtime.PhpEnums.prepareArguments(env,trace,method,args,internalCall);
+            if(bound!=null && bound.signature().completeNames()) {
+                for(int i=0;i<passed.length;i++)bound.updateCallArgument(i,passed[i]);
+                bound.prepared(passed);
+            }
+            return passed;
+        }
+        java.lang.reflect.Method member = method.getNativeMethod();
+        if (member == null || member.getDeclaringClass() != php.runtime.lang.spl.iterator.ArrayIterator.class
+                || env.getModuleManager().getPhpLanguageProfile(trace) != php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return makeArgumentsForTarget(env, args, method, parameters, originClassName, originMethodName, staticClassName, trace, internalCall);
+        var bound = BoundArguments.current(env, args, method);
+        if (bound != null && bound.signature().completeNames()) bound.requirePreparation(parameters);
+        args = unpackArgs(env, trace, args, parameters);
+        int supplied = args == null ? 0 : args.length;
+        int minimum = requiredCount(parameters), maximum = parameters.length;
+        if (supplied < minimum || supplied > maximum) {
+            int count = supplied < minimum ? minimum : maximum;
+            String range = minimum == maximum ? "exactly " + count
+                    : supplied < minimum ? "at least " + count : "at most " + count;
+            env.exception(trace, php.runtime.lang.exception.BaseArgumentCountError.class,
+                    "ArrayIterator::%s() expects %s argument%s, %d given", member.getName(), range,
+                    count == 1 ? "" : "s", supplied);
+        }
+        Memory[] passed = argsToPassed(env, trace, args, parameters);
+        ModuleEntity module = env.getModuleManager().findModule(trace);
+        boolean strict = !internalCall && module != null && module.isStrictTypes();
+        for (int i = 0; i < parameters.length; i++) {
+            ParameterEntity parameter = parameters[i];
+            Memory value = passed[i] == null
+                    ? makeDefaultArg(env, trace, parameter, i, originClassName, originMethodName)
+                    : makeNormalArg(env, trace, parameter, passed[i], i, originClassName, originMethodName);
+            HintType type = parameter.getType();
+            // Callable acquisition belongs to the sort body, once, in the native call scope.
+            if (type != HintType.ANY && type != HintType.CALLABLE
+                    && !parameter.checkTypeHinting(env, value, staticClassName)) {
+                Memory converted = null;
+                if (!strict && value.isNull() && (type == HintType.INT || type == HintType.STRING)) {
+                    env.error(trace == null ? TraceInfo.UNKNOWN : trace, ErrorType.E_DEPRECATED,
+                            "ArrayIterator::%s(): Passing null to parameter #%d ($%s) of type %s is deprecated",
+                            member.getName(), i + 1, parameter.getName(), parameter.getTypeChecker().getSignature());
+                    converted = type == HintType.INT ? php.runtime.memory.LongMemory.valueOf(0) : Memory.CONST_EMPTY_STRING;
+                } else if (parameter.getTypeChecker() != null) {
+                    converted = parameter.getTypeChecker().apply(env, value, parameter.isNullableOrDefaultNull(), strict);
+                }
+                if (converted == null) invalidType(env, trace, parameter, i + 1, value,
+                        "ArrayIterator", member.getName(), true);
+                else {
+                    converted = php.runtime.PhpNumericConversions.checkedScalarCoercion(value, converted, env, trace);
+                    if (converted.getRealType() == Memory.Type.INT) {
+                        Memory number = value.isString() ? php.runtime.PhpNumericString.parseStrict(value.toString()) : value;
+                        if (number != null) php.runtime.PhpNumericConversions.warnIntegerPrecisionLoss(value, number, env, trace);
+                    }
+                    value = converted;
+                }
+            }
+            passed[i] = value;
+            if (bound != null && bound.signature().completeNames()) bound.updateCallArgument(i, value);
+        }
+        if (bound != null && bound.signature().completeNames()) bound.prepared(passed);
+        return passed;
+    }
+
+    /** Only the actual resolved entity may consume the current bound vector. */
+    public static Memory[] makeArgumentsForTarget(Environment env, Memory[] args, Object target,
+                                                   ParameterEntity[] parameters, String originClassName,
+                                                   String originMethodName, String staticClassName,
+                                                   TraceInfo trace, boolean internalCall) {
+        var bound = BoundArguments.current(env, args, target);
+        if (bound != null && bound.signature().completeNames()) {
+            bound.requirePreparation(parameters);
+            return makeBoundArguments(env, trace, bound, parameters, originClassName, originMethodName,
+                    staticClassName, internalCall);
+        }
+        return makeArguments(env, args, parameters, originClassName, originMethodName, staticClassName, trace, internalCall);
+    }
+
     public static Memory[] makeArguments(Environment env, Memory[] args,
                                          ParameterEntity[] parameters,
                                          String originClassName, String originMethodName, String staticClassName,
@@ -232,7 +318,6 @@ public class InvokeArgumentHelper {
         if (parameters == null) {
             return args;
         }
-
         args = unpackArgs(env, trace, args, parameters);
         int suppliedCount = args == null ? 0 : args.length;
         Memory[] passed = argsToPassed(env, trace, args, parameters);
@@ -303,6 +388,74 @@ public class InvokeArgumentHelper {
     }
 
 
+    private static Memory[] makeBoundArguments(Environment env, TraceInfo trace, BoundArguments bound,
+                                              ParameterEntity[] parameters, String originClassName,
+                                              String originMethodName, String staticClassName, boolean internalCall) {
+        Memory[] args = bound.arguments();
+        int fixed = bound.signature().fixedCount();
+        boolean variadic = bound.signature().variadic() != null;
+        Memory[] passed = new Memory[variadic ? parameters.length : Math.max(parameters.length, args.length)];
+        for (int i = 0; i < fixed; i++) {
+            Memory arg = i < args.length ? args[i] : null;
+            passed[i] = makeArg(env, trace, parameters[i], arg, i, originClassName, originMethodName,
+                    staticClassName, internalCall, args.length, parameters);
+            bound.updateCallArgument(i, passed[i]);
+        }
+        if (variadic) {
+            ParameterEntity parameter = parameters[fixed];
+            ArrayMemory tail = new ArrayMemory();
+            int ordinal = fixed;
+            for (int i = fixed; i < args.length; i++) {
+                Memory value = makeNormalArg(env, trace, parameter, args[i], ordinal, originClassName, originMethodName);
+                value = typeHintArg(env, trace, parameter, value, ordinal++, originClassName, originMethodName,
+                        staticClassName, internalCall);
+                tail.add(makeValue(parameter, value, env, trace));
+                bound.updateCallArgument(i, value);
+            }
+            for (var entry : bound.namedExtras().entrySet()) {
+                Memory value = makeNormalArg(env, trace, parameter, entry.getValue(), ordinal, originClassName, originMethodName);
+                value = typeHintArg(env, trace, parameter, value, ordinal++, originClassName, originMethodName,
+                        staticClassName, internalCall);
+                value = makeValue(parameter, value, env, trace);
+                // Named variadic keys are already PHP names; retain the exact string, including numeric-looking names.
+                // put creates a real bucket facet; a canonical reference remains its shared payload.
+                tail.put(entry.getKey(), value);
+            }
+            passed[fixed] = tail;
+        } else {
+            for (int i = fixed; i < args.length; i++) {
+                passed[i] = args[i].toImmutable();
+                bound.updateCallArgument(i, passed[i]);
+            }
+        }
+        bound.prepared(passed);
+        return passed;
+    }
+
+    /** Native bodies retain their own coercion/deprecation order; only omitted fixed holes are filled. */
+    public static Memory[] makeBoundNativeArguments(Environment env, TraceInfo trace, BoundArguments bound) {
+        bound.requirePreparation(bound.signature().parameters());
+        if (bound.signature().variadic() != null) {
+            if (!(bound.signature().target() instanceof php.runtime.reflection.CompileFunctionEntity function)
+                    || !bound.signature().completeNames() || function.getPhpSignature() == null
+                    || !function.getPhpSignature().namedVariadic() || bound.signature().variadic().isReference())
+                throw new IllegalArgumentException("Native named variadic transport lacks complete PHP metadata");
+        } else if (!bound.namedExtras().isEmpty())
+            throw new IllegalArgumentException("Native named extras have no declared variadic parameter");
+        Memory[] args = bound.arguments();
+        ParameterEntity[] parameters = bound.signature().parameters();
+        for (int i = 0; i < Math.min(args.length, bound.signature().fixedCount()); i++) {
+            if (args[i] != null) continue;
+            Memory value = parameters[i].evaluateDefault(env);
+            if (value != null) value = value.toImmutable(env, trace);
+            if (value == null || value.isUndefined())
+                throw new IllegalArgumentException("Native omitted parameter lacks an executable PHP default: $" + parameters[i].getName());
+            args[i] = parameters[i].isReference() ? new ReferenceMemory(value) : value;
+        }
+        bound.prepared(args);
+        return args;
+    }
+
     private static void makeImmutable(Memory[] passed, ParameterEntity[] parameters) {
         for (int j = parameters.length ; j < passed.length; j++) {
             passed[j] = passed[j].toImmutable();
@@ -343,6 +496,13 @@ public class InvokeArgumentHelper {
                     boolean isRef;
 
                     while (foreachIterator.next()) {
+                        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                            Memory key = foreachIterator.getMemoryKey();
+                            if (key.isString()) env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                                    "Named argument unpacking requires a resolved call binding");
+                            if (key.getRealType() != Memory.Type.INT) env.exception(trace, php.runtime.lang.exception.BaseError.class,
+                                    "Keys must be of type int|string during argument unpacking");
+                        }
                         if (parameters != null) {
                             if (parameterEntity == null || !parameterEntity.isVariadic()) {
                                 parameterEntity = paramCnt < parameters.length ? parameters[paramCnt] : null;
@@ -411,6 +571,16 @@ public class InvokeArgumentHelper {
         invalidType(env, trace, param, index, passed, originClassName, originMethodName, false);
     }
 
+    private static boolean internalMethodParameter(Environment env, String className, String methodName, ParameterEntity parameter) {
+        if (className == null || methodName == null) return false;
+        var owner = env.fetchClass(className, false, php.runtime.common.PhpLanguageProfile.PHP_8_5);
+        if (owner == null || owner.getModule() != null || owner.getNativeClass() == null) return false;
+        var method = owner.findMethod(methodName);
+        if (method == null || method.getClazz() != owner || method.getParameters() == null) return false;
+        for (var declared : method.getParameters()) if (declared == parameter) return true;
+        return false;
+    }
+
     private static void invalidType(Environment env, TraceInfo trace, ParameterEntity param, int index, Memory passed,
                                     String originClassName, String originMethodName, boolean internalCall) {
         if (passed != null && param.getTypeChecker() != null && param.getTypeEnum() == null
@@ -425,7 +595,7 @@ public class InvokeArgumentHelper {
                     : passed.isResource() ? "resource" : passed.isNull() ? "null"
                     : passed.getRealType() == Memory.Type.INT ? "int"
                     : passed.getRealType() == Memory.Type.BOOL ? (passed.toBoolean() ? "true" : "false") : passed.getRealType().toString();
-            String location = internalCall || trace == null ? ""
+            String location = internalCall || trace == null || internalMethodParameter(env, originClassName, originMethodName, param) ? ""
                     : ", called in " + trace.getFileName() + " on line " + (trace.getStartLine() + 1);
             env.exception(trace, BaseTypeError.class, "%s(): Argument #%d%s must be of type %s, %s given%s",
                     callName(originClassName, originMethodName), index,

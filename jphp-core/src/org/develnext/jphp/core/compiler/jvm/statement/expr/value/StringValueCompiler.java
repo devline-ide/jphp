@@ -6,6 +6,7 @@ import org.develnext.jphp.core.tokenizer.token.expr.value.StringExprToken;
 import php.runtime.Memory;
 import php.runtime.memory.BinaryMemory;
 import php.runtime.memory.StringMemory;
+import php.runtime.memory.PhpByteStringMemory;
 
 public class StringValueCompiler extends BaseExprCompiler<StringExprToken> {
     public StringValueCompiler(ExpressionStmtCompiler exprCompiler) {
@@ -14,7 +15,9 @@ public class StringValueCompiler extends BaseExprCompiler<StringExprToken> {
 
     @Override
     public void write(StringExprToken token, boolean returnValue) {
-        if (token.isBinary()) {
+        if (token.hasRawBytes()) {
+            expr.writePushMemory(new PhpByteStringMemory(token.getPhp85Bytes()));
+        } else if (token.isBinary()) {
             expr.writePushConstString(token.getValue());
             expr.writeSysStaticCall(BinaryMemory.class, "valueOf", Memory.class, String.class);
         } else

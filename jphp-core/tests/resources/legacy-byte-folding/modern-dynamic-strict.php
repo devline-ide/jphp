@@ -1,0 +1,1 @@
+<?php declare(strict_types=1);$f='chr';$g='ord';try{$f('65');}catch(TypeError $e){echo get_class($e).':'.$e->getMessage().'|';}try{$g(65);}catch(TypeError $e){echo get_class($e).':'.$e->getMessage().'|';}echo bin2hex(call_user_func('chr',255)),'|',call_user_func('ord',hex2bin('ff'));

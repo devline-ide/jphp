@@ -10,3 +10,8 @@ dependencies {
     testImplementation 'junit:junit:4.+'
     testImplementation project.project(':jphp-core').sourceSets.test.output
 }
+
+test {
+    // QA-only census of owned JVM shutdown hooks; production launchers need no opens.
+    jvmArgs '--add-opens=java.base/java.lang=ALL-UNNAMED'
+}

@@ -10,6 +10,7 @@ import php.runtime.common.StringUtils;
 import php.runtime.env.Environment;
 import php.runtime.env.TraceInfo;
 import php.runtime.exceptions.TodoException;
+import php.runtime.exceptions.support.ErrorType;
 import php.runtime.ext.core.MathFunctions;
 import php.runtime.ext.support.compile.FunctionsContainer;
 import php.runtime.lang.ForeachIterator;
@@ -39,6 +40,132 @@ import java.util.zip.GZIPOutputStream;
  * - chunk_split
  */
 public class StringFunctions extends FunctionsContainer {
+    private static boolean nativeAscii(Memory value) {
+        value = value.toValue();
+        if (value.getClass() != StringMemory.class) return false;
+        String text = value.toString();
+        for (int i = 0; i < text.length(); i++) if (text.charAt(i) > 127) return false;
+        return true;
+    }
+
+    private static int nativeByteIndex(byte[] haystack, byte[] needle, int start) {
+        if (needle.length == 0) return start;
+        int end = haystack.length - needle.length;
+        for (int at = start; at <= end; at++) {
+            if (haystack[at] != needle[0]) continue;
+            int i = 1;
+            while (i < needle.length && haystack[at + i] == needle[i]) i++;
+            if (i == needle.length) return at;
+        }
+        return -1;
+    }
+
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "haystack", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "needle", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "offset", type = php.runtime.common.HintType.INT, optional = @php.runtime.annotation.Reflection.Optional(value = "0", type = php.runtime.common.HintType.INT))},
+            returnType = "int|false")
+    public static Memory strpos(Environment env, TraceInfo trace, Memory haystack, Memory needle) throws Throwable {
+        return strpos(env, trace, haystack, needle, Memory.CONST_INT_0);
+    }
+
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "haystack", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "needle", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "offset", type = php.runtime.common.HintType.INT, optional = @php.runtime.annotation.Reflection.Optional(value = "0", type = php.runtime.common.HintType.INT))},
+            returnType = "int|false")
+    public static Memory strpos(Environment env, TraceInfo trace, Memory haystack, Memory needle, Memory offset) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return strpos(env, trace, haystack.toString(), needle, offset.toInteger());
+        boolean ascii = nativeAscii(haystack) && nativeAscii(needle);
+        byte[] h = ascii ? null : NativeScalarArguments.string(env, trace, "strpos", 1, "haystack", haystack);
+        byte[] n = ascii ? null : NativeScalarArguments.string(env, trace, "strpos", 2, "needle", needle);
+        long start = NativeScalarArguments.integer(env, trace, "strpos", 3, "offset", offset);
+        int length = ascii ? haystack.toString().length() : h.length;
+        if (start < -((long) length) || start > length) {
+            env.exception(trace, php.runtime.lang.exception.BaseValueError.class,
+                    "strpos(): Argument #3 ($offset) must be contained in argument #1 ($haystack)");
+            return Memory.FALSE;
+        }
+        if (start < 0) start += length;
+        int position = ascii ? haystack.toString().indexOf(needle.toString(), (int) start)
+                : nativeByteIndex(h, n, (int) start);
+        return position < 0 ? Memory.FALSE : LongMemory.valueOf(position);
+    }
+
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "limit", type = php.runtime.common.HintType.INT, optional = @php.runtime.annotation.Reflection.Optional(value = "9223372036854775807", type = php.runtime.common.HintType.INT, constantName = "PHP_INT_MAX"))},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.ARRAY))
+    public static Memory explode(Environment env, TraceInfo trace, Memory separator, Memory string) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return explode(separator.toString(), string.toString());
+        return explode(env, trace, separator, string, LongMemory.valueOf(Long.MAX_VALUE));
+    }
+
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "limit", type = php.runtime.common.HintType.INT, optional = @php.runtime.annotation.Reflection.Optional(value = "9223372036854775807", type = php.runtime.common.HintType.INT, constantName = "PHP_INT_MAX"))},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.ARRAY))
+    public static Memory explode(Environment env, TraceInfo trace, Memory separator, Memory string, Memory limit) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return explode(separator.toString(), string.toString(), limit.toInteger());
+        boolean ascii = nativeAscii(separator) && nativeAscii(string);
+        byte[] delimiter = ascii ? null : NativeScalarArguments.string(env, trace, "explode", 1, "separator", separator);
+        byte[] value = ascii ? null : NativeScalarArguments.string(env, trace, "explode", 2, "string", string);
+        long maximum = NativeScalarArguments.integer(env, trace, "explode", 3, "limit", limit);
+        int delimiterLength = ascii ? separator.toString().length() : delimiter.length;
+        int length = ascii ? string.toString().length() : value.length;
+        if (delimiterLength == 0) {
+            env.exception(trace, php.runtime.lang.exception.BaseValueError.class,
+                    "explode(): Argument #1 ($separator) must not be empty");
+            return Memory.NULL;
+        }
+        if (maximum == 0) maximum = 1;
+        List<Memory> pieces = new ArrayList<>();
+        int from = 0;
+        while (maximum < 0 || pieces.size() < maximum - 1) {
+            int at = ascii ? string.toString().indexOf(separator.toString(), from) : nativeByteIndex(value, delimiter, from);
+            if (at < 0) break;
+            pieces.add(ascii ? StringMemory.valueOf(string.toString().substring(from, at))
+                    : new PhpByteStringMemory(Arrays.copyOfRange(value, from, at)));
+            from = at + delimiterLength;
+        }
+        pieces.add(ascii ? StringMemory.valueOf(string.toString().substring(from))
+                : new PhpByteStringMemory(Arrays.copyOfRange(value, from, length)));
+        long retained = maximum < 0 ? Math.max(0, pieces.size() + maximum) : pieces.size();
+        ArrayMemory result = new ArrayMemory();
+        for (int i = 0; i < retained; i++) result.add(pieces.get(i));
+        return result.toConstant();
+    }
+
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING)},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    public static Memory strtolower(Environment env, TraceInfo trace, Memory string) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return StringMemory.valueOf(strtolower(string.toString()));
+        if (nativeAscii(string)) return StringMemory.valueOf(string.toString().toLowerCase(Locale.ROOT));
+        byte[] bytes = NativeScalarArguments.string(env, trace, "strtolower", 1, "string", string);
+        for (int i = 0; i < bytes.length; i++) {
+            int c = bytes[i] & 255;
+            if (c >= 'A' && c <= 'Z') bytes[i] = (byte) (c + 32);
+        }
+        return new PhpByteStringMemory(bytes);
+    }
+
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING)},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    public static Memory strtoupper(Environment env, TraceInfo trace, Memory string) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return StringMemory.valueOf(strtoupper(string.toString()));
+        if (nativeAscii(string)) return StringMemory.valueOf(string.toString().toUpperCase(Locale.ROOT));
+        byte[] bytes = NativeScalarArguments.string(env, trace, "strtoupper", 1, "string", string);
+        for (int i = 0; i < bytes.length; i++) {
+            int c = bytes[i] & 255;
+            if (c >= 'a' && c <= 'z') bytes[i] = (byte) (c - 32);
+        }
+        return new PhpByteStringMemory(bytes);
+    }
+
     private static final DecimalFormatSymbols DEFAULT_DECIMAL_FORMAT_SYMBOLS;
 
     private static ArrayMemory HTML_ENTITIES;
@@ -340,6 +467,24 @@ public class StringFunctions extends FunctionsContainer {
         return sb.toString();
     }
 
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING)},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    @Immutable
+    public static Memory bin2hex(Environment env, TraceInfo trace, Memory string) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return StringMemory.valueOf(bin2hex(string));
+        byte[] bytes = NativeScalarArguments.string(env, trace, "bin2hex", 1, "string", string);
+        char[] result = new char[Math.multiplyExact(bytes.length, 2)];
+        final String digits = "0123456789abcdef";
+        for (int i = 0; i < bytes.length; i++) {
+            int value = bytes[i] & 255;
+            result[i * 2] = digits.charAt(value >>> 4);
+            result[i * 2 + 1] = digits.charAt(value & 15);
+        }
+        return StringMemory.valueOf(new String(result));
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
     @Immutable
     public static String bin2hex(Memory _value) {
         String value = _value.toBinaryString();
@@ -367,6 +512,37 @@ public class StringFunctions extends FunctionsContainer {
         return sb.toString();
     }
 
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING)},
+            returnType = "string|false")
+    public static Memory hex2bin(Environment env, TraceInfo trace, Memory string) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace))
+            return PhpByteStringMemory.fromBinaryString(hex2bin(string));
+        byte[] value = NativeScalarArguments.string(env, trace, "hex2bin", 1, "string", string);
+        if ((value.length & 1) != 0) {
+            env.warning(trace, "hex2bin(): Hexadecimal input string must have an even length");
+            return Memory.FALSE;
+        }
+        byte[] result = new byte[value.length / 2];
+        for (int i = 0; i < value.length; i += 2) {
+            int high = hexByteDigit(value[i] & 0xff), low = hexByteDigit(value[i + 1] & 0xff);
+            if (high < 0 || low < 0) {
+                env.warning(trace, "hex2bin(): Input string must be hexadecimal string");
+                return Memory.FALSE;
+            }
+            result[i / 2] = (byte) ((high << 4) | low);
+        }
+        return new php.runtime.memory.PhpByteStringMemory(result);
+    }
+
+    private static int hexByteDigit(int c) {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
     @Immutable
     public static String hex2bin(Memory _s) {
         String s = _s.toBinaryString();
@@ -714,7 +890,7 @@ public class StringFunctions extends FunctionsContainer {
         return nl2br(value, true);
     }
 
-    @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory implode(Environment env, TraceInfo trace, Memory glue, Memory pieces) {
         ArrayMemory array;
         String delimiter;
@@ -741,21 +917,212 @@ public class StringFunctions extends FunctionsContainer {
         return new StringMemory(builder.toString());
     }
 
-    @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory implode(Environment env, TraceInfo trace, Memory pieces) {
         return implode(env, trace, Memory.NULL, pieces);
     }
 
-    @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory join(Environment env, TraceInfo trace, Memory glue, Memory pieces) {
         return implode(env, trace, glue, pieces);
     }
 
-    @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory join(Environment env, TraceInfo trace, Memory pieces) {
         return implode(env, trace, Memory.NULL, pieces);
     }
 
+    @php.runtime.annotation.Reflection.Name("implode")
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", typeDeclaration = "array|string"),
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional(value = "null"))
+    }, result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    @php.runtime.annotation.Runtime.DirectCall(value = "directImplode", liveArrayVariables = true)
+    @php.runtime.annotation.Runtime.StringJoin
+    public static Memory nativeImplode(Environment env, TraceInfo trace, Memory separator, Memory array) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return implode(env, trace, separator, array);
+        return nativeJoin(env, trace, "implode", separator, array);
+    }
+
+    @php.runtime.annotation.Reflection.Name("implode")
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", typeDeclaration = "array|string"),
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional(value = "null"))
+    }, result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    @php.runtime.annotation.Runtime.DirectCall(value = "directImplode", liveArrayVariables = true)
+    @php.runtime.annotation.Runtime.StringJoin
+    public static Memory nativeImplode(Environment env, TraceInfo trace, Memory separator) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return implode(env, trace, separator);
+        return nativeJoin(env, trace, "implode", separator, Memory.NULL);
+    }
+
+    @php.runtime.annotation.Reflection.Name("join")
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", typeDeclaration = "array|string"),
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional(value = "null"))
+    }, result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    @php.runtime.annotation.Runtime.StringJoin
+    public static Memory nativeJoin(Environment env, TraceInfo trace, @php.runtime.annotation.Runtime.Reference Memory separator, @php.runtime.annotation.Runtime.Reference Memory array) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return join(env, trace, separator, array);
+        return nativeJoin(env, trace, "join", separator, array);
+    }
+
+    @php.runtime.annotation.Reflection.Name("join")
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", typeDeclaration = "array|string"),
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional(value = "null"))
+    }, result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    @php.runtime.annotation.Runtime.StringJoin
+    public static Memory nativeJoin(Environment env, TraceInfo trace, @php.runtime.annotation.Runtime.Reference Memory separator) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return join(env, trace, separator);
+        return nativeJoin(env, trace, "join", separator, Memory.NULL);
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", typeDeclaration = "array|string"),
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional(value = "null"))
+    }, result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    @php.runtime.annotation.Runtime.Frameless({1})
+    @php.runtime.annotation.Runtime.StringJoin
+    public static Memory directImplode(Environment env, TraceInfo trace, @php.runtime.annotation.Runtime.Reference Memory separator) throws Throwable {
+        Memory pieces = separator.toValue();
+        if (!pieces.isArray()) {
+            env.exception(trace, php.runtime.lang.exception.BaseTypeError.class,
+                    "implode(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given");
+            return Memory.NULL;
+        }
+        return joinBytePieces(env, trace, Memory.CONST_EMPTY_STRING, pieces);
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "separator", typeDeclaration = "array|string"),
+            @php.runtime.annotation.Reflection.Arg(value = "array", type = php.runtime.common.HintType.ARRAY,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional(value = "null"))
+    }, result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    @php.runtime.annotation.Runtime.Frameless({2})
+    @php.runtime.annotation.Runtime.StringJoin
+    public static Memory directImplode(Environment env, TraceInfo trace, @php.runtime.annotation.Runtime.Reference Memory separator, @php.runtime.annotation.Runtime.Reference Memory array) throws Throwable {
+        return directJoin(env, trace, "implode", separator, array);
+    }
+
+    private static Memory directJoin(Environment env, TraceInfo trace, String function,
+                                     Memory separator, Memory array) throws Throwable {
+        Memory first = separator.toValue();
+        byte[] bytes;
+        if (first.isNull() && !php.runtime.invoke.NativeFunctionContext.isStrict(env, trace, function)) {
+            env.error(trace, ErrorType.E_DEPRECATED,
+                    "%s(): Passing null to parameter #1 ($separator) of type array|string is deprecated", function);
+            bytes = new byte[0];
+        } else bytes = nativeJoinSeparator(env, trace, function, first);
+        Memory delimiter = first.getClass() == StringMemory.class ? first
+                : new php.runtime.memory.PhpByteStringMemory(bytes);
+        Memory pieces = array.toValue();
+        if (!pieces.isArray() && !pieces.isNull()) {
+            Php85Functions.invalid(env, trace, function, 2, "array", "?array", pieces);
+            return Memory.NULL;
+        }
+        if (pieces.isNull()) {
+            env.exception(trace, php.runtime.lang.exception.BaseTypeError.class,
+                    "%s(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given", function);
+            return Memory.NULL;
+        }
+        return joinBytePieces(env, trace, delimiter, pieces);
+    }
+
+    private static Memory nativeJoin(Environment env, TraceInfo trace, String function,
+                                     Memory separator, Memory array) throws Throwable {
+        Memory first = separator.toValue();
+        Memory delimiter = Memory.CONST_EMPTY_STRING;
+        if (!first.isArray()) {
+            byte[] bytes;
+            if (first.isNull() && !php.runtime.invoke.NativeFunctionContext.isStrict(env, trace, function)) {
+                env.error(trace, ErrorType.E_DEPRECATED,
+                        "%s(): Passing null to parameter #1 ($separator) of type array|string is deprecated", function);
+                bytes = new byte[0];
+            } else if (first.isString() || (!php.runtime.invoke.NativeFunctionContext.isStrict(env, trace, function)
+                    && (first.isNumber() || first.getRealType() == Memory.Type.BOOL
+                        || (first.isObject() && !first.isResource()
+                            && first.toValue(php.runtime.memory.ObjectMemory.class).getReflection().methodMagicToString != null)))) {
+                bytes = nativeJoinSeparator(env, trace, function, first);
+            } else {
+                Php85Functions.invalid(env, trace, function, 1, "separator", "array|string", first);
+                return Memory.NULL;
+            }
+            delimiter = first.getClass() == StringMemory.class ? first
+                    : new php.runtime.memory.PhpByteStringMemory(bytes);
+        }
+        // Separator conversion runs before the second parameter is read or checked.
+        Memory second = array.toValue();
+        if (!second.isNull() && !second.isArray()) {
+            Php85Functions.invalid(env, trace, function, 2, "array", "?array", second);
+            return Memory.NULL;
+        }
+        Memory pieces;
+        if (second.isNull()) {
+            if (!first.isArray()) {
+                env.exception(trace, php.runtime.lang.exception.BaseTypeError.class,
+                        "%s(): If argument #1 ($separator) is of type string, argument #2 ($array) must be of type array, null given", function);
+                return Memory.NULL;
+            }
+            pieces = first;
+        } else {
+            if (first.isArray()) {
+                Php85Functions.invalid(env, trace, function, 1, "separator", "string", first);
+                return Memory.NULL;
+            }
+            pieces = second;
+        }
+        return joinBytePieces(env, trace, delimiter, pieces);
+    }
+
+    private static byte[] nativeJoinSeparator(Environment env, TraceInfo trace, String function, Memory value) throws Throwable {
+        if (php.runtime.PhpRuntimeOwnership.current(env) != null && value.isObject() && !value.isResource()
+                && !php.runtime.invoke.NativeFunctionContext.isStrict(env, trace, function)
+                && value.toValue(php.runtime.memory.ObjectMemory.class).getReflection().methodMagicToString != null) {
+            var body = php.runtime.PhpRuntimeOwnership.currentNativeBody(env);
+            if (body == null) throw new IllegalArgumentException("Native Stringable lacks its exact active BODY envelope");
+            return body.stringable(value.toValue(php.runtime.memory.ObjectMemory.class), trace).getBinaryBytes(StandardCharsets.UTF_8);
+        }
+        return NativeScalarArguments.string(env, trace, function, 1, "separator", value);
+    }
+
+    private static Memory nativeJoinValue(Environment env, TraceInfo trace, Memory value) throws Throwable {
+        Memory actual = value.toValue();
+        if (php.runtime.PhpRuntimeOwnership.current(env) != null && actual.isObject() && !actual.isResource()
+                && actual.toValue(php.runtime.memory.ObjectMemory.class).getReflection().methodMagicToString != null) {
+            var body = php.runtime.PhpRuntimeOwnership.currentNativeBody(env);
+            if (body == null) throw new IllegalArgumentException("Native element Stringable lacks its exact active BODY envelope");
+            return body.stringable(actual.toValue(php.runtime.memory.ObjectMemory.class), trace);
+        }
+        return php.runtime.PhpByteStrings.stringValue(actual, env, trace);
+    }
+
+    private static Memory joinBytePieces(Environment env, TraceInfo trace, Memory delimiter, Memory pieces) throws Throwable {
+        // Snapshot array buckets, retaining actual reference cells across ordered __toString callbacks.
+        ArrayMemory snapshot = (ArrayMemory) pieces.toImmutable();
+        var body = php.runtime.PhpRuntimeOwnership.currentNativeBody(env);
+        if (php.runtime.PhpRuntimeOwnership.current(env) != null && body == null)
+            throw new IllegalArgumentException("Native ARRAY read lacks its exact active BODY envelope");
+        try (var retained = body == null ? null : body.retainArrayRead((ArrayMemory) pieces, snapshot)) {
+            php.runtime.PhpByteStringBuilder builder = new php.runtime.PhpByteStringBuilder();
+            boolean initial = true;
+            for (Memory item : snapshot) {
+                if (!initial) builder.append(delimiter, env, trace);
+                builder.append(nativeJoinValue(env, trace, item), env, trace);
+                initial = false;
+            }
+            return builder.toImmutable();
+        }
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory explode(String delimiter, String string, int limit) {
         if (limit == 0)
             limit = 1;
@@ -770,6 +1137,7 @@ public class StringFunctions extends FunctionsContainer {
         return ArrayMemory.ofStrings(result);
     }
 
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory explode(String delimiter, String string) {
         return explode(delimiter, string, Integer.MAX_VALUE);
     }
@@ -926,6 +1294,37 @@ public class StringFunctions extends FunctionsContainer {
         }
     }
 
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "offset", type = php.runtime.common.HintType.INT),
+            @php.runtime.annotation.Reflection.Arg(value = "length", type = php.runtime.common.HintType.INT,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional("NULL"))},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    public static Memory substr(Environment env, TraceInfo trace, Memory string, Memory offset) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return substr(string.toString(), offset.toInteger());
+        return substr(env, trace, string, offset, Memory.NULL);
+    }
+
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "offset", type = php.runtime.common.HintType.INT),
+            @php.runtime.annotation.Reflection.Arg(value = "length", type = php.runtime.common.HintType.INT,
+                    nullable = true, optional = @php.runtime.annotation.Reflection.Optional("NULL"))},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    public static Memory substr(Environment env, TraceInfo trace, Memory string, Memory offset, Memory length) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) {
+            return substr(string.toString(), offset.toInteger(), length.toInteger());
+        }
+        byte[] value = NativeScalarArguments.string(env, trace, "substr", 1, "string", string);
+        long start = NativeScalarArguments.integer(env, trace, "substr", 2, "offset", offset);
+        Long count = NativeScalarArguments.nullableInteger(env, trace, "substr", 3, "length", length);
+        start = start < 0 ? Math.max(0, value.length + start) : Math.min(start, value.length);
+        long end = count == null ? value.length : count < 0 ? Math.max(0, value.length + count)
+                : start + Math.min(count, value.length - start);
+        return end <= start ? Memory.CONST_EMPTY_STRING : new BinaryMemory(Arrays.copyOfRange(value, (int) start, (int) end));
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
     @Immutable
     public static Memory substr(String value, int start, int length) {
         int strLen = value.length();
@@ -953,6 +1352,7 @@ public class StringFunctions extends FunctionsContainer {
             return new StringMemory(value.substring(start, end));
     }
 
+    @php.runtime.annotation.Reflection.Ignore
     @Immutable
     public static Memory substr(String value, int start) {
         int length = value.length();
@@ -1080,11 +1480,13 @@ public class StringFunctions extends FunctionsContainer {
     }
 
     @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static String strtolower(String string) {
         return string.toLowerCase();
     }
 
     @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static String strtoupper(String string) {
         return string.toUpperCase();
     }
@@ -1128,6 +1530,7 @@ public class StringFunctions extends FunctionsContainer {
     }
 
     @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory strpos(Environment env, TraceInfo trace, String haystack, Memory needle, int offset) {
         int haystackLen = haystack.length();
         if (offset < 0 || offset > haystackLen) {
@@ -1168,6 +1571,7 @@ public class StringFunctions extends FunctionsContainer {
     }
 
     @Immutable
+    @php.runtime.annotation.Reflection.Ignore
     public static Memory strpos(Environment env, TraceInfo trace, String haystack, Memory needle) {
         return strpos(env, trace, haystack, needle, 0);
     }
@@ -1317,12 +1721,26 @@ public class StringFunctions extends FunctionsContainer {
         return stripos(env, trace, haystack, needle, 0);
     }
 
-    @Immutable
-    public static Memory strlen(Environment env, TraceInfo trace, Memory string) {
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING)},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.INT))
+    public static Memory strlen(Environment env, TraceInfo trace, Memory string) throws Throwable {
+        if (NativeScalarArguments.modern(env, trace)) {
+            if (string instanceof php.runtime.memory.PhpByteStringMemory)
+                return LongMemory.valueOf(((php.runtime.memory.PhpByteStringMemory) string).byteLength());
+            if (string.getClass() == StringMemory.class) {
+                String text = string.toString();
+                if (text.length() <= 8 || text.charAt(0) >= 0x100)
+                    return NativeScalarArguments.utf8StringLength(text);
+            }
+            return LongMemory.valueOf(NativeScalarArguments.string(env, trace, "strlen", 1, "string", string).length);
+        }
         if (string.isArray()) {
             env.warning(trace, "expects parameter 1 to be string, array given");
             return Memory.NULL;
         }
+        Memory actual = string.toValue();
+        if (actual instanceof PhpByteStringMemory raw) return LongMemory.valueOf(raw.byteLength());
         if (string instanceof BinaryMemory)
             return LongMemory.valueOf(string.getBinaryBytes(env.getDefaultCharset()).length);
 
@@ -1651,6 +2069,29 @@ public class StringFunctions extends FunctionsContainer {
         return number_format(number, 0, '.', ',');
     }
 
+    @php.runtime.annotation.Reflection.Signature(value = {
+            @php.runtime.annotation.Reflection.Arg(value = "string", type = php.runtime.common.HintType.STRING),
+            @php.runtime.annotation.Reflection.Arg(value = "times", type = php.runtime.common.HintType.INT)},
+            result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.STRING))
+    public static Memory str_repeat(Environment env, TraceInfo trace, Memory string, Memory times) throws Throwable {
+        if (!NativeScalarArguments.modern(env, trace)) return StringMemory.valueOf(str_repeat(string.toString(), times.toInteger()));
+        byte[] value = NativeScalarArguments.string(env, trace, "str_repeat", 1, "string", string);
+        long count = NativeScalarArguments.integer(env, trace, "str_repeat", 2, "times", times);
+        if (count < 0) env.exception(trace, php.runtime.lang.exception.BaseValueError.class,
+                "str_repeat(): Argument #2 ($times) must be greater than or equal to 0");
+        if (count == 0 || value.length == 0) return Memory.CONST_EMPTY_STRING;
+        // PHP integers remain 64-bit until the actual JVM byte-array allocation boundary.
+        if (count > Integer.MAX_VALUE / value.length) throw new OutOfMemoryError("Required string length exceeds the JVM array limit");
+        byte[] result = new byte[(int) (count * value.length)];
+        System.arraycopy(value, 0, result, 0, value.length);
+        for (int copied = value.length; copied < result.length;) {
+            int next = Math.min(copied, result.length - copied);
+            System.arraycopy(result, 0, result, copied, next); copied += next;
+        }
+        return new BinaryMemory(result);
+    }
+
+    @php.runtime.annotation.Reflection.Ignore
     @Immutable
     public static String str_repeat(String input, int multiplier) {
         if (multiplier <= 0)

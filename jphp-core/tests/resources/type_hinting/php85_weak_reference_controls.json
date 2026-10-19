@@ -1,0 +1,137 @@
+{
+  "cases": [
+    {
+      "id": "identity",
+      "code": "$o=new stdClass;$o->x=7;$a=WeakReference::create($o);$b=WeakReference::create($o);echo serialize([$a===$b,$a->get()===$o,$a->get()->x]);",
+      "exit": 0,
+      "stdout": "a:3:{i:0;b:1;i:1;b:1;i:2;i:7;}",
+      "stderr": ""
+    },
+    {
+      "id": "classes",
+      "code": "$o=new stdClass;$w=WeakReference::create($o);echo serialize([get_class($w),(new ReflectionClass('WeakReference'))->isFinal(),is_object($w->get()),get_object_vars($w)]);",
+      "exit": 0,
+      "stdout": "a:4:{i:0;s:13:\"WeakReference\";i:1;b:1;i:2;b:1;i:3;a:0:{}}",
+      "stderr": ""
+    },
+    {
+      "id": "constructor",
+      "code": "try{new WeakReference;}catch(Throwable $e){echo get_class($e),':',$e->getMessage();}",
+      "exit": 0,
+      "stdout": "Error:Direct instantiation of WeakReference is not allowed, use WeakReference::create instead",
+      "stderr": ""
+    },
+    {
+      "id": "clone",
+      "code": "$o=new stdClass;$w=WeakReference::create($o);try{clone $w;}catch(Throwable $e){echo get_class($e),':',$e->getMessage();}",
+      "exit": 0,
+      "stdout": "Error:Trying to clone an uncloneable object of class WeakReference",
+      "stderr": ""
+    },
+    {
+      "id": "serialize",
+      "code": "$o=new stdClass;$w=WeakReference::create($o);try{serialize($w);}catch(Throwable $e){echo get_class($e),':',$e->getMessage();}",
+      "exit": 0,
+      "stdout": "Exception:Serialization of 'WeakReference' is not allowed",
+      "stderr": ""
+    },
+    {
+      "id": "unserialize",
+      "code": "try{unserialize('O:13:\"WeakReference\":0:{}');}catch(Throwable $e){echo get_class($e),':',$e->getMessage();}",
+      "exit": 0,
+      "stdout": "Exception:Unserialization of 'WeakReference' is not allowed",
+      "stderr": ""
+    },
+    {
+      "id": "invalid",
+      "code": "foreach([null,false,1,'x',[]]as$v){try{WeakReference::create($v);}catch(Throwable $e){echo get_class($e),';';}}",
+      "exit": 0,
+      "stdout": "TypeError;TypeError;TypeError;TypeError;TypeError;",
+      "stderr": ""
+    },
+    {
+      "id": "dynamic",
+      "code": "$o=new stdClass;$w=WeakReference::create($o);try{$w->x=1;}catch(Throwable $e){echo get_class($e),':',$e->getMessage();}",
+      "exit": 0,
+      "stdout": "Error:Cannot create dynamic property WeakReference::$x",
+      "stderr": ""
+    },
+    {
+      "id": "debug",
+      "code": "$o=new stdClass;$o->x=7;$w=WeakReference::create($o);var_dump($w);",
+      "exit": 0,
+      "stdout": "object(WeakReference)#2 (1) {\n  [\"object\"]=>\n  object(stdClass)#1 (1) {\n    [\"x\"]=>\n    int(7)\n  }\n}\n",
+      "stderr": ""
+    },
+    {
+      "id": "reflection_methods",
+      "code": "$m=get_class_methods('WeakReference');sort($m);echo serialize($m);",
+      "exit": 0,
+      "stdout": "a:3:{i:0;s:11:\"__construct\";i:1;s:6:\"create\";i:2;s:3:\"get\";}",
+      "stderr": ""
+    },
+    {
+      "id": "objects",
+      "code": "class C{}$a=new C;$b=new C;echo serialize([WeakReference::create($a)===WeakReference::create($a),WeakReference::create($a)===WeakReference::create($b)]);",
+      "exit": 0,
+      "stdout": "a:2:{i:0;b:1;i:1;b:0;}",
+      "stderr": ""
+    },
+    {
+      "id": "array_owner",
+      "code": "$o=new stdClass;$w=WeakReference::create($o);$a=[$w->get()];unset($o);echo serialize([$w->get()===$a[0]]);",
+      "exit": 0,
+      "stdout": "a:1:{i:0;b:1;}",
+      "stderr": ""
+    },
+    {
+      "id": "reference_arg",
+      "code": "$o=new stdClass;$r=&$o;$w=WeakReference::create($r);echo serialize([$w->get()===$o]);",
+      "exit": 0,
+      "stdout": "a:1:{i:0;b:1;}",
+      "stderr": ""
+    },
+    {
+      "id": "print_r",
+      "code": "$o=new stdClass;$w=WeakReference::create($o);$s=print_r($w,true);echo strpos($s,'[object]')!==false?'yes':'no';",
+      "exit": 0,
+      "stdout": "yes",
+      "stderr": ""
+    },
+    {
+      "id": "allowed_false",
+      "code": "$x=unserialize('O:13:\"WeakReference\":0:{}',['allowed_classes'=>false]);echo get_class($x);",
+      "exit": 0,
+      "stdout": "__PHP_Incomplete_Class",
+      "stderr": ""
+    },
+    {
+      "id": "reflect_new",
+      "code": "try{(new ReflectionClass('WeakReference'))->newInstance();}catch(Throwable $e){echo get_class($e),':',$e->getMessage();}",
+      "exit": 0,
+      "stdout": "Error:Direct instantiation of WeakReference is not allowed, use WeakReference::create instead",
+      "stderr": ""
+    },
+    {
+      "id": "reflect_without",
+      "code": "try{(new ReflectionClass('WeakReference'))->newInstanceWithoutConstructor();}catch(Throwable $e){echo get_class($e),':',$e->getMessage();}",
+      "exit": 0,
+      "stdout": "ReflectionException:Class WeakReference is an internal class marked as final that cannot be instantiated without invoking its constructor",
+      "stderr": ""
+    },
+    {
+      "id": "return_metadata",
+      "code": "$a=(new ReflectionMethod('WeakReference','create'))->getReturnType();$b=(new ReflectionMethod('WeakReference','get'))->getReturnType();echo serialize([(string)$a,$a->getName(),$a->isBuiltin(),$a->allowsNull(),get_class($a),(string)$b,$b->getName(),$b->isBuiltin(),$b->allowsNull(),get_class($b)]);",
+      "exit": 0,
+      "stdout": "a:10:{i:0;s:13:\"WeakReference\";i:1;s:13:\"WeakReference\";i:2;b:0;i:3;b:0;i:4;s:19:\"ReflectionNamedType\";i:5;s:7:\"?object\";i:6;s:6:\"object\";i:7;b:1;i:8;b:1;i:9;s:19:\"ReflectionNamedType\";}",
+      "stderr": ""
+    },
+    {
+      "id": "parameter_metadata",
+      "code": "$p=(new ReflectionParameter(['WeakReference','create'],0));$t=$p->getType();echo serialize([$p->getName(),(string)$t,$t->getName(),$t->isBuiltin(),$t->allowsNull(),get_class($t)]);",
+      "exit": 0,
+      "stdout": "a:6:{i:0;s:6:\"object\";i:1;s:6:\"object\";i:2;s:6:\"object\";i:3;b:1;i:4;b:0;i:5;s:19:\"ReflectionNamedType\";}",
+      "stderr": ""
+    }
+  ]
+}

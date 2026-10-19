@@ -1,0 +1,1 @@
+{"result":["ok",[["x",false,true,true,true,[["get","$x::get",true,false,"int",[]],["set","$x::set",false,false,"void",[["v","int"]]]]],["virtual",true,true,true,false,[["get","$virtual::get",false,false,"int",[]]]]]],"warnings":[]}

@@ -1,0 +1,222 @@
+[
+  {
+    "abi": 18,
+    "originCommand": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision63-final-physical-version-controls\\reader18-reject21.command.json",
+    "originSHA256": "e1347d4c1e64fe147ba66e2c29f33fb734c0907578bf696a952e132cbfd82674",
+    "classpath": [
+      {
+        "path": "F:\\ReWork\\ozl.devline.ide\\build\\jphp-fresh-owner-20261013\\outputs\\jphp-runtime\\libs\\jphp-runtime-0.9.3-SNAPSHOT.jar",
+        "sha256": "73aeb80efac0fe99a34e2805f1afe2cd091c6bd0ca6047975699af4230f0b307"
+      },
+      {
+        "path": "F:\\ReWork\\ozl.devline.ide\\build\\jphp-fresh-owner-20261013\\outputs\\jphp-core\\libs\\jphp-core-0.9.3-SNAPSHOT.jar",
+        "sha256": "07cc0125a47f9f6f0ca3e6690341b858d76693f889aa0df3cae39d7410f4153e"
+      },
+      {
+        "path": "F:\\ReWork\\ozl.devline.ide\\build\\jphp-fresh-owner-20261013\\outputs\\exts\\jphp-zend-ext\\libs\\jphp-zend-ext-0.9.3-SNAPSHOT.jar",
+        "sha256": "220352fc750e7fe18daa1e887c5696c2ad820b22421bab4282b69099880eccf1"
+      },
+      {
+        "path": "F:\\ReWork\\ozl.devline.ide\\build\\jphp-fresh-owner-20261013\\outputs\\exts\\jphp-json-ext\\libs\\jphp-json-ext-0.9.3-SNAPSHOT.jar",
+        "sha256": "7f951c97a48189003ef4c362223460404726271dbc0b1ce557fb9dfad795c00b"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\com.google.code.gson\\gson\\2.7\\751f548c85fa49f330cecbb1875893f971b33c4e\\gson-2.7.jar",
+        "sha256": "2d43eb5ea9e133d2ee2405cc14f5ee08951b8361302fdd93494a3a997b508d32"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\junit\\junit\\4.13.2\\8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12\\junit-4.13.2.jar",
+        "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.hamcrest\\hamcrest-core\\1.3\\42a25dc3219429f0e5d060061f71acb49bf010a0\\hamcrest-core-1.3.jar",
+        "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-analysis\\9.8\\b9747a320844b6cb1eacd90d8ecfd260a16c01d3\\asm-analysis-9.8.jar",
+        "sha256": "e640732fbcd3c6271925a504f125e38384688f4dfbbf92c8622dfcee0d09edb9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-tree\\9.8\\18419ca5b77a2f81097c741e7872e6ab8d2f40d\\asm-tree-9.8.jar",
+        "sha256": "14b7880cb7c85eed101e2710432fc3ffb83275532a6a894dc4c4095d49ad59f1"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-util\\9.8\\395f1c1f035258511f27bc9b2583d76e4b143f59\\asm-util-9.8.jar",
+        "sha256": "8ba0460ecb28fd0e2980e5f3ef3433a513a457bc077f81a53bdc75b587a08d15"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm\\9.8\\dc19ecb3f7889b7860697215cae99c0f9b6f6b4b\\asm-9.8.jar",
+        "sha256": "876eab6a83daecad5ca67eb9fcabb063c97b5aeb8cf1fca7a989ecde17522051"
+      },
+      {
+        "path": "G:/DevLine-QA/jphp-sql-sdk19-20261013/component-r1/dependencies/HikariCP-7.1.0.jar",
+        "sha256": "2be45c641b841e81df87292e181f2c203500c5f0e9a1676f135927387f3cf40b"
+      }
+    ]
+  },
+  {
+    "abi": 19,
+    "originCommand": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision63-final-physical-version-controls\\reader19-reject21.command.json",
+    "originSHA256": "9b451ec8ad282344f2b80bf9ce364e6616fcff9fe554b395c87e25b84eb9adef",
+    "classpath": [
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\outputs\\jphp-runtime\\libs\\jphp-runtime-0.9.3-SNAPSHOT.jar",
+        "sha256": "43444188421cf1deadd164c4c530987d9feb1f98219d1c2f7fe3decbe7da6476"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\outputs\\jphp-core\\libs\\jphp-core-0.9.3-SNAPSHOT.jar",
+        "sha256": "36ea91f4d53ab12172e2e962da7b15b064e8262db9187f314a077eecb9f235ce"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\outputs\\exts\\jphp-zend-ext\\libs\\jphp-zend-ext-0.9.3-SNAPSHOT.jar",
+        "sha256": "1f2fa86f0c62b21f4ace01fdca508c3c875efcbd21a2f76d953519eaba02fcc6"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\outputs\\exts\\jphp-json-ext\\libs\\jphp-json-ext-0.9.3-SNAPSHOT.jar",
+        "sha256": "7f951c97a48189003ef4c362223460404726271dbc0b1ce557fb9dfad795c00b"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\com.google.code.gson\\gson\\2.7\\751f548c85fa49f330cecbb1875893f971b33c4e\\gson-2.7.jar",
+        "sha256": "2d43eb5ea9e133d2ee2405cc14f5ee08951b8361302fdd93494a3a997b508d32"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\junit\\junit\\4.13.2\\8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12\\junit-4.13.2.jar",
+        "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.hamcrest\\hamcrest-core\\1.3\\42a25dc3219429f0e5d060061f71acb49bf010a0\\hamcrest-core-1.3.jar",
+        "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-analysis\\9.8\\b9747a320844b6cb1eacd90d8ecfd260a16c01d3\\asm-analysis-9.8.jar",
+        "sha256": "e640732fbcd3c6271925a504f125e38384688f4dfbbf92c8622dfcee0d09edb9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-tree\\9.8\\18419ca5b77a2f81097c741e7872e6ab8d2f40d\\asm-tree-9.8.jar",
+        "sha256": "14b7880cb7c85eed101e2710432fc3ffb83275532a6a894dc4c4095d49ad59f1"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-util\\9.8\\395f1c1f035258511f27bc9b2583d76e4b143f59\\asm-util-9.8.jar",
+        "sha256": "8ba0460ecb28fd0e2980e5f3ef3433a513a457bc077f81a53bdc75b587a08d15"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm\\9.8\\dc19ecb3f7889b7860697215cae99c0f9b6f6b4b\\asm-9.8.jar",
+        "sha256": "876eab6a83daecad5ca67eb9fcabb063c97b5aeb8cf1fca7a989ecde17522051"
+      },
+      {
+        "path": "G:/DevLine-QA/jphp-sql-sdk19-20261013/component-r1/dependencies/HikariCP-7.1.0.jar",
+        "sha256": "2be45c641b841e81df87292e181f2c203500c5f0e9a1676f135927387f3cf40b"
+      }
+    ]
+  },
+  {
+    "abi": 20,
+    "originCommand": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision63-final-physical-version-controls\\reader20-reject21.command.json",
+    "originSHA256": "7a67b2c9333ef75f591c33ef0b26f344a8155e31ada10b77a23925ef0f92fc15",
+    "classpath": [
+      {
+        "path": "G:\\DevLine-QA\\jphp-sdk20-handoff-20261013\\revision3-consumer-ready\\lib\\jphp-runtime-0.9.3-SNAPSHOT.jar",
+        "sha256": "be6a1564dee1c6cc52f5cb82145d60268776d7f305782a6a922bf2715f3dcedf"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-sdk20-handoff-20261013\\revision3-consumer-ready\\lib\\jphp-core-0.9.3-SNAPSHOT.jar",
+        "sha256": "cb570e018b0acab11f2d691855e1bec9d12b324f5d1ec08992689c0f28c338ff"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-sdk20-handoff-20261013\\revision3-consumer-ready\\lib\\jphp-zend-ext-0.9.3-SNAPSHOT.jar",
+        "sha256": "5f8c0c083596f45b506ec8eff408232b5c9cd925cfcaaff4f5caaf2bf8a32885"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-sdk20-handoff-20261013\\revision3-consumer-ready\\lib\\jphp-json-ext-0.9.3-SNAPSHOT.jar",
+        "sha256": "31d43de8ca31584486e8e54ccf702c76389b5ce586678162253a5b3c6cbf57e2"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\com.google.code.gson\\gson\\2.7\\751f548c85fa49f330cecbb1875893f971b33c4e\\gson-2.7.jar",
+        "sha256": "2d43eb5ea9e133d2ee2405cc14f5ee08951b8361302fdd93494a3a997b508d32"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\junit\\junit\\4.13.2\\8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12\\junit-4.13.2.jar",
+        "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.hamcrest\\hamcrest-core\\1.3\\42a25dc3219429f0e5d060061f71acb49bf010a0\\hamcrest-core-1.3.jar",
+        "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-analysis\\9.8\\b9747a320844b6cb1eacd90d8ecfd260a16c01d3\\asm-analysis-9.8.jar",
+        "sha256": "e640732fbcd3c6271925a504f125e38384688f4dfbbf92c8622dfcee0d09edb9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-tree\\9.8\\18419ca5b77a2f81097c741e7872e6ab8d2f40d\\asm-tree-9.8.jar",
+        "sha256": "14b7880cb7c85eed101e2710432fc3ffb83275532a6a894dc4c4095d49ad59f1"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-util\\9.8\\395f1c1f035258511f27bc9b2583d76e4b143f59\\asm-util-9.8.jar",
+        "sha256": "8ba0460ecb28fd0e2980e5f3ef3433a513a457bc077f81a53bdc75b587a08d15"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm\\9.8\\dc19ecb3f7889b7860697215cae99c0f9b6f6b4b\\asm-9.8.jar",
+        "sha256": "876eab6a83daecad5ca67eb9fcabb063c97b5aeb8cf1fca7a989ecde17522051"
+      },
+      {
+        "path": "G:/DevLine-QA/jphp-sql-sdk19-20261013/component-r1/dependencies/HikariCP-7.1.0.jar",
+        "sha256": "2be45c641b841e81df87292e181f2c203500c5f0e9a1676f135927387f3cf40b"
+      }
+    ]
+  },
+  {
+    "abi": 21,
+    "originCommand": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision63-final-physical-version-controls\\load21.command.json",
+    "originSHA256": "7e02509cadb940a7b0130bc5fdda5e6f366c54895d6b05dce04b0dd9f2db89c3",
+    "classpath": [
+      {
+        "path": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision58-regression-successor\\jphp-runtime-abi21-regression-candidate.jar",
+        "sha256": "26373aba9a3041ccd6e9f0f393bfcd9bf38c099dea3b8aeb4037d3a8304dcb22"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision45-closure-integrated\\jphp-core-abi21-closure-candidate.jar",
+        "sha256": "84b48352ca84b20e3d477dae3a1c1104cb2befba91d5dc39eff11c27ef96c8f4"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision18-current-owner-functional\\jphp-zend-ext-abi21-candidate.jar",
+        "sha256": "0e8bc4f55b62380804d2a9907a65c13a1c94bdc7bbd13a442ac7dfeb7848067e"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-attributes-implementation-20261013\\revision18-current-owner-functional\\jphp-json-ext-abi21-candidate.jar",
+        "sha256": "15484920ad42441d78e6f99fc17f718433557a26cdc3e4f46b1b10a08369a34a"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\com.google.code.gson\\gson\\2.7\\751f548c85fa49f330cecbb1875893f971b33c4e\\gson-2.7.jar",
+        "sha256": "2d43eb5ea9e133d2ee2405cc14f5ee08951b8361302fdd93494a3a997b508d32"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\junit\\junit\\4.13.2\\8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12\\junit-4.13.2.jar",
+        "sha256": "8e495b634469d64fb8acfa3495a065cbacc8a0fff55ce1e31007be4c16dc57d3"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.hamcrest\\hamcrest-core\\1.3\\42a25dc3219429f0e5d060061f71acb49bf010a0\\hamcrest-core-1.3.jar",
+        "sha256": "66fdef91e9739348df7a096aa384a5685f4e875584cce89386a7a47251c4d8e9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-analysis\\9.8\\b9747a320844b6cb1eacd90d8ecfd260a16c01d3\\asm-analysis-9.8.jar",
+        "sha256": "e640732fbcd3c6271925a504f125e38384688f4dfbbf92c8622dfcee0d09edb9"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-tree\\9.8\\18419ca5b77a2f81097c741e7872e6ab8d2f40d\\asm-tree-9.8.jar",
+        "sha256": "14b7880cb7c85eed101e2710432fc3ffb83275532a6a894dc4c4095d49ad59f1"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm-util\\9.8\\395f1c1f035258511f27bc9b2583d76e4b143f59\\asm-util-9.8.jar",
+        "sha256": "8ba0460ecb28fd0e2980e5f3ef3433a513a457bc077f81a53bdc75b587a08d15"
+      },
+      {
+        "path": "G:\\DevLine-QA\\jphp-coherent-components-20261013\\revision8-integrated\\gradle-user-home\\caches\\modules-2\\files-2.1\\org.ow2.asm\\asm\\9.8\\dc19ecb3f7889b7860697215cae99c0f9b6f6b4b\\asm-9.8.jar",
+        "sha256": "876eab6a83daecad5ca67eb9fcabb063c97b5aeb8cf1fca7a989ecde17522051"
+      },
+      {
+        "path": "G:/DevLine-QA/jphp-sql-sdk19-20261013/component-r1/dependencies/HikariCP-7.1.0.jar",
+        "sha256": "2be45c641b841e81df87292e181f2c203500c5f0e9a1676f135927387f3cf40b"
+      }
+    ]
+  }
+]

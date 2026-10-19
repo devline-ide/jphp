@@ -101,7 +101,7 @@ public class VarExport extends Printer {
 
                 printer.write(" =>");
 
-                if (el.isArray()) {
+                if (el.isArray() || el.isObject() && modernObject(el.toValue(ObjectMemory.class))) {
                     if (!used.contains(el.getPointer()))
                         printer.write("\n");
                     else
@@ -123,12 +123,16 @@ public class VarExport extends Printer {
 
     @Override
     protected void printObject(ObjectMemory value, int level, Set<Integer> used) {
+        if(value.value instanceof php.runtime.lang.BaseEnum actual) {
+            printer.write("\\"+value.getReflection().getName()+"::"+actual.enumCaseName());return;
+        }
         if (used.contains(value.getPointer())){
             recursionExists = true;
             printNull();
         } else {
             used.add(value.getPointer());
 
+            if(modernObject(value)){try{printModernObject(value,level,used);}finally{used.remove(value.getPointer());}return;}
             ClassEntity entity = value.getReflection();
             printer.write(entity.getName());
             printer.write("::");
@@ -138,6 +142,28 @@ public class VarExport extends Printer {
 
             used.remove(value.getPointer());
         }
+    }
+
+
+    private boolean modernObject(ObjectMemory value) {
+        var module=value.getReflection().getModule();
+        return module!=null&&module.getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5;
+    }
+
+    private void printModernObject(ObjectMemory value,int level,Set<Integer> used) {
+        printer.write(StringUtils.repeat(' ',level*PRINT_INDENT));
+        printer.write("\\"+value.getReflection().getName()+"::__set_state(array(\n");
+        ForeachIterator iterator=php.runtime.PhpPropertyHookAccess.consumerProperties(value.value,env,env.trace(),null,0);
+        while(iterator.next()) {
+            Memory element=iterator.getValue();if(element.isUndefined())continue;
+            String key=iterator.getKey().toString();key=key.substring(key.lastIndexOf('\0')+1);
+            printer.write(StringUtils.repeat(' ',level*PRINT_INDENT+3));printString(new StringMemory(key));printer.write(" => ");
+            if(element.isArray()||element.isObject()) {
+                printer.write("\n");print(element,level+1,used);
+            }else print(element,level+1,used);
+            printer.write(",\n");
+        }
+        printer.write(StringUtils.repeat(' ',level*PRINT_INDENT));printer.write("))");
     }
 
     @Override

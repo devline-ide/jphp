@@ -18,6 +18,14 @@ public final class PhpOwnershipDomain {
     private final IdentityHashMap<PhpOwnership.Node, Lifecycle> objectLifecycles = new IdentityHashMap<>();
     private Execution execution;
     private PhpOwnershipHeap heap;
+    private PhpRuntimeOwnership.Shared runtimeOwnership;
+    /** Ordinary and explicitly certified publishers share this domain's one node authority. */
+    PhpRuntimeOwnership.Shared runtimeOwnership() {
+        graph.checkMutationAccess();
+        if(runtimeOwnership==null)runtimeOwnership=new PhpRuntimeOwnership.Shared(this);
+        return runtimeOwnership;
+    }
+
 
     public PhpOwnershipDomain() {graph = new PhpOwnership();}
     public PhpOwnershipDomain(PhpOwnership.FailureComposition composition) {graph = new PhpOwnership(composition);}

@@ -1,0 +1,13 @@
+get
+read:ok:2
+rhs
+assign:Error:Cannot modify private(set) property H::$x from global scope
+rhs
+get
+compound:Error:Cannot modify private(set) property H::$x from global scope
+get
+inc:Error:Cannot modify private(set) property H::$x from global scope
+get
+set
+get
+own:ok:5

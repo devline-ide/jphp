@@ -10,6 +10,12 @@ import org.develnext.jphp.core.tokenizer.token.stmt.ExprStmtToken;
 public class DynamicAccessExprToken extends OperatorExprToken {
     public boolean isNullsafe() {return "?->".equals(getMeta().getWord());}
     private boolean coalescingRead;
+    private boolean arrayUnsetRead;
+    private boolean objectWriteReceiverRead;
+    public boolean isObjectWriteReceiverRead() {return objectWriteReceiverRead;}
+    public void setObjectWriteReceiverRead(boolean value) {objectWriteReceiverRead=value;}
+    public boolean isArrayUnsetRead() {return arrayUnsetRead;}
+    public void setArrayUnsetRead(boolean value) {arrayUnsetRead=value;}
     public boolean isCoalescingRead() {return coalescingRead;}
     public void setCoalescingRead(boolean value) {coalescingRead = value;}
     protected ValueExprToken field;

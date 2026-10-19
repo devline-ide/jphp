@@ -38,7 +38,7 @@ public class ClassConstantMemory extends ReferenceMemory {
             return NULL;
         }
 
-        return entity.getValue();
+        return entity.getValue(env, trace);
     }
 
     public String getName() {

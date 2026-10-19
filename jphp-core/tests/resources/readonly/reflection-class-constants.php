@@ -1,0 +1,1 @@
+<?php final class R{} abstract class P{} $n="ReflectionClass"; $r=new ReflectionClass(R::class); echo serialize([$n::IS_FINAL,$n::IS_EXPLICIT_ABSTRACT,$n::IS_IMPLICIT_ABSTRACT,(new ReflectionClass($n))->getConstant("IS_FINAL"),(new ReflectionClassConstant($n,"IS_EXPLICIT_ABSTRACT"))->getValue(),$r->getModifiers(),(new ReflectionClass(P::class))->getModifiers()]);

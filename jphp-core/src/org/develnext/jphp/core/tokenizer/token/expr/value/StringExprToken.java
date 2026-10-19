@@ -29,8 +29,18 @@ public class StringExprToken extends ValueExprToken {
         }
     }
 
+    /** Physical source origin only for modern DOC interpolations; ordinary Segment layout is unchanged. */
+    public static final class SourceSegment extends Segment {
+        public final int sourceLine;
+        public final int sourcePosition;
+        public SourceSegment(int from, int to, boolean variable, int line, int position) {
+            super(from, to, variable);sourceLine = line;sourcePosition = position;
+        }
+    }
+
     protected final Quote quote;
     private String value;
+    private java.util.BitSet rawBytePositions;
 
     protected List<Segment> segments = new ArrayList<Segment>();
     protected ExprStmtToken expression;
@@ -108,6 +118,57 @@ public class StringExprToken extends ValueExprToken {
     @Override
     public boolean isConstant() {
         return true;
+    }
+
+
+    /** Raw escape positions in the UTF16 projection; ordinary tokens have no descriptor. */
+    public boolean hasRawBytes() {
+        return rawBytePositions != null;
+    }
+
+    public void setRawBytePositions(java.util.BitSet positions) {
+        if (positions == null || positions.isEmpty()) {
+            rawBytePositions = null;
+            return;
+        }
+        if (positions.length() > value.length()) throw new IllegalArgumentException("Raw position outside literal");
+        for (int i = positions.nextSetBit(0); i >= 0; i = positions.nextSetBit(i + 1))
+            if (value.charAt(i) > 255) throw new IllegalArgumentException("Raw position is not a byte");
+        rawBytePositions = (java.util.BitSet) positions.clone();
+    }
+
+    /** Exact bytes of the lexer projection; interpolation expressions are not evaluated here. */
+    public byte[] getPhp85Bytes() {
+        if (rawBytePositions == null) return value.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+        java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream(value.length());
+        int from = 0;
+        for (int i = rawBytePositions.nextSetBit(0); i >= 0; i = rawBytePositions.nextSetBit(i + 1)) {
+            if (from < i) bytes.writeBytes(value.substring(from, i).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            bytes.write(value.charAt(i));
+            from = i + 1;
+        }
+        if (from < value.length()) bytes.writeBytes(value.substring(from).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        return bytes.toByteArray();
+    }
+
+    /** A literal slice retains the honest enclosing source span and rebases projection offsets. */
+    public StringExprToken slice(int from, int to) {
+        if (from < 0 || to < from || to > value.length()) throw new IndexOutOfBoundsException();
+        for (Segment segment : segments)
+            if (segment.from < to && segment.to > from && (segment.from < from || segment.to > to))
+                throw new IllegalArgumentException("Slice splits an interpolation expression");
+        StringExprToken result = new StringExprToken(TokenMeta.of(value.substring(from, to), this), Quote.SINGLE);
+        result.binary = binary;
+        if (rawBytePositions != null) {
+            int first = rawBytePositions.nextSetBit(from);
+            if (first >= 0 && first < to) result.rawBytePositions = rawBytePositions.get(from, to);
+        }
+        for (Segment segment : segments)
+            if (segment.from >= from && segment.to <= to)
+                result.segments.add(segment instanceof SourceSegment origin
+                        ? new SourceSegment(segment.from - from, segment.to - from, segment.isVariable, origin.sourceLine, origin.sourcePosition)
+                        : new Segment(segment.from - from, segment.to - from, segment.isVariable));
+        return result;
     }
 
     public boolean isBinary() {

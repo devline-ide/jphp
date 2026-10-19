@@ -28,11 +28,12 @@ public class GameScene2D {
     private AnimationTimer timer = new AnimationTimer() {
         @Override
         public void handle(long internalTime) {
-            processUpdate(System.nanoTime());
+            processUpdate(internalTime);
         }
     };
 
     protected List<GameEntity2D> entities = new ArrayList<>();
+    private GameEntity2D[] entitySnapshot = null;
 
     protected Vec2d gravity = new Vec2d(0, 0);
 
@@ -78,11 +79,15 @@ public class GameScene2D {
     }
 
     public void play() {
+        previousTime = 0;
+        accumulatedTime = 0;
         timer.start();
     }
 
     public void pause() {
         timer.stop();
+        previousTime = 0;
+        accumulatedTime = 0;
     }
 
     public ObjectProperty<GameEntity2D> observedObjectProperty() {
@@ -142,6 +147,9 @@ public class GameScene2D {
     }
 
     private long previousTime = 0;
+    private double accumulatedTime = 0;
+    private static final double STEP_SECONDS = 1.0 / 60.0;
+    private static final int MAX_CATCH_UP_STEPS = 8;
 
     private void processUpdate(long internalTime) {
         if (previousTime == 0) {
@@ -149,24 +157,24 @@ public class GameScene2D {
             return;
         }
 
-        //float delta = ((internalTime - previousTime) / 1000.0f / 1000.0f / 1000.0f);
-
+        double elapsed = Math.max(0, (internalTime - previousTime) / 1_000_000_000.0);
         previousTime = internalTime;
+        accumulatedTime = Math.min(accumulatedTime + elapsed, STEP_SECONDS * MAX_CATCH_UP_STEPS);
 
-        world.update(TIME_STEP);
-
-        for (GameEntity2D entity : entities) {
-            entity.update(TIME_STEP, this);
-
-            GameEntity2D entity2D = observedObject.get();
-
-            if (entity2D != null) {
-                ScrollHandler scrollHandler = this.scrollHandler.get();
-
-                if (scrollHandler != null) {
-                    scrollHandler.scrollTo(entity.getCenterX(), entity.getCenterY());
-                }
+        while (accumulatedTime + 1e-9 >= STEP_SECONDS) {
+            world.update(TIME_STEP);
+            if (entitySnapshot == null) entitySnapshot = entities.toArray(new GameEntity2D[0]);
+            GameEntity2D[] snapshot = entitySnapshot;
+            for (GameEntity2D entity : snapshot) {
+                if (entity.getScene() == this) entity.update(TIME_STEP, this);
             }
+            accumulatedTime = Math.max(0, accumulatedTime - STEP_SECONDS);
+        }
+
+        GameEntity2D observed = observedObject.get();
+        ScrollHandler handler = scrollHandler.get();
+        if (observed != null && observed.getScene() == this && handler != null) {
+            handler.scrollTo(observed.getCenterX(), observed.getCenterY());
         }
     }
 
@@ -175,6 +183,7 @@ public class GameScene2D {
             entity.scene = this;
 
             entities.add(entity);
+            entitySnapshot = null;
             world.addBody(entity.body);
 
             entity.onSceneAdd();
@@ -182,9 +191,12 @@ public class GameScene2D {
     }
 
     public void removeEntity(GameEntity2D entity) {
+        if (entity.getScene() != this) return;
         entities.remove(entity);
+        entitySnapshot = null;
         world.removeBody(entity.body);
         entity.scene = null;
+        if (observedObject.get() == entity) observedObject.set(null);
     }
 
     public void clear() {
@@ -195,6 +207,8 @@ public class GameScene2D {
         }
 
         entities.clear();
+        entitySnapshot = null;
+        observedObject.set(null);
     }
 
     public Vec2d getGravity() {

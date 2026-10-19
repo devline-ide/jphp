@@ -1,0 +1,1 @@
+TypeError:chr(): Argument #1 ($codepoint) must be of type int, string given|TypeError:ord(): Argument #1 ($character) must be of type string, int given|ff|255

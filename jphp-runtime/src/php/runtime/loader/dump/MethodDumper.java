@@ -91,6 +91,10 @@ public class MethodDumper extends Dumper<MethodEntity> {
 
     @Override
     public MethodEntity load(InputStream input) throws IOException {
+        return load(input,Integer.MAX_VALUE,false);
+    }
+
+    MethodEntity load(InputStream input,int maximumParameters,boolean strictFlags) throws IOException {
         DumpInputStream data = new DumpInputStream(input);
         MethodEntity entity = new MethodEntity(context);
 
@@ -101,22 +105,25 @@ public class MethodDumper extends Dumper<MethodEntity> {
         }
 
         // static
-        entity.setStatic( data.readBoolean() );
+        entity.setStatic( readFlag(data,strictFlags) );
 
         // final
-        entity.setFinal( data.readBoolean() );
+        entity.setFinal( readFlag(data,strictFlags) );
 
         // abstract
-        entity.setAbstract( data.readBoolean() );
-        entity.setAbstractable(data.readBoolean());
+        entity.setAbstract( readFlag(data,strictFlags) );
+        entity.setAbstractable(readFlag(data,strictFlags));
 
-        entity.setImmutable(data.readBoolean());
-        entity.setResult(data.readMemory());
+        entity.setImmutable(readFlag(data,strictFlags));
+        if(strictFlags) {
+            if(data.readInt()!=-1) throw new DumpException("Hook method cannot contain a folded heap result");
+            entity.setResult(null);
+        } else entity.setResult(data.readMemory());
 
-        entity.setEmpty(data.readBoolean());
+        entity.setEmpty(readFlag(data,strictFlags));
 
         // ref
-        entity.setReturnReference( data.readBoolean() );
+        entity.setReturnReference( readFlag(data,strictFlags) );
 
         // type hinting
         entity.setReturnType(data.readHintType());
@@ -126,10 +133,10 @@ public class MethodDumper extends Dumper<MethodEntity> {
             entity.setReturnTypeClass(returnTypeClass);
         }
 
-        entity.setReturnTypeNullable(data.readBoolean());
+        entity.setReturnTypeNullable(readFlag(data,strictFlags));
 
         // uses stack trace
-        entity.setUsesStackTrace( data.readBoolean() );
+        entity.setUsesStackTrace( readFlag(data,strictFlags) );
 
         // modifier
         entity.setModifier(data.readModifier());
@@ -142,12 +149,12 @@ public class MethodDumper extends Dumper<MethodEntity> {
         entity.setTrace(data.readTrace(context));
 
         int paramCount = data.readInt();
-        if (paramCount < 0)
+        if (paramCount < 0 || paramCount > maximumParameters)
             throw new DumpException("Invalid param count");
 
         entity.setParameters(new ParameterEntity[paramCount]);
         for(int i = 0; i < paramCount; i++){
-            ParameterEntity param = parameterDumper.load(input);
+            ParameterEntity param = parameterDumper.load(input,strictFlags);
             param.setTrace(entity.getTrace());
             entity.getParameters()[i] = param;
         }
@@ -155,5 +162,11 @@ public class MethodDumper extends Dumper<MethodEntity> {
         var declaration = TypeDeclarationDumper.load(data.readRawData());
         if (declaration != null) entity.setReturnTypeChecker(declaration);
         return entity;
+    }
+    private static boolean readFlag(DumpInputStream data,boolean strict) throws IOException {
+        if(!strict) return data.readBoolean();
+        int flag=data.readUnsignedByte();
+        if(flag>1) throw new DumpException("Invalid hook method boolean flag");
+        return flag==1;
     }
 }

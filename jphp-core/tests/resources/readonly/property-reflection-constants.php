@@ -1,0 +1,2 @@
+<?php function ro_result($f){try{return ["ok",$f()];}catch(Throwable $e){return [get_class($e),$e->getMessage()];}}
+class R{public readonly int $a;protected readonly int $b;private readonly int $c;}echo serialize([ReflectionProperty::IS_READONLY,ReflectionProperty::IS_PROTECTED_SET,ReflectionClass::IS_READONLY,(new ReflectionProperty(R::class,"a"))->getModifiers(),(new ReflectionProperty(R::class,"b"))->getModifiers(),(new ReflectionProperty(R::class,"c"))->getModifiers()]);

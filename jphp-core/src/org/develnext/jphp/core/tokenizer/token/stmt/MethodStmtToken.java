@@ -7,6 +7,25 @@ import java.util.List;
 
 public class MethodStmtToken extends FunctionStmtToken {
     private boolean isAbstract;
+    private String propertyHookName;
+    // Compiler-only lexical origin of the generated _run body, never a receiver/ownership certificate.
+    private int generatorPropertyHookKind;
+    public int getGeneratorPropertyHookKind() {return generatorPropertyHookKind;}
+    public void setGeneratorPropertyHookKind(int kind) {
+        if(kind<1 || kind>2)throw new IllegalArgumentException("Invalid generator hook kind");
+        generatorPropertyHookKind=kind;
+    }
+    private final java.util.List<PropertyHookStmtToken.BackingAccess> propertyHookBackingAccesses=new java.util.ArrayList<>();
+    public String getPropertyHookName() {return propertyHookName;}
+    public void setPropertyHookName(String name) {propertyHookName=name;}
+    public void notePropertyHookBackingAccess(PropertyHookStmtToken.BackingAccess access) {
+        if(propertyHookName==null || !access.member().getWord().equals(propertyHookName))
+            throw new IllegalArgumentException("Not the executing hook's exact backing property");
+        propertyHookBackingAccesses.add(access);
+    }
+    public java.util.List<PropertyHookStmtToken.BackingAccess> getPropertyHookBackingAccesses() {
+        return java.util.List.copyOf(propertyHookBackingAccesses);
+    }
     private boolean isFinal;
     private boolean isStatic;
     private boolean moduleChunk;
@@ -21,6 +40,7 @@ public class MethodStmtToken extends FunctionStmtToken {
 
     public MethodStmtToken(FunctionStmtToken token){
         this(token.getMeta());
+        setPhpAttributes(token.getPhpAttributes());
         setArguments(token.arguments);
         setBody(token.body);
         setModifier(token.modifier);

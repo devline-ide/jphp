@@ -10,7 +10,9 @@ public class StaticAccessExprToken extends ValueExprToken {
     protected ValueExprToken field;
     protected ExprStmtToken fieldExpr;
     protected boolean dynamicConstant;
-    private boolean writeAccess, quietRead;
+    private boolean writeAccess, quietRead,directAssignment;
+    public boolean isDirectAssignment(){return directAssignment;}
+    public void setDirectAssignment(boolean value){directAssignment=value;}
     public boolean isWriteAccess() {return writeAccess;}
     public void setWriteAccess(boolean value) {writeAccess=value;}
     public boolean isQuietRead() {return quietRead;}

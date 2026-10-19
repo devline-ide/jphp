@@ -10,13 +10,15 @@ import php.runtime.reflection.ModuleEntity;
 public final class PhpConstantTypes {
     private PhpConstantTypes() {}
     public static void validate(ModuleEntity module, Environment env) {
-        for (ClassEntity owner : module.getClasses()) {
-            if (owner.getParent() != null) for (ConstantEntity parent : owner.getParent().getConstants())
-                if (!parent.isPrivate()) check(owner.findConstant(parent.getName()), parent, module, env);
-            for (ClassEntity contract : owner.getInterfaces().values()) for (ConstantEntity parent : contract.getConstants())
-                check(owner.findConstant(parent.getName()), parent, module, env);
-        }
+        for (ClassEntity owner : module.getClasses()) if (!owner.isUnresolvedDeclaration()) validateClass(owner,module,env);
     }
+    public static void validateClass(ClassEntity owner, ModuleEntity module, Environment env) {
+        if (owner.getParent() != null) for (ConstantEntity parent : owner.getParent().getConstants())
+            if (!parent.isPrivate()) check(owner.findConstant(parent.getName()), parent, module, env);
+        for (ClassEntity contract : owner.getInterfaces().values()) for (ConstantEntity parent : contract.getConstants())
+            check(owner.findConstant(parent.getName()), parent, module, env);
+    }
+
     private static void check(ConstantEntity child, ConstantEntity parent, ModuleEntity module, Environment env) {
         if (child == null || child == parent || parent.getDeclaredType() == null) return;
         PhpTypeDeclaration actual = child.getDeclaredType(), required = parent.getDeclaredType();

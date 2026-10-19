@@ -42,6 +42,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
     public final MethodNode node;
 
     protected int statementIndex = 0;
+    private int finallyReturnSequence;
 
     private Stack<StackItem> stack = new Stack<StackItem>();
     private final List<JumpItem> jumpStack = new ArrayList<JumpItem>();
@@ -62,6 +63,25 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
     private boolean external = false;
     private boolean initializer;
+    private final OwnershipFrameCompiler ownership = new OwnershipFrameCompiler(this);
+
+    public OwnershipFrameCompiler ownership() { return ownership; }
+    private final TypedSourceFrameCompiler typedSources = new TypedSourceFrameCompiler(this);
+    public TypedSourceFrameCompiler typedSources() { return typedSources; }
+    private PrimitiveCellFrameCompiler primitiveCells;
+    public PrimitiveCellFrameCompiler primitiveCells() {
+        if (primitiveCells==null) primitiveCells=new PrimitiveCellFrameCompiler(this);return primitiveCells;
+    }
+    private final TraitStaticSitesCompiler traitStaticSites = new TraitStaticSitesCompiler(this);
+    public TraitStaticSitesCompiler traitStaticSites() { return traitStaticSites; }
+    public boolean isCompilingFinally() { return !activeFinallyBodies.empty(); }
+    public List<BodyStmtToken> currentFinallyBodies() { return List.copyOf(activeFinallyBodies); }
+
+    public TryCatchItem newTryCatchItem(TryStmtToken token, LabelNode returnLabel) {
+        String pending = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                ? "~finallyReturn~" + finallyReturnSequence++ : "~result~";
+        return new TryCatchItem(token, returnLabel, pending, ownership.enabled() ? ownership.returnRoute() : -1, currentFinallyBodies());
+    }
 
     private long methodId;
     private LabelNode labelStart;
@@ -119,6 +139,13 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
     public void setRealName(String realName) {
         this.realName = realName;
     }
+
+    // Null means a parameter/property default initializer. An empty name means a
+    // non-callable attribute declaration, whose function/method magic constants are empty.
+    private String attributeCallableName;
+    public boolean isAttributeInitializer() {return attributeCallableName!=null;}
+    public String getAttributeCallableName() {return attributeCallableName;}
+    public void setAttributeCallableName(String name) {attributeCallableName=java.util.Objects.requireNonNull(name);realName=name;}
 
     public boolean isInitializer() { return initializer; }
 
@@ -418,6 +445,26 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
         return localVariables.get(variable);
     }
 
+    private void writeConstructorPromotion(ExpressionStmtCompiler expr) {
+        for (ArgumentStmtToken argument : statement.getArguments()) if (argument.getPromotionModifier() != null) {
+            expr.writePushThis();expr.writeVarLoad(argument.getName().getName());
+            if (!argument.isReference()) expr.writePopImmutable();
+            expr.writePushConstString(argument.getName().getName());
+            expr.writePushEnv();expr.writePushTraceInfo(argument);
+            if (clazz.statement.isTrait()) {expr.writePushConstNull();expr.writePushConstInt(0);}
+            else {
+                expr.writeGetStatic("$CALL_PROP_CACHE",php.runtime.invoke.cache.PropertyCallCache.class);
+                expr.writePushConstInt(clazz.getAndIncCallPropCount());
+            }
+            expr.writeSysStaticCall(php.runtime.invoke.ObjectInvokeHelper.class,
+                    argument.isReference() ? "assignRefProperty" : "assignProperty",Memory.class,
+                    Memory.class,Memory.class,String.class,Environment.class,TraceInfo.class,
+                    php.runtime.invoke.cache.PropertyCallCache.class,int.class);
+            expr.writePopAll(1);
+            entity.setEmpty(false);entity.setImmutable(false);entity.setResult(null);
+        }
+    }
+
     void writeHeader(){
         int access = 0;
         if (statement != null){
@@ -435,6 +482,9 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
             //if (statement.isAbstract()) access += Opcodes.ACC_ABSTRACT;
             if (statement.isFinal()) access += Opcodes.ACC_FINAL;
 
+            if(statement.getPropertyHookName()!=null && generatorEntity==null) {
+                access&=~(Opcodes.ACC_PUBLIC|Opcodes.ACC_PROTECTED);access|=Opcodes.ACC_PRIVATE;
+            }
             node.access = access;
             node.name = clazz.isSystem() || entity == null ? statement.getName().getName() : entity.getInternalName();
             node.desc = Type.getMethodDescriptor(
@@ -464,20 +514,44 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
             addLocalVariable("~env", label, Environment.class); // Environment env
             LocalVariable args = addLocalVariable("~args", label, Memory[].class);  // Memory[] arguments
 
+            if (external && statement.isDynamicLocal())
+                addLocalVariable("~passedLocal", label, ArrayMemory.class);
+            if(statement.getPropertyHookName()!=null) {
+                LocalVariable hook=addLocalVariable("~propertyHook",label,php.runtime.reflection.support.PhpPropertyHooks.Hook.class);
+                expressionCompiler.writeVarLoad("~this");expressionCompiler.writePushEnv();
+                expressionCompiler.writePushConstString(statement.getPropertyHookName());
+                expressionCompiler.writePushConstInt(generatorEntity==null?entity.getName().endsWith("::get")?1:2:statement.getGeneratorPropertyHookKind());
+                expressionCompiler.writePushConstString(entity.getInternalName());
+                expressionCompiler.writeSysStaticCall(php.runtime.PhpPropertyHookBodyAccess.class,
+                        generatorEntity==null?"bindGeneratedMethod":"bindGeneratedGenerator",
+                        php.runtime.reflection.support.PhpPropertyHooks.Hook.class,
+                        generatorEntity==null?php.runtime.lang.IObject.class:php.runtime.lang.Generator.class,
+                        Environment.class,String.class,int.class,String.class);
+                expressionCompiler.writeVarStore(hook,false,false);
+                if(generatorEntity!=null) {
+                    LocalVariable original=addLocalVariable("~propertyHookThis",label,php.runtime.lang.IObject.class);
+                    expressionCompiler.writeVarLoad("~this");
+                    expressionCompiler.writeSysDynamicCall(php.runtime.lang.Generator.class,"__getHookReceiver",php.runtime.lang.IObject.class);
+                    expressionCompiler.writeVarStore(original,false,false);
+                }
+            }
+            ownership.defineEntry(label);
+
             if (statement.isDynamicLocal()){
-                if (external)
-                    addLocalVariable("~passedLocal", label, ArrayMemory.class);
 
                 LocalVariable local = addLocalVariable("~local", label, ArrayMemory.class);
+                LabelNode ownershipTableEnd = ownership.table(node.instructions);
 
                 if (external){
                     expressionCompiler.writeVarLoad("~passedLocal");
                     expressionCompiler.writeSysStaticCall(ArrayMemory.class, "valueOfRef", ArrayMemory.class, ArrayMemory.class);
+                    if (ownershipTableEnd != null) node.instructions.add(ownershipTableEnd);
                     expressionCompiler.setStackPeekAsImmutable();
                     expressionCompiler.writeVarStore(local, false, true);
                 } else {
                     expressionCompiler.writePushConstNull();
                     expressionCompiler.writeSysStaticCall(ArrayMemory.class, "valueOfRef", ArrayMemory.class, ArrayMemory.class);
+                    if (ownershipTableEnd != null) node.instructions.add(ownershipTableEnd);
                     expressionCompiler.setStackPeekAsImmutable();
                     expressionCompiler.writeVarStore(local, false, true);
                 }
@@ -489,30 +563,41 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 expressionCompiler.writeGetDynamic("uses", Memory[].class);
 
                 for (ArgumentStmtToken argument : statement.getUses()) {
+                    // A byvalue argument/capture can become a private writable yield cell.
+                    boolean privateYieldReference = !argument.isReference() && generatorEntity != null
+                            && generatorEntity.isReturnReference() && statement.variable(argument.getName()).isReference();
                     LocalVariable local;
                     if (statement.isDynamicLocal()) {
                         expressionCompiler.writeDefineVariable(argument.getName());
                         local = getLocalVariable(argument.getName().getName());
                     } else {
                         local = addLocalVariable(argument.getName().getName(), label, Memory.class);
+                        ownership.manage(local);
                     }
 
-                    if (argument.isReference()){
+                    if (argument.isReference() || privateYieldReference){
                         local.setReference(true);
                         statement.variable(argument.getName()).setUnstable(true);
                     }
 
                     expressionCompiler.writePushDup();
                     expressionCompiler.writePushGetFromArray(i, Memory.class);
+                    ownership.importing(i, true, argument.isReference());
 
                     if (statement.isDynamicLocal()) {
                         expressionCompiler.writeVarAssign(local, argument.getName(), false, false);
                     } else {
-                        if (argument.isReference() && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                        if (privateYieldReference) {
+                            // Detach the PHP value before creating a cell; a byvalue import
+                            // must never alias a caller parameter or lexical capture cell.
+                            expressionCompiler.writePopImmutable();
+                            expressionCompiler.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "valueOf", Memory.class, Memory.class);
+                        } else if (argument.isReference() && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
                             expressionCompiler.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "valueOf", Memory.class, Memory.class);
                         expressionCompiler.writeVarStore(local, false, false);
                     }
 
+                    ownership.endImport();
                     local.pushLevel();
                     i++;
                 }
@@ -536,7 +621,9 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 if (local != null) {
                     expressionCompiler.writeVarLoad(args);
                     expressionCompiler.writePushGetFromArray(i, Memory.class);
+                    ownership.importing(i, false, argument.isReference());
                     expressionCompiler.writeVarAssign(local, argument.getName(), true, false);
+                    ownership.endImport();
 
                     // if length <= i then undefined
                     node.instructions.add(new JumpInsnNode(Opcodes.IFNONNULL, next));
@@ -614,6 +701,12 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
     @SuppressWarnings("unchecked")
     void writeFooter(){
+        typedSources.prepare();
+        ownership.finish();
+        primitiveCells().finish();
+        typedSources.finish();
+        ownership.finishTransport();
+        traitStaticSites.finish();
         LabelNode endL = new LabelNode();
         node.instructions.add(endL);
 
@@ -665,6 +758,10 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 entity.setReturnTypeChecker(TypeChecker.of(statement.getReturnHintTypeClass().getName()));
             } else if (statement.getReturnHintType() != null) {
                 entity.setReturnTypeChecker(TypeChecker.of(statement.getReturnHintType()));
+            } else if (!clazz.isSystem() && !clazz.isClosure()
+                    && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && "__tostring".equals(php.runtime.common.PhpClassNames.canonicalKey(entity.getName()))) {
+                entity.setReturnTypeChecker(TypeChecker.of(php.runtime.common.HintType.STRING));
             }
 
             entity.setReturnTypeNullable(statement.isReturnOptional());
@@ -674,6 +771,8 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
             else
                 entity.setInternalName(entity.getName() + "$" + clazz.entity.nextMethodIndex());
 
+            clazz.compilePhpAttributes(entity,statement,clazz.isSystem()
+                    ? php.runtime.reflection.support.PhpAttribute.FUNCTION : php.runtime.reflection.support.PhpAttribute.METHOD);
             ParameterEntity[] parameters = new ParameterEntity[statement.getArguments().size()];
             int i = 0;
             for(ArgumentStmtToken argument : statement.getArguments()){
@@ -681,7 +780,10 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 ParameterEntity parameter = parameters[i];
 
                 parameter.setReference(argument.isReference());
+                parameter.setPromoted(argument.getPromotionModifier() != null);
                 parameter.setName(argument.getName().getName());
+                clazz.compilePhpAttributes(parameter,argument,php.runtime.reflection.support.PhpAttribute.PARAMETER,
+                        (clazz.isSystem() && clazz.getFunctionName()!=null ? clazz.getFunctionName() : entity.getName())+"/P"+i);
                 parameter.setTrace(argument.toTraceInfo(compiler.getContext()));
                 parameter.setNullable(argument.isOptional());
 
@@ -706,7 +808,9 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 ExprStmtToken value = argument.getValue();
 
                 if (value != null) {
-                    Memory defaultValue = expressionStmtCompiler.writeExpression(value, true, true, false);
+                    Memory defaultValue = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                            ? PhpConstantExpression.checkParameter(value, expressionStmtCompiler)
+                            : expressionStmtCompiler.writeExpression(value, true, true, false);
 
                     // try detect constant
                     if (value.isSingle()) {
@@ -736,7 +840,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                     }
 
                     if (defaultValue == null && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
-                        defaultValue = PhpConstantExpression.check(value, expressionStmtCompiler);
+                        defaultValue = PhpConstantExpression.checkParameter(value, expressionStmtCompiler);
                         if (defaultValue == null) {
                             parameter.setDefaultInitializer(writeParameterInitializer(value));
                             defaultValue = Memory.NULL;
@@ -759,6 +863,9 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                                 php.runtime.reflection.support.PhpTypeDeclaration.valueType(defaultValue), parameter.getName(), type.getErrorSignature());
                         defaultValue = checked;
                     }
+                    if (argument.getPromotedType() != null && parameter.getDefaultInitializer() == null && defaultValue.isNull() && !argument.getPromotedType().allowsNull())
+                        compiler.getEnvironment().error(argument.toTraceInfo(compiler.getContext()), ErrorType.E_COMPILE_ERROR,
+                                "Cannot use null as default value for parameter $%s of type %s", parameter.getName(), argument.getPromotedType().getErrorSignature());
                     parameter.setDefaultValue(defaultValue);
                 }
                 i++;
@@ -773,7 +880,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                         Messages.ERR_INTERFACE_FUNCTION_CANNOT_CONTAIN_BODY.fetch(entity.getSignatureString(false))
                 );
             }
-            if (statement.isAbstract() || statement.isFinal()){
+            if (statement.getPropertyHookName()==null && (statement.isAbstract() || statement.isFinal())){
                 compiler.getEnvironment().error(entity.getTrace(),
                         Messages.ERR_ACCESS_TYPE_FOR_INTERFACE_METHOD.fetch(entity.getSignatureString(false))
                 );
@@ -793,7 +900,8 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                             .anyMatch(arm -> arm.size() == 1 && java.util.Set.of("generator", "iterator", "traversable", "iterable", "object", "mixed")
                                     .contains(arm.getFirst().toLowerCase(java.util.Locale.ROOT)));
                     if (!valid) compiler.getEnvironment().error(entity.getTrace(), ErrorType.E_COMPILE_ERROR,
-                            "Generator return type must be a supertype of Generator, %s given", name == null ? hint : name);
+                            "Generator return type must be a supertype of Generator, %s given",
+                            statement.getDeclaredReturnType()!=null?statement.getDeclaredReturnType().getSignature():name==null?hint:name);
                 }
                 entity.setEmpty(false);
                 entity.setImmutable(false);
@@ -803,6 +911,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
                 ExpressionStmtCompiler expr = new ExpressionStmtCompiler(this, null);
 
+                writeConstructorPromotion(expr);
                 expr.makeUnknown(new TypeInsnNode(NEW, entity.getGeneratorEntity().getInternalName()));
                 expr.stackPush(Memory.Type.REFERENCE);
                 expr.writePushDup();
@@ -819,14 +928,37 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 // self
                 expr.writePushThis();
 
-                // uses
-                expr.writeVarLoad("~args");
+                // Generator closures retain both resolved arguments and lexical captures.
+                if (statement.getUses() != null && !statement.getUses().isEmpty()) {
+                    List<ArgumentStmtToken> uses = new ArrayList<>(statement.getArguments());
+                    uses.addAll(statement.getUses());
+                    expr.writePushSmallInt(uses.size());
+                    node.instructions.add(new TypeInsnNode(Opcodes.ANEWARRAY, Type.getInternalName(Memory.class)));
+                    expr.stackPop();
+                    expr.stackPush(Memory.Type.REFERENCE);
+                    int useIndex = 0;
+                    for (ArgumentStmtToken use : uses) {
+                        expr.writePushDup();
+                        expr.writePushSmallInt(useIndex++);
+                        expr.writeVarLoad(getLocalVariable(use.getName().getName()));
+                        expr.writePopBoxing(!use.isReference());
+                        if (use.isReference() && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                            expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class, "exportReference", Memory.class, Memory.class);
+                        node.instructions.add(new InsnNode(Opcodes.AASTORE));
+                        expr.stackPop(); expr.stackPop(); expr.stackPop();
+                    }
+                } else {
+                    expr.writeVarLoad("~args");
+                }
 
                 expr.writeSysCall(
                         entity.getGeneratorEntity().getInternalName(), INVOKESPECIAL, Constants.INIT_METHOD, void.class,
                         Environment.class, ClassEntity.class, Memory.class, Memory[].class
                 );
                 expr.writeSysStaticCall(ObjectMemory.class, "valueOf", Memory.class, IObject.class);
+                if(statement.getPropertyHookName()!=null && entity.isReturnReference()
+                        && compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                    expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class,"valueOf",Memory.class,Memory.class);
 
                 expr.makeUnknown(new InsnNode(Opcodes.ARETURN));
                 expr.stackPop();
@@ -841,6 +973,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
                 if (statement != null && statement.getBody() != null) {
                     expr.writeDefineVariables(statement.getLocal());
+                    writeConstructorPromotion(expr);
                     if (!ModuleBodyCompiler.write(expr, statement)) expr.write(statement.getBody());
 
                     if (!statement.getBody().getInstructions().isEmpty()) {
@@ -867,6 +1000,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 expr.getCompiler(ReturnStmtToken.class).write(token);
             }
 
+            ownership.finish();
             writePropertyWriteContext();
             writeFooter();
         }
@@ -877,12 +1011,26 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
     public static class TryCatchItem {
         private final TryStmtToken token;
         private final LabelNode returnLabel;
+        private final String returnVariable;
+        private final int returnCustodyId;
+        private final List<BodyStmtToken> finallyBodies;
         private final Map<LabelNode, LabelNode> exitLabels = new LinkedHashMap<>();
 
         public TryCatchItem(TryStmtToken token, LabelNode returnLabel) {
+            this(token, returnLabel, "~result~", -1, List.of());
+        }
+
+        private TryCatchItem(TryStmtToken token, LabelNode returnLabel, String returnVariable, int returnCustodyId, List<BodyStmtToken> finallyBodies) {
             this.token = token;
             this.returnLabel = returnLabel;
+            this.returnVariable = returnVariable;
+            this.returnCustodyId = returnCustodyId;
+            this.finallyBodies = List.copyOf(finallyBodies);
         }
+
+        public String getReturnVariable() { return returnVariable; }
+        public int getReturnCustodyId() { return returnCustodyId; }
+        public List<BodyStmtToken> getFinallyBodies() { return finallyBodies; }
 
         public TryStmtToken getToken() {
             return token;

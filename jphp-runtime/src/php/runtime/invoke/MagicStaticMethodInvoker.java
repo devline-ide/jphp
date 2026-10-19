@@ -21,7 +21,7 @@ class MagicStaticMethodInvoker extends StaticMethodInvoker {
         env.pushCall(trace, null, args, methodName.toString(), method.getClazz().getName(), calledClass);
         env.pushCall(
                 trace, null,
-                new Memory[]{methodName, new ArrayMemory(true, args)},
+                new Memory[]{methodName, PhpNamedArgumentTarget.magicArguments(env, args, this)},
                 method.getName(), method.getClazz().getName(), calledClass
         );
     }
@@ -34,6 +34,6 @@ class MagicStaticMethodInvoker extends StaticMethodInvoker {
 
     @Override
     protected Memory invoke(Memory... args) throws Throwable {
-        return super.invoke(methodName, new ArrayMemory(false, args));
+        return super.invoke(methodName, PhpNamedArgumentTarget.magicArguments(env, args, this));
     }
 }

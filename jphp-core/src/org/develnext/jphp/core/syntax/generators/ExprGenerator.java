@@ -248,6 +248,7 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
         }
             //unexpectedToken(next, "$var");
 
+        if(result.isValueReference())result.setIterator(PhpSetVisibility.reference(analyzer,result.getIterator()));
         if (result.getValue().isSingle() && result.getValue().getSingle() instanceof ListExprToken) {
             ListExprToken listExprToken = (ListExprToken)result.getValue().getSingle();
             if (listExprToken.getVariables().isEmpty()) {
@@ -415,23 +416,7 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
                     .getToken(next, iterator);
             if (value != null && analyzer.getFunction() != null && analyzer.getFunction().isReturnReference()
                     && analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
-                List<Token> path = new ArrayList<>(value.getTokens());
-                int baseEnd = path.size();
-                while (baseEnd > 0 && (path.get(baseEnd - 1) instanceof ArrayGetExprToken
-                        || path.get(baseEnd - 1) instanceof DynamicAccessExprToken)) baseEnd--;
-                if (baseEnd == 1 && path.get(0) instanceof VariableExprToken) {
-                    analyzer.getFunction().variable((VariableExprToken) path.get(0)).setReference(true).setUnstable(true);
-                    for (int i = baseEnd; i < path.size(); i++) {
-                        Token step = path.get(i);
-                        if (step.getClass() == ArrayGetExprToken.class) {
-                            ArrayGetRefExprToken reference = new ArrayGetRefExprToken((ArrayGetExprToken) step);
-                            reference.setShortcut(true);
-                            path.set(i, reference);
-                        }
-                        else if (step.getClass() == DynamicAccessExprToken.class) path.set(i, new DynamicAccessGetRefExprToken((DynamicAccessExprToken) step));
-                    }
-                    value = new ExprStmtToken(analyzer.getEnvironment(), analyzer.getContext(), path);
-                }
+                value=PhpSetVisibility.reference(analyzer,value);
             }
             result.setValue(value);
         }
@@ -713,7 +698,27 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
             } else if (current instanceof SemicolonToken){
                 tokens.add(current);
                 break;
+            } else if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && (current.getClass()==NameToken.class && current.getWord().equalsIgnoreCase("enum") && iterator.hasNext()
+                            && nextTokenAndPrev(iterator) instanceof NameToken
+                        || isTokenClass(current, ClassStmtToken.class, InterfaceStmtToken.class, TraitStmtToken.class,
+                            FinalStmtToken.class, AbstractStmtToken.class)
+                        || current instanceof NameToken && current.getWord().equalsIgnoreCase("readonly") && iterator.hasNext()
+                            && isTokenClass(nextTokenAndPrev(iterator),ClassStmtToken.class,FinalStmtToken.class,AbstractStmtToken.class))) {
+                ClassStmtToken declaration = analyzer.generator(ClassGenerator.class).getToken(current, iterator, true);
+                if (declaration == null) unexpectedToken(current);
+                tokens.add(declaration);
+                break;
+            } else if (current instanceof AttributeStartToken) {
+                Token declaration=analyzer.generator(AttributeGenerator.class).getToken(current,iterator,true);
+                if(declaration instanceof FunctionStmtToken function && function.getName()!=null) {
+                    function.setStatic(false);
+                    analyzer.registerFunction(function);
+                }
+                if(declaration instanceof ExprStmtToken attributed) tokens.addAll(attributed.getTokens());else tokens.add(declaration);
+                break;
             } else if (current instanceof FunctionStmtToken){
+                FunctionStmtToken parentFunction=analyzer.getFunction();
                 FunctionStmtToken token = analyzer.generator(FunctionGenerator.class)
                         .getToken(current, iterator, true);
                 token.setStatic(false);
@@ -721,6 +726,7 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
                     ClosureStmtToken closure = new ClosureStmtToken(token.getMeta());
                     closure.setFunction(token);
                     closure.setOwnerClass(analyzer.getClazz());
+                    closure.setParentFunction(parentFunction);
                     tokens.add(closure);
                     analyzer.registerClosure(closure);
 

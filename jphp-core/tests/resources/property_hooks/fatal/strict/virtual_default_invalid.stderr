@@ -1,0 +1,3 @@
+Fatal error: Cannot specify default value for virtual hooked property H::$x in G:\DevLine-QA\jphp-property-hooks-20261013\native-corpus1\php\strict\virtual_default_invalid.php on line 5
+Stack trace:
+#0 {main}

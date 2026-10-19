@@ -44,11 +44,11 @@ public class ConstantDumper extends Dumper<ConstantEntity> {
         dump.writeEnum(entity.getModifier());
         dump.writeName(entity.getName());
         dump.writeTrace(debugInformation ? null : entity.getTrace());
-        dump.writeMemory(entity.getValue());
+        dump.writeMemory(entity.getStoredValue());
 
         ByteArrayOutputStream metadata = new ByteArrayOutputStream();
         DumpOutputStream attributes = new DumpOutputStream(metadata);
-        attributes.writeInt(3);
+        attributes.writeInt(entity.isEnumCase()?4:3);
         attributes.writeBoolean(entity.isFinal());
         attributes.writeName(entity.getTraitName());
         attributes.writeName(entity.getInitializerClass());
@@ -58,6 +58,7 @@ public class ConstantDumper extends Dumper<ConstantEntity> {
         if (type != null) for (var arm : type.getAlternatives()) {
             attributes.writeInt(arm.size()); for (String name : arm) attributes.writeName(name);
         }
+        if(entity.isEnumCase())attributes.writeBoolean(true);
         dump.writeRawData(metadata.toByteArray());
     }
 
@@ -86,7 +87,7 @@ public class ConstantDumper extends Dumper<ConstantEntity> {
         if (metadata != null && metadata.length != 0) {
             DumpInputStream attributes = new DumpInputStream(new ByteArrayInputStream(metadata));
             int version = attributes.readInt();
-            if (version < 1 || version > 3) throw new DumpException("Unsupported class constant metadata version");
+            if (version < 1 || version > 4) throw new DumpException("Unsupported class constant metadata version");
             entity.setFinal(attributes.readBoolean());
             entity.setTraitName(attributes.readName());
             if (version >= 2) entity.setInitializer(attributes.readName(), attributes.readName());
@@ -107,6 +108,7 @@ public class ConstantDumper extends Dumper<ConstantEntity> {
                 }
                 if (alternatives > 0) entity.setDeclaredType(new php.runtime.reflection.support.PhpTypeDeclaration(arms));
             }
+            if(version>=4){if(attributes.readUnsignedByte()!=1)throw new DumpException("Invalid enum case flag");entity.setEnumCase(true);}
             if (attributes.available() != 0) throw new DumpException("Invalid class constant metadata size");
         }
         return entity;

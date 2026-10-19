@@ -41,6 +41,8 @@ abstract public class CastExprToken extends OperatorExprToken {
             return new ObjectCastExprToken(meta);
         else if (word.equals("unset"))
             return new UnsetCastExprToken(meta);
+        else if (word.equals("void"))
+            return new VoidCastExprToken(meta);
         else if (word.equals("binary"))
             return new BinaryCastExprToken(meta);
 

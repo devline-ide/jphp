@@ -1,0 +1,4 @@
+existing:ok:2
+rhs
+missing:Error:Cannot indirectly modify private(set) property H::$a from global scope
+{"x":2}

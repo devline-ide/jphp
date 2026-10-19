@@ -1,0 +1,168 @@
+[
+  {
+    "id": "weak/basic",
+    "resource": "resources/property_hooks/generator_resume/weak/basic",
+    "nativeExit": 0,
+    "sourceSha256": "1db3cb646cd1b335e8961d3301f9aeab2f1d192cf5440413b944e753a41452fc",
+    "stdoutSha256": "00b040d22bf6a6e17728e0f462835ff95421f5d5aa0d5a7cdd86f54cacee63b1",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/parent",
+    "resource": "resources/property_hooks/generator_resume/weak/parent",
+    "nativeExit": 0,
+    "sourceSha256": "17ee7906896b2661923ab30e2501de7c4c375115f79a49eb220f141f3d73d2a1",
+    "stdoutSha256": "04daf8f80f6bb4901f0dd552b42ee395a61858a2ec3fcd2e85920fc8acd21d31",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/parent_generator",
+    "resource": "resources/property_hooks/generator_resume/weak/parent_generator",
+    "nativeExit": 0,
+    "sourceSha256": "14f41a5aeb9f645c1a7ae259667e4613e031b0694db9f6f9a7cbca94a3a21bab",
+    "stdoutSha256": "02fd701463ea126483150b6ebb0e3acbc97c671296d1de21f8867507fcd153e6",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/backing",
+    "resource": "resources/property_hooks/generator_resume/weak/backing",
+    "nativeExit": 0,
+    "sourceSha256": "9f4d8856a147057e6a0e4ef22637b5afdfc56084645ae199bcb627feb6c7c48e",
+    "stdoutSha256": "25b711ee2aecbd7cf2867f3ee49a1c5b9e0400c5e2f69e482f02bf9206443924",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/reference",
+    "resource": "resources/property_hooks/generator_resume/weak/reference",
+    "nativeExit": 0,
+    "sourceSha256": "4e5a61f278c662931379a3c3d53d3c3688574f65a213375b3d60199a831dd53d",
+    "stdoutSha256": "ddc23b00af659d75ea14f7fb5db21e4b5e5ce9fd72ff09e5cfa5512b1c24265a",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/catch_finally",
+    "resource": "resources/property_hooks/generator_resume/weak/catch_finally",
+    "nativeExit": 0,
+    "sourceSha256": "c6a5e05cdad228bb833af1a810901ef97b9a15a8dce42428de01ca9c5b2dbf54",
+    "stdoutSha256": "19140b1f757344ea1ac87e709e183677c4deee0f90b497fa99ef9ae9ffc45399",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/receiver_suspended",
+    "resource": "resources/property_hooks/generator_resume/weak/receiver_suspended",
+    "nativeExit": 0,
+    "sourceSha256": "073915e2953cc707d2b0b6d7a7d8be0a51d9e4c396049aafcd68fe357157df49",
+    "stdoutSha256": "7a1d6ea4aa49c65d0902b5a7cdfa466bf04330218148815109075b3d879fbf31",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/nested_forbidden",
+    "resource": "resources/property_hooks/generator_resume/weak/nested_forbidden",
+    "nativeExit": 255,
+    "sourceSha256": "e56c0ccad594a60c2ea695fa569576e291e7c4c03df244b84467e7804b8ecaa0",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "ab2682e1a5e89028a3deaf63eca9f8dc69a17f110826a260dfeec07e1bd922bf",
+    "message": "Must not use parent::$x::get() outside a property hook"
+  },
+  {
+    "id": "weak/wrong_return_type",
+    "resource": "resources/property_hooks/generator_resume/weak/wrong_return_type",
+    "nativeExit": 255,
+    "sourceSha256": "217d507c01f2132a7dc7b90a3ff6fa0f79170f1497335dd38303fdb984eaa3bd",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "acf2d237f2c8122348d73e5123cf955d17556356e0e454058d16c3b78eeda3d4",
+    "message": "Generator return type must be a supertype of Generator, int given"
+  },
+  {
+    "id": "weak/reference_yield_from",
+    "resource": "resources/property_hooks/generator_resume/weak/reference_yield_from",
+    "nativeExit": 255,
+    "sourceSha256": "50694625f7c4b86e05d59c27ac77e144e2496087e5c98b0fe9a8c510251522dc",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "235a2241f0bf555b5333035023170651d235d13ed811ee6abbeddf04ea66b2a3",
+    "message": "Cannot use \"yield from\" inside a by-reference generator"
+  },
+  {
+    "id": "strict/basic",
+    "resource": "resources/property_hooks/generator_resume/strict/basic",
+    "nativeExit": 0,
+    "sourceSha256": "e385ecd62a47fccc3bcc8e83614b70d7aac011ec1770b9a635f04a50f3c5b787",
+    "stdoutSha256": "00b040d22bf6a6e17728e0f462835ff95421f5d5aa0d5a7cdd86f54cacee63b1",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/parent",
+    "resource": "resources/property_hooks/generator_resume/strict/parent",
+    "nativeExit": 0,
+    "sourceSha256": "4127740b64ab3b0651e9e43b1e0ce65262488488764cb6cb970bd46a05742958",
+    "stdoutSha256": "04daf8f80f6bb4901f0dd552b42ee395a61858a2ec3fcd2e85920fc8acd21d31",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/parent_generator",
+    "resource": "resources/property_hooks/generator_resume/strict/parent_generator",
+    "nativeExit": 0,
+    "sourceSha256": "d76b92b0564018c88910e8709836b2c16cb565c4865479f6a5348b9b75ae0ed9",
+    "stdoutSha256": "02fd701463ea126483150b6ebb0e3acbc97c671296d1de21f8867507fcd153e6",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/backing",
+    "resource": "resources/property_hooks/generator_resume/strict/backing",
+    "nativeExit": 0,
+    "sourceSha256": "3d38b7ceb743382d1ec04ab2a8d573a3aa281c119c88ba984fbc9d18b8853303",
+    "stdoutSha256": "25b711ee2aecbd7cf2867f3ee49a1c5b9e0400c5e2f69e482f02bf9206443924",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/reference",
+    "resource": "resources/property_hooks/generator_resume/strict/reference",
+    "nativeExit": 0,
+    "sourceSha256": "c0d51fb378e8bfb353eddbedf44bcac44d752704931e4a59bb9c21544928747d",
+    "stdoutSha256": "ddc23b00af659d75ea14f7fb5db21e4b5e5ce9fd72ff09e5cfa5512b1c24265a",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/catch_finally",
+    "resource": "resources/property_hooks/generator_resume/strict/catch_finally",
+    "nativeExit": 0,
+    "sourceSha256": "0e7b4fa776b379be7fcc5ad6acfccf1d83d434ed076b92aaf0fd668c54e7b58d",
+    "stdoutSha256": "19140b1f757344ea1ac87e709e183677c4deee0f90b497fa99ef9ae9ffc45399",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/receiver_suspended",
+    "resource": "resources/property_hooks/generator_resume/strict/receiver_suspended",
+    "nativeExit": 0,
+    "sourceSha256": "551aedca1697366979a1c6cc28630992aee174cf40ca400bd1a88aad2e8f6042",
+    "stdoutSha256": "7a1d6ea4aa49c65d0902b5a7cdfa466bf04330218148815109075b3d879fbf31",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/nested_forbidden",
+    "resource": "resources/property_hooks/generator_resume/strict/nested_forbidden",
+    "nativeExit": 255,
+    "sourceSha256": "15e3fb4dad680b0244a2311b8fba2fd9af67bcd615e841c6ca816123fe37398b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "202af8febd55110684af0a81e3f0d64d58310617d602e67dc0f7085adfdcd0b3",
+    "message": "Must not use parent::$x::get() outside a property hook"
+  },
+  {
+    "id": "strict/wrong_return_type",
+    "resource": "resources/property_hooks/generator_resume/strict/wrong_return_type",
+    "nativeExit": 255,
+    "sourceSha256": "f034db3522053f852775b503be61e94461e8dafa706eeba957ad250a1e34f616",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c1241f2e69350ffc018253a81c86624cd00fbf5ebb7b602acae235b78735191c",
+    "message": "Generator return type must be a supertype of Generator, int given"
+  },
+  {
+    "id": "strict/reference_yield_from",
+    "resource": "resources/property_hooks/generator_resume/strict/reference_yield_from",
+    "nativeExit": 255,
+    "sourceSha256": "b200580ac21ba9efb682d4527d46cc12f10421b4a3b278e084a0cd1d9af1c88e",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "1f39999c6d3e9412cd431e0c3b4ef4ace9792097e33dfa09bbd76febf6317674",
+    "message": "Cannot use \"yield from\" inside a by-reference generator"
+  }
+]

@@ -1,0 +1,3 @@
+Fatal error: Property with asymmetric visibility H::$x must have type in G:\DevLine-QA\jphp-property-hooks-20261013\asymmetric-agent-contract-r1\native\strict\untyped.php on line 3
+Stack trace:
+#0 {main}

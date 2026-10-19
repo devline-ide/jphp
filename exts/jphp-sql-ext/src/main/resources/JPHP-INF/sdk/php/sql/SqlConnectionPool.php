@@ -21,6 +21,11 @@ class SqlConnectionPool
     {
     }
 
+    /** Release pooled connections and housekeeping threads. Safe to call repeatedly. */
+    public function close()
+    {
+    }
+
     /**
      * @param string $username
      * @return $this

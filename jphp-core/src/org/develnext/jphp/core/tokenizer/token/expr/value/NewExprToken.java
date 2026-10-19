@@ -10,8 +10,12 @@ import java.util.List;
 
 public class NewExprToken extends ValueExprToken implements CallableExprToken {
     private Token name;
+    private org.develnext.jphp.core.tokenizer.token.stmt.ClassStmtToken anonymousClass;
+    public org.develnext.jphp.core.tokenizer.token.stmt.ClassStmtToken getAnonymousClass() { return anonymousClass; }
+    public void setAnonymousClass(org.develnext.jphp.core.tokenizer.token.stmt.ClassStmtToken value) { anonymousClass=value; }
     private ExprStmtToken exprName;
     private List<ExprStmtToken> parameters;
+    private List<CallArgument> arguments;
 
     public NewExprToken(TokenMeta meta) {
         super(meta, TokenType.T_NEW);
@@ -47,6 +51,19 @@ public class NewExprToken extends ValueExprToken implements CallableExprToken {
 
     public void setParameters(List<ExprStmtToken> parameters) {
         this.parameters = parameters;
+        this.arguments = null;
+    }
+
+    public List<CallArgument> getArguments() { return arguments; }
+
+    public void setArguments(List<CallArgument> arguments) {
+        this.arguments = List.copyOf(arguments);
+        this.parameters = new java.util.ArrayList<>(arguments.size());
+        for (CallArgument argument : arguments) this.parameters.add(argument.getExpression());
+    }
+
+    public boolean hasNamedArguments() {
+        return arguments != null && arguments.stream().anyMatch(argument -> argument.getKind() == CallArgument.Kind.NAMED);
     }
 
     @Override

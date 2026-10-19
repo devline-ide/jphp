@@ -1,0 +1,1 @@
+{"result":["ok",[["throw","Error","Cannot unset hooked property H::$x"],["ok",2]]],"warnings":[]}

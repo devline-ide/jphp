@@ -1,0 +1,1 @@
+{"result":["ok",[12,["throw","TypeError","H::$x::set(): Argument #1 ($v) must be of type string|int, array given, called in G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\type_set_wider.php on line 5"]]],"warnings":[]}

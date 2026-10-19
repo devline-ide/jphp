@@ -16,7 +16,7 @@ abstract public class BaseObject implements IObject, php.runtime.lang.support.IP
     protected ClassEntity __class__;
     protected final Environment __env__;
 
-    private boolean isFinalized;
+    private volatile byte lifecycleState;
     private transient php.runtime.PhpOwnershipObjects.ObjectCertificate ownershipObject;
 
     @Override public final php.runtime.PhpOwnershipObjects.ObjectCertificate getOwnershipObject() {return ownershipObject;}
@@ -60,6 +60,9 @@ abstract public class BaseObject implements IObject, php.runtime.lang.support.IP
         return __class__;
     }
 
+    /** Read existing PHP storage without initialization or arbitrary native getters. */
+    @Ignore public final ArrayMemory peekProperties() {return __dynamicProperties__;}
+
     @Override
     public ArrayMemory getProperties() {
         if (__dynamicProperties__ == null) {
@@ -82,13 +85,17 @@ abstract public class BaseObject implements IObject, php.runtime.lang.support.IP
 
     @Override
     public boolean isFinalized() {
-        return isFinalized;
+        return (lifecycleState & 1) != 0;
     }
 
     @Override
     public void doFinalize() {
-        isFinalized = true;
+        lifecycleState |= 1;
     }
+
+    @Ignore public final void beginPhpConstruction() { lifecycleState |= 2; }
+    @Ignore public final void completePhpConstruction() { lifecycleState &= ~2; }
+    @Ignore public final boolean isPhpConstructionPending() { return (lifecycleState & 2) != 0; }
 
     @Override
     public boolean isMock() {

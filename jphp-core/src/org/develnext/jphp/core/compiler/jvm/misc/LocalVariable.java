@@ -15,7 +15,21 @@ public class LocalVariable {
 
     private boolean isImmutable;
     private boolean isReference;
+    private boolean ownershipLocal;
+
+    public boolean isOwnershipLocal() { return ownershipLocal; }
+    public void setOwnershipLocal(boolean ownershipLocal) { this.ownershipLocal = ownershipLocal; }
     private int level;
+    private String runtimeClosureInternalName;
+    private int runtimeClosureProducerId = -1, runtimeClosureLevel = -1;
+
+    public void clearRuntimeClosureWitness() { runtimeClosureInternalName=null;runtimeClosureProducerId=-1;runtimeClosureLevel=-1; }
+    public void setRuntimeClosureWitness(String internalName,int producerId) {
+        if (internalName == null || producerId < 4_000_000) throw new IllegalArgumentException("Invalid lexical producer witness");
+        runtimeClosureInternalName=internalName;runtimeClosureProducerId=producerId;runtimeClosureLevel=level;
+    }
+    public String getRuntimeClosureInternalName() { return runtimeClosureLevel == level ? runtimeClosureInternalName : null; }
+    public int getRuntimeClosureProducerId() { return runtimeClosureLevel == level ? runtimeClosureProducerId : -1; }
     private List<Memory> values;
     private List<StackFrame> frames;
 
@@ -51,6 +65,7 @@ public class LocalVariable {
     }
 
     public void pushLevel(){
+        clearRuntimeClosureWitness();
         level += 1;
     }
 
@@ -68,6 +83,7 @@ public class LocalVariable {
     }
 
     public void setValue(Memory value){
+        clearRuntimeClosureWitness();
         /*if (isReference)
             value = null;*/
 

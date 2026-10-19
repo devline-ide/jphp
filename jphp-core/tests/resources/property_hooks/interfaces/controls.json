@@ -1,0 +1,1742 @@
+[
+  {
+    "id": "weak/top/missing_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "d763f2f13907fde1d6b25f4caceeedfea87370dde12b7bb85a0ebb9422dce506",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d253ad7db292fd5431c98cad232afc1b4edfe6a25101e6b4f4ff165b8a14904a"
+  },
+  {
+    "id": "strict/top/missing_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "6b16b1d1b26a1c9047eb5ac281ebb850d153bfa1280c6598445894d62d92f215",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "34131fd574414098ee35a24eaec807aaf92bcf56d32e5d58754732c4e299e43c"
+  },
+  {
+    "id": "weak/deferred/missing_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "61b93ab709857d4ce75d651768d8db798062ff12361471c927c09d62c46e0dc6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "669061a0c87e02ebca2cfe78cb12d07f30d1fe08bf54d46617d1c5200581eceb"
+  },
+  {
+    "id": "strict/deferred/missing_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "33faeac1c527bc473291940d285c8736d36814074480b877016af1b0792a8d38",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d35e85a6c843bedac5973fd84cef9c7233efbfe64c66e5bac716a06e342d3ce1"
+  },
+  {
+    "id": "weak/top/missing_both",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "c5161e60a5b740d53cc49403ab49f53c9a395bc21c275163a10c0fb3b23d653a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "2778b0162fb9655b93acb3434d574378055d3dcb19cb7d30b35b733647ab4b30"
+  },
+  {
+    "id": "strict/top/missing_both",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "b4c0230017b688cf5decbcef172336534690798f85c8e380dcaaf9735f89fe86",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7e69800f697160e205e94c6188da845a6ed2f452829667266b4e8f79890bf56d"
+  },
+  {
+    "id": "weak/deferred/missing_both",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "fb8ab26c20c36dc9fbfa5437db468b994fafff64048885d96745ed1bbb4fca50",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "76f670352fdb6263e0432104eb280a3540426b6d35754e6772b5c98dfc1706e3"
+  },
+  {
+    "id": "strict/deferred/missing_both",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "8a5a7e8ac05849c834b7828aae930fe296d6faf78d997d07d01d676b93a2000b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "6644988a00cedd0b07c7bcc93c29e650c6d41dfebd50354579ce4d72248fb826"
+  },
+  {
+    "id": "weak/top/missing_set_virtual",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/missing_set_virtual",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::set)",
+    "sourceSha256": "bb21648c2c08be60decef7d54e401213a56f57301f73982376ae93377ddefa2d",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "90e1473474e05b8a3830d3b24292499fc74af62842258dd135c40b37fd151639"
+  },
+  {
+    "id": "strict/top/missing_set_virtual",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/missing_set_virtual",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::set)",
+    "sourceSha256": "96e606198a5586541cb6ac260269edd2800bb02a48aee748e5769a6b6bfcb1f2",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "da41082e53c2f75c01aba1758012e1b0d3f2083e4549188826c0da6faf14c274"
+  },
+  {
+    "id": "weak/deferred/missing_set_virtual",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/missing_set_virtual",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::set)",
+    "sourceSha256": "7151512154cbd56caba581fbbdeb13dcd5f4218d455635ba296278f20dfd9efd",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "2867fcbadb4b636f2e8783da30d1e5614158156616c2d35d6e6f0982e292571b"
+  },
+  {
+    "id": "strict/deferred/missing_set_virtual",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/missing_set_virtual",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::set)",
+    "sourceSha256": "3fd0e3bc51be735078e86cffc677866e58d91e0f7110293aff8452412a00ecbd",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "edc6cda1e3d009b2ca3228988708bd85a885e95ee2d5e0c1b52722c703c3a6a3"
+  },
+  {
+    "id": "weak/top/ordinary_both",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/ordinary_both",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "da33e205f2b81c4a638c201f5d643fa480043cb8a1c62b63e2e254023d352e2a",
+    "stdoutSha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/ordinary_both",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/ordinary_both",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "5c6047a0c293f3d8f779842b2fda8c9feacd5d8e0cb4842ac6b819dd7ff1306d",
+    "stdoutSha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/abstract_defer",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/abstract_defer",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "b72d737f8200e97ccaeade4865df208b28ab8616272308cc7ef96ce51a5e8ec5",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/abstract_defer",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/abstract_defer",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "eed46fff00d1547f8496d0a0a8cb43c9e4488dc7b386c6f8f71f6ebc4ca58c26",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/abstract_missing_child",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/abstract_missing_child",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "8bbec85e34d6bda75aa218750d7a7041a9c49ab2ec1886ad6410dd31ea7e1203",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7e330b9d6100ff3bacfecd91b9c3d4b68011f373b07a68cb67ee1608fde3e441"
+  },
+  {
+    "id": "strict/top/abstract_missing_child",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/abstract_missing_child",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "895f7a053a84db577e2d80066cba633fe9aef8c293008a8519f0af142f0663cf",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "9c4baac76899984e7d06a138bbf9ab2b20ddb51fe5fc66fdaa0159ab4644f926"
+  },
+  {
+    "id": "weak/deferred/abstract_missing_child",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/abstract_missing_child",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "8d02ef2a1809659e8a28e720e8712ea15e5d856ad696f81fd95fc35f351e508a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "80ea8a5f94e3b13cb97437028a7e04662f0205a9834b89bf6e1ca768a0779a63"
+  },
+  {
+    "id": "strict/deferred/abstract_missing_child",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/abstract_missing_child",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, I::$x::set)",
+    "sourceSha256": "9791d9d4bd4e2f0b5b14f7e2861b0dcbfc29c9f2aff05b4826559a3ecff79536",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "8107846d046126c1ba5377642526d1cf453aa5087f53df313336ce18ecba2ae5"
+  },
+  {
+    "id": "weak/top/protected_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/protected_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "da1436bf9dad45c8166a875a3a7f21a1c072a5d2d7a8e64459e269cd2e6b15e2",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "cdc5891da493bc59b5a5606a73e5ceaa8b0297cf2bdd829688e8bbcd6ab35b3a"
+  },
+  {
+    "id": "strict/top/protected_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/protected_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "30159b44ce5f85b805a45e9d8f9f34e94e53c7377d9be025d19d24384eebf47b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "a01e7239a92be257faa0b779356ca53331f6de5d472becc91db3644300a445ce"
+  },
+  {
+    "id": "weak/deferred/protected_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/protected_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "bf8738f472d055587c595962b9004e097112879afa32b8f03e360a8de6e520f8",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "83ed64e573931aa9f870ff10631574811ecd0286b20e478bd12bb808303fc6a0"
+  },
+  {
+    "id": "strict/deferred/protected_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/protected_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "e09c9dda40ea611a8fcb09ffc6dc01466bfbb3d521035a5089108c89ab902566",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "31581a4bfc8e29e45447276b34d60908da40a3180d3e9584f5b5c05b196293de"
+  },
+  {
+    "id": "weak/top/private_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/private_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "a59e67c1eaf144384e9b39a4623961b71c1e5a0e0c237d7b80c9fc424183b95c",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "fe328e3ec724d4fd42e4e9236d6258c75a36e37b7325414bb23c46bce935d58a"
+  },
+  {
+    "id": "strict/top/private_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/private_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "b75c75d1b81db999fcdfef9103e7581547f86734526c5aaa6c9eb98af3a0f965",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "98f768122d95c4c66d436b37ffae751eddfad09e2621277a1e15896a9671438a"
+  },
+  {
+    "id": "weak/deferred/private_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/private_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "91fae6ec0d92a1c1b626eac67b0e6f66ae69ca2affc19978e14f8bec208a12bc",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "468eaced7f49826f7b4966f03b38f94dc99ca9cee3eb4bf786dea017f6c9b53c"
+  },
+  {
+    "id": "strict/deferred/private_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/private_get",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "ce71a83ca386ba17c3bbd017e08700d13d4bbebeef522e70eb5d121c6c3c5bd9",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "a451659d6d1c2f2a544245ad6e7fab4f63294181243d01c48769171db756cfcb"
+  },
+  {
+    "id": "weak/top/inherited_public",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/inherited_public",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "d1cd8fe02547ab0715e7abb11037a566c966bb638b3186a1af39451dbfc5e1ea",
+    "stdoutSha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/inherited_public",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/inherited_public",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "0588232540b72e452ea84338e0ca655bc0a7bdc6126a76894e2455e7946dde81",
+    "stdoutSha256": "4b227777d4dd1fc61c6f884f48641d02b4d121d3fd328cb08b5531fcacdabf8a",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/trait_hook",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/trait_hook",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "206ba9869a3c7920dc956ceee632ee04eee0d2cfa3671fcb01611738b3dc23d5",
+    "stdoutSha256": "e7f6c011776e8db7cd330b54174fd76f7d0216b612387a5ffcfb81e6f0919683",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/trait_hook",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/trait_hook",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "5a8e2e36246f7d5329ebc0208b35c49ac891028d44ee44576298edc657562400",
+    "stdoutSha256": "e7f6c011776e8db7cd330b54174fd76f7d0216b612387a5ffcfb81e6f0919683",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/get_covariant",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/get_covariant",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "a9aa56fcecc3a20e3bca06d669890545e1822e14132bb0a85ab27b793069613b",
+    "stdoutSha256": "df7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/get_covariant",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/get_covariant",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "6ef5f931c3fcff4562cd60b098efa30e1afa1efd993a66934b0348c174a95f50",
+    "stdoutSha256": "df7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/get_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/get_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "e1d1fa00c4889c522727c2c105c92b6dc25615a3d74091dd1b9cbe7d8eefdec1",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "b2a56a027dd38f95af511d172a34f8c6d8a6f189e1031dbcf0e9b90e05c40a58"
+  },
+  {
+    "id": "strict/top/get_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/get_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "f0721e0581d677b751fde54cdeecca23be4df5748049691680bbf996b0a30cb6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d33bf35e5b5ca35056d35bd67cc52c9dbe1ba8add45490187de8b96839764727"
+  },
+  {
+    "id": "weak/deferred/get_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/get_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "4aec5ec7fd3761ccaad155b1cdc6b8a720c8e2bbaef5a9edcd2e4b589fdf3c9a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "bae2458457196222d244b3537198bd559041c27174a2e4ca2bc41c5f14b6bb4b"
+  },
+  {
+    "id": "strict/deferred/get_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/get_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "5be7645adfed80a56aee2395aba535e2691539a84b20f49b60a44ff99af1761b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "482eef19ad5f83766929ac761eeca635f8d9744e30b7c01ab2795fa0ad785d00"
+  },
+  {
+    "id": "weak/top/set_contravariant",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/set_contravariant",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "c18e570e8665ea8e94b949d68c74ead99a2aacde04655462dedf3c72ab93577c",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/set_contravariant",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/set_contravariant",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "13d07773a318f50c357f305bc2fd1a8106ff4fb79b1e1cb2c29778ae7487c2f2",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/set_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/set_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "27f540de54c81a3882bc2a63394d57a123a238b717fef21c1b0747ea39480770",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "313db389558f8816a06fff9ad182792d86274faa155f17ae24f5436a25ad8caa"
+  },
+  {
+    "id": "strict/top/set_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/set_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "d9a260ad8ea0ae5b14886bf67771540ba8b20dd6a9f9a584a3eb2fd0548d1367",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "fc2c434f0e6398e6c9f6d6930d56f47691bc3ec26da940301038bf40d50e362b"
+  },
+  {
+    "id": "weak/deferred/set_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/set_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "609b833f693d3b85b322c22d0e1d7f5d502def45844cd1953464240376f1d5aa",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "9d4072173d11efa69d9ad3e9052c30c4486469eaa62804d0c9e06a33dec69682"
+  },
+  {
+    "id": "strict/deferred/set_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/set_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "0d9f265a565749fa119f759bc21f65ddfd55f2a8ce4e8516ae61e1cb75212857",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "8b9a0f93c481ccbcd4850d2c2a622e3759c84604752bde450a052f6a6b0fbf74"
+  },
+  {
+    "id": "weak/top/set_parameter_wider",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/set_parameter_wider",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "5e5cd15dd6469ca27890b3be49c1c0dbea8295726c1de348a86b2bf5354e7e26",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "3437e1edb46d04b17e69c6936594a93d2cb5c9623f82c0e06e83ec623c738e52"
+  },
+  {
+    "id": "strict/top/set_parameter_wider",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/set_parameter_wider",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "1acedac8f886ad221937614ce4c5eed3f85d3dc18592fe255dd9a66e089c5658",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "bce1e621a4907ff46b78f5339b6ee5382cee81be549270ffd9b475682d76b560"
+  },
+  {
+    "id": "weak/deferred/set_parameter_wider",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/set_parameter_wider",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "cecf4695c59895721d1c52dd356563bb811842d2b40ad3c80af88f90e64ae396",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "ff58e314d565c60ff83575b45cb3a3f73913d1374ef966f4f90ee9570871f81f"
+  },
+  {
+    "id": "strict/deferred/set_parameter_wider",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/set_parameter_wider",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "8b8ae0a3dc7c14b6b352638a6fa47ebcc6441c7133d3ef1270dbaf6f7585532b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "ec580f91de2bb11c2163ce7eab9f0a83c18f7180e5ee05813f2a0be459b4df27"
+  },
+  {
+    "id": "weak/top/both_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/both_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "fe2a51045e86f777cb086556047cf80ecfceb566cec06f9844bb6d70c8304fea",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "ed305edd6df259a759e0da0e1d3b01b61e5f5c1dc08f183d6d50978098648e70"
+  },
+  {
+    "id": "strict/top/both_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/both_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "3ecac6c5376d7cded576d738fac09fec7325f8d2d4ab8430e26519d6acd73dd3",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "2cd2879648d93f8c711ab69cc52f487f8771bb6c4e82a946cc0ea1ee8ee5d396"
+  },
+  {
+    "id": "weak/deferred/both_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/both_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "79d78d6e98de32907caa420bdf3dc0a8b9829ce4311508021eb05efc7dd721bf",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "53b7348559ddf85f61f42a6363d24dad05314648d78981dfcfb961c51326b3fa"
+  },
+  {
+    "id": "strict/deferred/both_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/both_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void",
+    "sourceSha256": "8ca1aa82c0b04b37588c9ac8b00b89de3b33dc6495a5574f029949f89db20f66",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "804ad0276c4cf1ffe69fb828bbe052a265db678813f0d156318f5c2b02174b53"
+  },
+  {
+    "id": "weak/top/readonly_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/readonly_get",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "297410764920c411b320fb9271d682039a600f665a5b98753da0e0043994f256",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/readonly_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/readonly_get",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "96e936ece1f9c21ff7f7c25c6a2cb8bd654eb193f0d77847290b1c8cd13dc2f4",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/readonly_set",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/readonly_set",
+    "nativeExit": 255,
+    "message": "Set access level of C::$x must be omitted (as in class I)",
+    "sourceSha256": "704292fd79da60c56a1a7bfe3207f5039b4601e09e5ca3c0a6dbb355eb9411c5",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "3db95eb6d592491e4f9564f56ba60c77aa984d8547b3b2dfe1e175910d3e896c"
+  },
+  {
+    "id": "strict/top/readonly_set",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/readonly_set",
+    "nativeExit": 255,
+    "message": "Set access level of C::$x must be omitted (as in class I)",
+    "sourceSha256": "845f410057416436178ddc50c2669ece77144c7a5006dd87c8f2a9d0232bc0f6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "98993c23b52a69022a3e00a04259af3deccdcb498ebf7bc77ce55707e0ceb33d"
+  },
+  {
+    "id": "weak/deferred/readonly_set",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/readonly_set",
+    "nativeExit": 255,
+    "message": "Set access level of C::$x must be omitted (as in class I)",
+    "sourceSha256": "0685ff05d6af0bfcd736a5a889afcb1b89f14d12b6c49c09128d0e310fa38d87",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "804404dcbffd4c14cc671cb8f5e628ca74024935fe9ca6064845d37589229a24"
+  },
+  {
+    "id": "strict/deferred/readonly_set",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/readonly_set",
+    "nativeExit": 255,
+    "message": "Set access level of C::$x must be omitted (as in class I)",
+    "sourceSha256": "11103cc08397d33363a95bd7b031935a7298221f93d13375414b5f02328a232d",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "184c39686e24ed33be1e0aa0ff246c367b97800fd67bd3fb6e58110ca8e55f4e"
+  },
+  {
+    "id": "weak/top/ref_get_backed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/ref_get_backed",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "0d29a0f6e3a64702b7d719e786205ec8a6f6f150cc52a8fceab8075ee31549a8",
+    "stdoutSha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/ref_get_backed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/ref_get_backed",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "a735e27c7b3658bab0393c6070a429fe7671987c18b35c50d693ab7daff2834d",
+    "stdoutSha256": "2c624232cdd221771294dfbb310aca000a0df6ac8b66b696d90ef06fdefb64a3",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/ref_get_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/ref_get_missing",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): int must be compatible with & I::$x::get(): int",
+    "sourceSha256": "41b0114056bd57466a24bb56d5a290a6fbbaab5c98a013e2f29398c984c095b3",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d1526c79635259bee909248e2acedd8937aa859a0db53cf1a8e015b28b86f6c0"
+  },
+  {
+    "id": "strict/top/ref_get_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/ref_get_missing",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): int must be compatible with & I::$x::get(): int",
+    "sourceSha256": "c77bc571fe64ea73af408168e51f494bcf86cb822c49c28da3821a304f8c9487",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "5838c22b6ae9f5b137f967bb919f7ed615a04cab2dcdf26d5d857bc0100458bc"
+  },
+  {
+    "id": "weak/deferred/ref_get_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/ref_get_missing",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): int must be compatible with & I::$x::get(): int",
+    "sourceSha256": "0a8595226d6962407d3275256240231da101ca1ada1eedb1025a04a85ab614af",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "dd1db5a06b98111a8373ac5bc54cc49f89933b501951d1505c99becf8378ce80"
+  },
+  {
+    "id": "strict/deferred/ref_get_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/ref_get_missing",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): int must be compatible with & I::$x::get(): int",
+    "sourceSha256": "0cd9ccc7daefee92bb72057fb303009ce3b2a4c520e562f7497c3bfdaee3e858",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "b22e73e090f1208a76e379130d4706ddca3856904ad0e80060d98d8c95e4e360"
+  },
+  {
+    "id": "weak/top/ref_get_readonly",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/ref_get_readonly",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "3d69000fbbb42aeac67d7dfedbe14ffcb12a6aa13d26f45b2c26b59a37ebe34a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/ref_get_readonly",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/ref_get_readonly",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "15a8b600ca01e34f693827c470c88be88cd9f3a7088c59db99092ee09a509840",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/parent_interface",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/parent_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "37baa370353526cd6a02abd1f4a75c3b03badba56bdfc60ac7631f015559d279",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "151965aba22c794ab4d43bebbf4856d21e6f0062e92c8ffb8310e6936d80ee4d"
+  },
+  {
+    "id": "strict/top/parent_interface",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/parent_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "90041382fc3f7d8ddd408f2d4372b4e88833aa2f57633822812fb3c1f60bd1c9",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "98c12e1067564e12186e9e14ed7275b0c5a31f9cc12061de99233885e6e052df"
+  },
+  {
+    "id": "weak/deferred/parent_interface",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/parent_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "274d8eb4ebfeec4b805822ed3e1ab2cb969b454d4a6b44e37fbf08157d88f827",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f14eadecc8367f7443375b90ba929223bb7621699596f8fcfd7f59193b5cf14e"
+  },
+  {
+    "id": "strict/deferred/parent_interface",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/parent_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "7c4df9c636502100d34bca1ad2d196bab8513649b334cf27b1cfd97839b7d41c",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "789be6a06efa6a4aac35b77a4b5a925b55f5ec88cfa44f758fedb808fdeee92a"
+  },
+  {
+    "id": "weak/top/static_mismatch",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/static_mismatch",
+    "nativeExit": 255,
+    "message": "Cannot redeclare non static I::$x as static C::$x",
+    "sourceSha256": "9ba8b411f4880431efc4219c8833744bd388b098effc4cfdfa1e9ffe9fa97f94",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d7ca61cca4ac96590d207ef7fca241a9631a09d71b214c7aa69807465366f6cb"
+  },
+  {
+    "id": "strict/top/static_mismatch",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/static_mismatch",
+    "nativeExit": 255,
+    "message": "Cannot redeclare non static I::$x as static C::$x",
+    "sourceSha256": "774e1df201c2c4a671ee5db5800e4e8b3c62e6add7e26f2b9205ad208f5eb99c",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "265a1cedd3f112f547db1e87515529b6966b50af9a0f21d41841ce3807d3fa9d"
+  },
+  {
+    "id": "weak/deferred/static_mismatch",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/static_mismatch",
+    "nativeExit": 255,
+    "message": "Cannot redeclare non static I::$x as static C::$x",
+    "sourceSha256": "fdbb38336f156bc05cb604623bfd22286b2da4baa8130534969939287d9ba494",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "6a70f953e230edfe45fca1569e1ab9443635c036856e9fe5265b642de49be6a6"
+  },
+  {
+    "id": "strict/deferred/static_mismatch",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/static_mismatch",
+    "nativeExit": 255,
+    "message": "Cannot redeclare non static I::$x as static C::$x",
+    "sourceSha256": "22af393f85161c9975eb098e62d2e90ed09ef62f06dec1adb4407a78ab9be659",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "71afc6360abc55dc990676484b8a6489cb459127cda6e46a13cda3d984a98a40"
+  },
+  {
+    "id": "weak/top/multiple_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/multiple_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$y::set)",
+    "sourceSha256": "f9a9d1bf0a005d3eb14e3deda19cad0f0809ef2ccec3e14097b9273d8fc7acd6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d51bdd7ac848e8d8382c1fe19caaea2e24604174a51760b4c47fe56d1d163433"
+  },
+  {
+    "id": "strict/top/multiple_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/multiple_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$y::set)",
+    "sourceSha256": "0835fb69e98453ddfaad6a22508922044798d77fb5a99cda929ab9a80b736095",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f7f50879744b9127a7fa3011be45b343acd03d77bbfc6bffc3a7f5b88437a84c"
+  },
+  {
+    "id": "weak/deferred/multiple_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/multiple_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$y::set)",
+    "sourceSha256": "806abfd14ff38aebf6439adc3da9afef52cd2ac3780b867258b94f205e467361",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "804ab12c7282d7da8fc95458d0fc6ebc2ea2d1a47366979784b1c2a739a0b30e"
+  },
+  {
+    "id": "strict/deferred/multiple_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/multiple_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$y::set)",
+    "sourceSha256": "87a7e429e1f52c0754e424112a776a84fe46ee65b15e3c02895869933c49dc07",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "166e977f16fcfbe058d5089bf1ac89be39a9b9e9b1e31262f9fd144d97e257a0"
+  },
+  {
+    "id": "weak/top/abstract_narrow",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/abstract_narrow",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "7a734529fc69ca3c32a6dcef72b5f228216292e0c13ca54ce2d6f3fb36e03eb9",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7e5f2ad9e6af2715a62632786859e325b3749bfe8d0a05f6069b5b5809bc94a5"
+  },
+  {
+    "id": "strict/top/abstract_narrow",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/abstract_narrow",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "90f3c8154e55a1c6eeeffd3be95ce7821b141fd61d70a0102d8e35c43f79163b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "cc37987e3753fd0afdc426a9a872c1daf66fbba04afd1027a6778922727f2f16"
+  },
+  {
+    "id": "weak/deferred/abstract_narrow",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/abstract_narrow",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "b36d7656759a7bf7ce42a558a9ce6aeac62a5f1f07461066ec265f63f0a6135a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "ecd668d62ec3054438db4751aa7e1b04ec04d3066c40d09bbfb137a8f10ccdcc"
+  },
+  {
+    "id": "strict/deferred/abstract_narrow",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/abstract_narrow",
+    "nativeExit": 255,
+    "message": "Access level to C::$x must be public (as in class I)",
+    "sourceSha256": "44f8d1bb59caca446511ca3eadcc7500465d95ec74a6d32a6999760bd518e8c4",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f0c6bae73261226bd1973ea58ce321d59e23cee1a0d5f4c8be7b13d1d8434f97"
+  },
+  {
+    "id": "weak/top/abstract_virtual_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/abstract_virtual_missing",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "02a067d8d864721222016d51a777a0996d6639a848bb300d60dc9afe2e88b3f1",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/abstract_virtual_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/abstract_virtual_missing",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "f4b8fc21c91ececf0093f3be0c5074292518538ec23b0a1a9de33ed2cb7323d9",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/get_wrong_ordinary",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/get_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of B (as in class I)",
+    "sourceSha256": "b2773f7585d98bb14647ce50b4d9f9eb6e296fd725660013b578e830862b2796",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c509204072fd7dbe542b670565bf94606082844471fd7016b45978ab4442cdbc"
+  },
+  {
+    "id": "strict/top/get_wrong_ordinary",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/get_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of B (as in class I)",
+    "sourceSha256": "97fafc63742b80501d921bcde1e61e6da885261e7b64d169e390a478d3f557ab",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "09e38a804f57c60187f72d7afd5594fc1434356f0e32a378d130b0e39ab45de0"
+  },
+  {
+    "id": "weak/deferred/get_wrong_ordinary",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/get_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of B (as in class I)",
+    "sourceSha256": "46f6ba6c342f449874eef5188e7fb25147b0b6d69f9cf24de5c74caa199bf609",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d6ea40520b80d0d434247e804754349582872a837c8dd0d2dea030b15a6b4c7d"
+  },
+  {
+    "id": "strict/deferred/get_wrong_ordinary",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/get_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of B (as in class I)",
+    "sourceSha256": "8e0d517a8aa29ac764c1f12d9f3f2b2f0636d53e9c507733b5bb7365e4126b83",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "300358e842b994e4839e6753b4e50e960f83ba9767c747eb35aba7b9b5d7586f"
+  },
+  {
+    "id": "weak/top/set_wrong_ordinary",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/set_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "d3692c7d9ef34b82fd759e27433ca9e8ffba2c9b5688e798995e17131db216d1",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "11404c38c6ac80a348fc6369de7a45adcddde881fabe8058d1c998fdbe50da3c"
+  },
+  {
+    "id": "strict/top/set_wrong_ordinary",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/set_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "50f3c842e01600798d8e386d1a9c542f0f99456eab12bfe1882e7451cbfc45d5",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "013c607751f6582fd7889ccd8840ddb199fe9488ad96a6460df5220125df92e5"
+  },
+  {
+    "id": "weak/deferred/set_wrong_ordinary",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/set_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "ca42f3ae00c20727323a99fd1fef5381965ac12eab316cf4f028b6dfc41d5dff",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "775e122a19a27022a4d98bf52f12e3c7bc2a79536c7c675b1a35e86ca1415af0"
+  },
+  {
+    "id": "strict/deferred/set_wrong_ordinary",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/set_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of A (as in class I)",
+    "sourceSha256": "cd32edc3138ab2809348018830dbb311f184f24c0e63ee2474c4b5b48032e195",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "4e3732504e0cb2e25cd3ea0c1ceac6521498eaca437a4285ec0df293b144d163"
+  },
+  {
+    "id": "weak/top/both_wrong_ordinary",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/both_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be A (as in class I)",
+    "sourceSha256": "7e88092587ff5034268063e491614c49df5b8b1cb4d5055471bf8dbf2c59db8e",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "dfa15a868b932d8f87f2ff37c60d2ce3f908ce0a8e567af1f0b9438631f5f87d"
+  },
+  {
+    "id": "strict/top/both_wrong_ordinary",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/both_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be A (as in class I)",
+    "sourceSha256": "3bdb8d0ef77dc3d6df893ddb03fa0e0ee7c7c6320382501105a8f9a137a4d3a3",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "cc25f5037a4a6cd8b8746a1d69ca18ae7478f57c22aae42ec9fb62b5e5acd119"
+  },
+  {
+    "id": "weak/deferred/both_wrong_ordinary",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/both_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be A (as in class I)",
+    "sourceSha256": "f468fc1736afcdb17854931d024a436424cac2a8365eca118e1ecb0ec7119e44",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f676572b9732e6c188a2f97d67424b805387cf4f56385b494f09fc998d427d55"
+  },
+  {
+    "id": "strict/deferred/both_wrong_ordinary",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/both_wrong_ordinary",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be A (as in class I)",
+    "sourceSha256": "3beb010f091dcd255c907f81fd2b646b60f599174012a34fc1b44efde1701427",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "951b7682434cd30a76d53beb989d1110711e5932d7b5a4d466b5e84e72c1448f"
+  },
+  {
+    "id": "weak/top/both_getset_diff",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/both_getset_diff",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "e2eb799564132951128e984c28e9b740c8a5df1e897c23c64b4a99a40215e116",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "aa9b1f9055e7f5331315fbda00006632889a3f3e4e4535b26d01bd384d7733c8"
+  },
+  {
+    "id": "strict/top/both_getset_diff",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/both_getset_diff",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "3ee8a34d79aefac4d7c914cadc31bea299c2bda210847ea1718c8758df43c3b5",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "5ca8e1eae82a360574245f75d74b1ba262aea60bf032d748e332716b10cd0e8b"
+  },
+  {
+    "id": "weak/deferred/both_getset_diff",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/both_getset_diff",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "c0f0f1b5ac25bc0127f9679d291badede10bf5bc87de9b52e1ca8080d3a26c1f",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e6bf2bfdc2af1a47fb7b839a3d6bb6c55205d170059250398f9e97575312321d"
+  },
+  {
+    "id": "strict/deferred/both_getset_diff",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/both_getset_diff",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "3e5e2d7e587b4dfd905d97c42b1da96f74f0b97028e9815e18e650c61eb4f46f",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c740d2c598dcf072eb3a2bcd3c9e62a3485eff9e08a07645a258e274fa1a1323"
+  },
+  {
+    "id": "weak/top/interface_covariant",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/interface_covariant",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "35eb011f67d9e294acad54310dbc857be91cfcfa1ca74e455e4cdba9c1a24b3e",
+    "stdoutSha256": "df7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/interface_covariant",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/interface_covariant",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "43f2cb281e7a72e361757eee744655cdb3abae7fda7a03386c5b303cacceb8dc",
+    "stdoutSha256": "df7e70e5021544f4834bbee64a9e3789febc4be81470df629cad6ddb03320a5c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/interface_conflict",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/interface_conflict",
+    "nativeExit": 255,
+    "message": "Declaration of J::$x::get(): string must be compatible with I::$x::get(): int",
+    "sourceSha256": "0068e936ab0660aab232ddf573997094a658eae016e581d91452e5317dea3539",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "0b82db2f4f0d7c80e5a733cbea0174f7ce39cb0a5df8fee193b52ad9b0c00f06"
+  },
+  {
+    "id": "strict/top/interface_conflict",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/interface_conflict",
+    "nativeExit": 255,
+    "message": "Declaration of J::$x::get(): string must be compatible with I::$x::get(): int",
+    "sourceSha256": "7d7fa320a53b78c981772cf1e24ce43e77ee23ba0e6fe4c493eadb4edaa8f1fb",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "96554c7f387b8aae8367c31d4f1df1880f20f835aeb7e0b60796c9dbfee08a3b"
+  },
+  {
+    "id": "weak/deferred/interface_conflict",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/interface_conflict",
+    "nativeExit": 255,
+    "message": "Declaration of J::$x::get(): string must be compatible with I::$x::get(): int",
+    "sourceSha256": "55bcca1f672f0b49f52c0fd2ec9149ec8559aa2bbe18dc6057f71dcf64983efb",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7755f44cc1f6b29455ab8d5b0015a6923c6e30f91ea562ede938df09e88d022a"
+  },
+  {
+    "id": "strict/deferred/interface_conflict",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/interface_conflict",
+    "nativeExit": 255,
+    "message": "Declaration of J::$x::get(): string must be compatible with I::$x::get(): int",
+    "sourceSha256": "d2a51465fcdb5ae4713cf27074188b0e4f1294e9e288368824c73da97355cacd",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "df717b0907de7667b16319aababcc274ef303319497a8b95914cc620e71a828e"
+  },
+  {
+    "id": "weak/top/set_parameter_valid",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/set_parameter_valid",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "64d830d15e8b041ae2165ec40676256baaffe26dd170fd187edf085aeca7a3a4",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/set_parameter_valid",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/set_parameter_valid",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "e6fcb4e71636a4c090288b936e3eca515221ee32a1e60c136406de3f6ce74080",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/abstract_compatible_incomplete",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/abstract_compatible_incomplete",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "aba2caf88d35911354b7440857a2d053dd6f49358ff5c95f3740c77627569d44",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/abstract_compatible_incomplete",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/abstract_compatible_incomplete",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "0ff22bd84611a970fd90727de72d8711b58a741d4547bf2d64f4a7bc48735aa5",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/missing_with_method",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/missing_with_method",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, I::$x::get, I::$x::set)",
+    "sourceSha256": "7359ecd9c1b35a6ad6bad2605a793c96b12814885e42ef30405184c627dea63e",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "0b59f1e82910ba2318ad5b625c509931ec8971701c37e3fe15df85bace285560"
+  },
+  {
+    "id": "strict/top/missing_with_method",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/missing_with_method",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, I::$x::get, I::$x::set)",
+    "sourceSha256": "f569dbba1996244107519c70d487343a25876a373554e270cc5b4be7b7036198",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "3d5b85dd53fc36e0fd60df95f6a096c690ba70c1ce66a07aa13ec4818ffd475d"
+  },
+  {
+    "id": "weak/deferred/missing_with_method",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/missing_with_method",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, I::$x::get, I::$x::set)",
+    "sourceSha256": "158b7e838b5d6c76d20528144206cff6e4b5b3098c0a8e2be88111f89ed6a2e9",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "22366c62fdd9fd05c19cc33808d4222060850a99cfda828e8bcd85dd1c3f6b50"
+  },
+  {
+    "id": "strict/deferred/missing_with_method",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/missing_with_method",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, I::$x::get, I::$x::set)",
+    "sourceSha256": "0ab79152a825d4aa02df55c00bd1e2a0c526683fca234200774a479e11bb3030",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "1a5815c4d2b94abcfd2a62db71ab52e0160e32b9111922eceaa0246354b665e0"
+  },
+  {
+    "id": "weak/top/same_operation_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/same_operation_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "7f1e761997fe286c38b80c2384777c5266c1f2084474ff2ef85aaae30765c6c7",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "2808deeb48ef72dd4f9eff4b128684ffc42776c740d87c24ff3242f408b2ccd8"
+  },
+  {
+    "id": "strict/top/same_operation_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/same_operation_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "0d8f4bc41b117ca0975346e77f3ad71d4dc400ffec0655ca708f84a8b8aa662e",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "a621969856c952ce094c5caa204ad8c620e5c965807cdd380d3c6597c6833758"
+  },
+  {
+    "id": "weak/deferred/same_operation_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/same_operation_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "741dcfd88fbb005c9b082926000a6230b0388fd04c9c95bfd80268182204bfe6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "1e9612b76624c95b9e0a4b26b5b89ebae46ac15d044f8689fac2902e6f938dff"
+  },
+  {
+    "id": "strict/deferred/same_operation_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/same_operation_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "751a0aeece92130994e9d877e8effe9f17f83ce81cfcac84810a4c8c4630b318",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c95200bdc7672ca80e9e1c1255355a5158b48acdc5a9f78aed0b1f9f937a4b03"
+  },
+  {
+    "id": "weak/top/interface_add_set",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/interface_add_set",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "e1975567614e7159d3699c3a3514b8581dcd745683b07024de1c876cc84a9b0c",
+    "stdoutSha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/interface_add_set",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/interface_add_set",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "e5357a0b23b5ffece2e1f57510fee14e26a22cd96c48e8264b4b8bccf25f5f3b",
+    "stdoutSha256": "19581e27de7ced00ff1ce50b2047e7a567c76b1cbaebabe5ef03f7c3017bb5b7",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/interface_add_set_missing_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/interface_add_set_missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "f6f077d1b3098002460074302d9e7a2312d18698f4d894274acdbc18b1bd5060",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "aa960a289adfed5bcb310aa87492c73a9c6a87f88d93ff9e68a62c884bf0b77c"
+  },
+  {
+    "id": "strict/top/interface_add_set_missing_get",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/interface_add_set_missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "588ea056d90f00e495f1694e35f6726bd39e49a1a26cea777418d6c65a6e7bbf",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "8e46647c110b86375a4107d010c43b819e9554d571d410862361f3bf73f00b1c"
+  },
+  {
+    "id": "weak/deferred/interface_add_set_missing_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/interface_add_set_missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "accb078bbe2c5846628e4c12ffd059ae3fa69c82032e4049e7a6e228685c2fb0",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "6f020caeabe34e0e821f75ed3f6b40c87741344614905794e511908fe2268f63"
+  },
+  {
+    "id": "strict/deferred/interface_add_set_missing_get",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/interface_add_set_missing_get",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::$x::get)",
+    "sourceSha256": "da1553747d715252fc0636b98d9e8cd9935e218c53bc1b8cd9b0f9748af6dd3f",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "05c2215cd7bfc95edec869eff0318307bb0b87388a4bb2844895595c6b51fcf0"
+  },
+  {
+    "id": "weak/top/abstract_hook_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/abstract_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "a11cf5ed70d3b813e159de8c08b27c539dd09657d6e272106ee48530c5eafd20",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "810139356ed147e8c4b98d3389c4c159a773b8ce9090b459beefb2f191b3bf25"
+  },
+  {
+    "id": "strict/top/abstract_hook_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/abstract_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "45e5e2a4ac7c6dba921bc252b351fc82304bfa167173d4975801581c0e571a4d",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "90131b401cbe3fd3c10972ac5b6f412275b7896bad45cd4b28c63b38be881a56"
+  },
+  {
+    "id": "weak/deferred/abstract_hook_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/abstract_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "96c76815b0fb919e06595813423cf9fe9c139cb106f1a0403a0c05cddd7e3177",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f549b011d87a659fcb208656c2718dafd37c23ab47860862a3872b7ab8413b39"
+  },
+  {
+    "id": "strict/deferred/abstract_hook_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/abstract_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of C::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "d93c4ec8fdc7877fac4c4e0ea2aa60613ceadd857e05726cdb25cf83166cd670",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "38a211d7e5d60c3f39926533ecfb8fcd090677900ea00f4299433baa143f9f26"
+  },
+  {
+    "id": "weak/top/inherited_hook_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/inherited_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of P::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "5bba67f2de11f082f6609c8ac1a96d61899ef7100e08ba88d73b38b95758cb32",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "ce32759ad72e1f419aee73f68d3c3cab5be739d9dd82a4abd88edea3f09c54cf"
+  },
+  {
+    "id": "strict/top/inherited_hook_wrong",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/inherited_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of P::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "2b1866526c181e126bfe95406760762042e6758481c2763a50a3931c829a370f",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7abe09349a85140baf2cd793a7e4365e0ef26031768e8be7eb14578de6c6edb2"
+  },
+  {
+    "id": "weak/deferred/inherited_hook_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/inherited_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of P::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "6a29ab0ee64b76fcad2ae6f0f09aad0c4f98c55a37c87eaa45098ab1cc0717b4",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c0535aef2704616bb071f2b883a2bfa875dcef4bace5510b598e258a459c918b"
+  },
+  {
+    "id": "strict/deferred/inherited_hook_wrong",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/inherited_hook_wrong",
+    "nativeExit": 255,
+    "message": "Declaration of P::$x::get(): A must be compatible with I::$x::get(): B",
+    "sourceSha256": "996d26b577b7fbebab83dd73dc13862211946b7721d410a155d4f6615a0b6a95",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "504f7235b6bcc5c6cb72b4935cf60daf926ebdd1ebf0d2e0e807c85ca2124715"
+  },
+  {
+    "id": "weak/top/untyped_get_typed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/untyped_get_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "b217bf77c356a8fb9927aeb83dad4f856dff2b9940f03c8637d2d69447678f7d",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "a0ad30673e50feb2ff452c1b3a61bae3d55e1144643633e4b62d3f883257c5a0"
+  },
+  {
+    "id": "strict/top/untyped_get_typed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/untyped_get_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "ae5ebf255fba2fe4b9c62c79948f45121ad744b023a210ea33983e9e32bfd48d",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "0dd339e1ba5719b5daa9694939000d2ecc9f0598d4b05427b684acd77d7996e3"
+  },
+  {
+    "id": "weak/deferred/untyped_get_typed",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/untyped_get_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "665bb4ac862b83ac01dac0478114c015dcd8bb70d064e6aacc65729c6716f393",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c8e84aaf37f155f6a512c2bc4f69f67fb5b8a7c10030add14202274833b88073"
+  },
+  {
+    "id": "strict/deferred/untyped_get_typed",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/untyped_get_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "800855565e9c161e0caf26ee86a9931e8b85782771a3df424603fd1c37cab2fe",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "af023c74f6aaf18122b5f5ca1550e353058460e8058d5e8a87d4012939d48cbd"
+  },
+  {
+    "id": "weak/top/untyped_set_typed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/untyped_set_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "acbf85fd8aa57d6096d4cbc930ca1b3c7269fadb0b474f5475f1e2314ad9e9e2",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "497500c53bb209f89585b04b3b010d60c5135fb033b2fa85feb673e7ed10277c"
+  },
+  {
+    "id": "strict/top/untyped_set_typed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/untyped_set_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "df29ccb0eff8da272775d3482ff967d036ab0ac245acf694e2b69011af62064b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "a61a9679d8269f655a878a413fdf5a4f624a409b4bb37860259c98490d366568"
+  },
+  {
+    "id": "weak/deferred/untyped_set_typed",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/untyped_set_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "d5c0f053e0caf2166401bdb8255e311c8002b505353ed7e7971949a182994458",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7c3f93757f610c88c49a59cc5994a8ad02c4c5880c29a25e083be2de3a8cbad4"
+  },
+  {
+    "id": "strict/deferred/untyped_set_typed",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/untyped_set_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "9e5ee02a701102c182b6ef99a1aefa9a7d554a03eb1dd78b43dcbbcd3532b0eb",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c47798c8e53176631a5e5dce860fcbdc3f027bbb77b8102b812f7bc45cfa2d0c"
+  },
+  {
+    "id": "weak/top/untyped_both_typed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/untyped_both_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "483b7e2175301f444f23336d9752c3dd2b8647d546e4457ab90995855178ff42",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "b2195173b45e87b5aa20416de9375a2598244e99e21a5807fb3af700361ad3d4"
+  },
+  {
+    "id": "strict/top/untyped_both_typed",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/untyped_both_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "527974216a0bb0bb6f7cdeffd7fddc89532dc324e4610cfb4915ac9a66360343",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "8791e9f8f612c2534f268b7a478669d96a968801ea7d1d75e0229ffbfed7a04d"
+  },
+  {
+    "id": "weak/deferred/untyped_both_typed",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/untyped_both_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "a9130756a776c67d960e929813e176a30eb8b42edd30537475701ee248f49d36",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "18116c96952987c453b6e21e50663ca9d5dbde729919e6eccb242590b68800e1"
+  },
+  {
+    "id": "strict/deferred/untyped_both_typed",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/untyped_both_typed",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be omitted to match the parent definition in class I",
+    "sourceSha256": "599782897197b25b842221bd862d58b96cb81d45bee52249e0e04614101d91a5",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "0207b88b6ef837cbee1cb676caa37f314a5cb8d7982a349206d6493e979579ca"
+  },
+  {
+    "id": "weak/top/typed_get_untyped",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/typed_get_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of int (as in class I)",
+    "sourceSha256": "3b0348daae9437e3d0e922437ff95ff988f2d6519dffbd2f1915a2cdec184d66",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c4b41f6f85004ec207c0dcde63165c80ee72ef78e27505c5df0daedc55db0aa8"
+  },
+  {
+    "id": "strict/top/typed_get_untyped",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/typed_get_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of int (as in class I)",
+    "sourceSha256": "527bc43d1d6147483da58b06f27d61367d2fa141087104be40c69695f38368aa",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "ea59e039da0f554d9a6eead7300ae6e4246b2cfc1ed5742105b2e446f2cad657"
+  },
+  {
+    "id": "weak/deferred/typed_get_untyped",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/typed_get_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of int (as in class I)",
+    "sourceSha256": "949eb088494212a654d3c28617b08696593a29849dfd4fc3b9954bb46a07a2fb",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "146cb5d8d36e3fe85b8dd3ca683055611e67abe9cd007f47bbfb7b86f17db9a5"
+  },
+  {
+    "id": "strict/deferred/typed_get_untyped",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/typed_get_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be subtype of int (as in class I)",
+    "sourceSha256": "e646cbb84986ea7007f9bb56eeccdf75551a8c6569c665e8ab683aa125b67ef6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d7822032e479be7349c2b57cf9028019ae02c8246134ee972e26931f4d1fbc76"
+  },
+  {
+    "id": "weak/top/typed_set_untyped",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/typed_set_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of int (as in class I)",
+    "sourceSha256": "8576366edd72d8ff6dc258ec9165f86348315454e318903b34e9e101ce7df872",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "fd56ddc7d93fe9eec1eff5e6ae29a253147ef875baeb8aa912b1bdc4b522d33a"
+  },
+  {
+    "id": "strict/top/typed_set_untyped",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/typed_set_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of int (as in class I)",
+    "sourceSha256": "4b94fda21247228f80bc1cfef6062e201293ced51f67d8dbb36d31330412cb42",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "3b2cc0e44f5f80ae1053f689f1eb9e0cdcb16081f11e294d5e82e13e959319f7"
+  },
+  {
+    "id": "weak/deferred/typed_set_untyped",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/typed_set_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of int (as in class I)",
+    "sourceSha256": "b118dc4c003834a58cf51427441a789394f9eb9642632d8d94a4c5025ff6d7a6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "0483802597a77587424574a672a84b58b02fa81a974b75bd038e5b1b58d0933f"
+  },
+  {
+    "id": "strict/deferred/typed_set_untyped",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/typed_set_untyped",
+    "nativeExit": 255,
+    "message": "Type of C::$x must be supertype of int (as in class I)",
+    "sourceSha256": "73ffe69dd48a6b452698b744b58dc9caf0bd9975a1b365af7f20f6ea5b7dc650",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "32af35a7fd54cec7dfda3bad8977d7e2e3395cdc5f200e23a3dcaa38a87625ff"
+  },
+  {
+    "id": "weak/top/nullable_covariance",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/nullable_covariance",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "7c55eaac3d6a5a2beae3ca873d1bf3c71f6b0e8befa841449e54a0ded3a15d4c",
+    "stdoutSha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/nullable_covariance",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/nullable_covariance",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "afde870044046010bc84037f994e8583c300e4e2335745efc9224f227aac6252",
+    "stdoutSha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/nullable_contravariance",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/nullable_contravariance",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "52d487ae09c2dd97cca3ee677bb1a3110d45a94f8dd10a05568d57133eb55ec2",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/nullable_contravariance",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/nullable_contravariance",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "bb70ca0483469afee8e040446f9eb937091e5c4d4b8c4a817550e14a3293c17b",
+    "stdoutSha256": "2689367b205c16ce32ed4200942b8b8b1e262dfc70d9bc9fbc77c49699a4f1df",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/getter_ref_impl",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/getter_ref_impl",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "c87285a66647e2365901173ccf1d64fa261973c16d4762cd44e62992c28ded1b",
+    "stdoutSha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/getter_ref_impl",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/getter_ref_impl",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "8477c0f121258defc75a9324e0db40f65f3585ee0f05ed21d267f603a2c7b04c",
+    "stdoutSha256": "d4735e3a265e16eee03f59718b9b5d03019c07d8b6c51f90da3a666eec13ab35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/interface_add_set_missing_both",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/interface_add_set_missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$x::set)",
+    "sourceSha256": "d5d79f22e82a52887e775e1fda69e4ed56a7e5f40df9f5838575263389e6a958",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "a0b83ab4258ba893c56cf8af104b3435c00acc12d50405d9ade0fceb77800dc8"
+  },
+  {
+    "id": "strict/top/interface_add_set_missing_both",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/interface_add_set_missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$x::set)",
+    "sourceSha256": "e129373a630c6fb9ac42f78f6455010d9516ef49ed110819b092daa351c4db89",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "cb71feefa4ef90ed58b0d6c9f5b2b6d1fb323af3e40607535a5526ccfd93a222"
+  },
+  {
+    "id": "weak/deferred/interface_add_set_missing_both",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/interface_add_set_missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$x::set)",
+    "sourceSha256": "6c48b942fe6104760d531f3df4aa3437edd9f0aef7456e3115e0f83abf944e76",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "95076badc0862242cf2790311756934026cd5f20f307fe9cd6d9368987fd6bb5"
+  },
+  {
+    "id": "strict/deferred/interface_add_set_missing_both",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/interface_add_set_missing_both",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$x::set)",
+    "sourceSha256": "8ffbf6f78316192222fdcd28bdf6ced34f8cc3a859594826d4283bc0c2005e28",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "8d635ce3cd0a602c27a45d8b5fefd33f0004a928a52491ba4b2c7e2feb97a2ea"
+  },
+  {
+    "id": "weak/top/interface_override_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/interface_override_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (J::$x::get)",
+    "sourceSha256": "b5656cfcc72c711dedf6c5559a40046ee3772582ca561431d6b47365ab7f4229",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "6df8f972dfc945fbf469444ad06669fff88ceaa3b22f588f69197d7d8efa007f"
+  },
+  {
+    "id": "strict/top/interface_override_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/interface_override_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (J::$x::get)",
+    "sourceSha256": "abbec0df8ef042d5dc0d4994b17b04de940406e268cdde4d3ae7a5c9aaa5b08c",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "17701390d0da9aef83b51dacb351154c374c847b87110b71b6e846cbb468bb63"
+  },
+  {
+    "id": "weak/deferred/interface_override_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/weak/deferred/interface_override_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (J::$x::get)",
+    "sourceSha256": "46e1dff8001a94eb28a3acc8ea91b2bd17620e1214d4f8acde26b9722b7849a6",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "edbce31e11d972682f3436ce6a3aaa134786223f61359b17279b40a7f1eef563"
+  },
+  {
+    "id": "strict/deferred/interface_override_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/interfaces/strict/deferred/interface_override_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (J::$x::get)",
+    "sourceSha256": "acc4d8aa24e3d11dd7b66857fe9d7a3c78a7014bc31a241342ad6218fa1de2bc",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "bb89cfb8c4d4bdbe0ed80522d1471a225134c4dada1a9c0dbd28764d57aaf713"
+  },
+  {
+    "id": "weak/top/interface_override_reflection",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/interface_override_reflection",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "26a6f597fa882481b9c9e345d94a911add40a65c5bc456c53c442203bd133b9d",
+    "stdoutSha256": "a83dd0ccbffe39d071cc317ddf6e97f5c6b1c87af91919271f9fa140b0508c6c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/interface_override_reflection",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/interface_override_reflection",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "4ac81354a5078275a1ffbc418edaf6a0bcbc059da4f702dec6b392a204077a90",
+    "stdoutSha256": "a83dd0ccbffe39d071cc317ddf6e97f5c6b1c87af91919271f9fa140b0508c6c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/own_exact_prototype",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/own_exact_prototype",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "f47a60410bcc88b1fb8e6bdf7334c76fd2c5cda069de123398987e1444085dcc",
+    "stdoutSha256": "66624321eb61ce5c5a21757f8c3bb70dfc84a215d6133eec11a2cb7dabbf754f",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/own_exact_prototype",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/own_exact_prototype",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "164bf45037740e02a8d79cf7b44f0df083af1b5705a37f5e25f85a1ff9e5aa60",
+    "stdoutSha256": "66624321eb61ce5c5a21757f8c3bb70dfc84a215d6133eec11a2cb7dabbf754f",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/shared_inherited_prototype",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/shared_inherited_prototype",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "1ef535559c7fe1ce64ecc963843c1337aec6b9cb7597b012f3ee0480080d44a8",
+    "stdoutSha256": "8d29b6246c5ccb1d99d205e09b5b5141a9c45782b54611174d4afec187e7bfec",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/shared_inherited_prototype",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/shared_inherited_prototype",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "62763148bfe5911800b1ca151018e49ca1417b45dd3b0a251f82ca5e9beca78b",
+    "stdoutSha256": "8d29b6246c5ccb1d99d205e09b5b5141a9c45782b54611174d4afec187e7bfec",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/override_exact_prototype",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/weak/top/override_exact_prototype",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "48d3eaaf69c9032d82e3699771511d9f170ed58830bf3c27b020d3f68bda330a",
+    "stdoutSha256": "a83dd0ccbffe39d071cc317ddf6e97f5c6b1c87af91919271f9fa140b0508c6c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/override_exact_prototype",
+    "phase": "top",
+    "resource": "resources/property_hooks/interfaces/strict/top/override_exact_prototype",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "31afd00ec3918fc507010363cd50fa54a5fd3723b3dca8fd165ad8b4884f6f75",
+    "stdoutSha256": "a83dd0ccbffe39d071cc317ddf6e97f5c6b1c87af91919271f9fa140b0508c6c",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+]

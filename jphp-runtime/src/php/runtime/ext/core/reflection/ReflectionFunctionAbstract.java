@@ -35,6 +35,34 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
                 ? (php.runtime.invoke.PhpCallableFactory.CapturedClosure) getInstance() : null;
     }
 
+    @php.runtime.annotation.Reflection.Signature({
+            @php.runtime.annotation.Reflection.Arg(value="name",type=php.runtime.common.HintType.STRING,
+                    nullable=true,optional=@php.runtime.annotation.Reflection.Optional("null")),
+            @php.runtime.annotation.Reflection.Arg(value="flags",type=php.runtime.common.HintType.INT,
+                    optional=@php.runtime.annotation.Reflection.Optional("0"))})
+    public Memory getAttributes(Environment env,Memory...args) {
+        return ReflectionAttribute.collect(env,getEntity(),args[0],args[1],this instanceof ReflectionMethod ? "ReflectionMethod" : "ReflectionFunction");
+    }
+
+    @Signature(result = @php.runtime.annotation.Reflection.Arg(type = php.runtime.common.HintType.BOOLEAN))
+    public Memory isGenerator(Environment env, Memory... args) {
+        var capture = captured();
+        if (capture != null && capture.isMagicCapture()) return Memory.FALSE;
+        AbstractFunctionEntity entity = getEntity();
+        php.runtime.reflection.ModuleEntity module = entity instanceof php.runtime.reflection.FunctionEntity
+                ? ((php.runtime.reflection.FunctionEntity) entity).getModule()
+                : entity instanceof php.runtime.reflection.MethodEntity
+                ? ((php.runtime.reflection.MethodEntity) entity).getClazz().getModule() : null;
+        if (module != null && !module.hasValidatedGeneratorLinkage())
+            exception(env, "Generator metadata is unavailable in this compiled artifact; recompile the PHP source");
+        if (entity instanceof php.runtime.reflection.MethodEntity method && method.getTrait() != null) {
+            php.runtime.reflection.ModuleEntity donor = method.getTrait().getModule();
+            if (donor != null && !donor.hasValidatedGeneratorLinkage())
+                exception(env, "Generator metadata is unavailable in the trait artifact; recompile the PHP source");
+        }
+        return entity.getGeneratorEntity() == null ? Memory.FALSE : Memory.TRUE;
+    }
+
     @Signature
     public Memory getClosureScopeClass(Environment env, Memory... args){
         IObject instance = getInstance();
@@ -141,6 +169,19 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
     }
 
     @Signature
+    public Memory isVariadic(Environment env, Memory... args) {
+        ParameterEntity[] parameters = getClosureEntity() == null
+                ? getEntity().getParameters() : getClosureEntity().parameters;
+        if (parameters != null) return parameters.length > 0 && parameters[parameters.length - 1].isVariadic() ? Memory.TRUE : Memory.FALSE;
+        if (getEntity() instanceof php.runtime.reflection.CompileFunctionEntity) {
+            var compiled = ((php.runtime.reflection.CompileFunctionEntity) getEntity()).getCompileFunction();
+            var method = compiled.find(compiled.getMaxArgs());
+            return method != null && method.isVarArg() ? Memory.TRUE : Memory.FALSE;
+        }
+        return Memory.FALSE;
+    }
+
+    @Signature
     public Memory getNumberOfParameters(Environment env, Memory... args){
         if (getClosureEntity() != null)
             return LongMemory.valueOf(getClosureEntity().parameters.length);
@@ -229,6 +270,22 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
         return getEntity().isReturnReference() ? Memory.TRUE : Memory.FALSE;
     }
 
+    private php.runtime.reflection.support.PhpTypeDeclaration tentativeReturnType() {
+        return getEntity() instanceof php.runtime.reflection.MethodEntity
+                ? php.runtime.lang.spl.iterator.ArrayIterator.tentativeReturnType((php.runtime.reflection.MethodEntity) getEntity()) : null;
+    }
+
+    @Signature
+    public Memory hasTentativeReturnType(Environment env, Memory... args) {
+        return tentativeReturnType() == null ? Memory.FALSE : Memory.TRUE;
+    }
+
+    @Signature
+    public Memory getTentativeReturnType(Environment env, Memory... args) {
+        var type = tentativeReturnType();
+        return type == null ? Memory.NULL : ObjectMemory.valueOf(ReflectionType.fromDeclaration(env, type));
+    }
+
     @Signature
     public Memory hasReturnType(Environment env, Memory... args) {
         if (captured() != null && captured().isMagicCapture()) return Memory.FALSE;
@@ -244,7 +301,12 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
             return Memory.NULL;
         }
 
-        if (getEntity() instanceof php.runtime.reflection.FunctionEntity
+        if (getEntity() instanceof php.runtime.reflection.MethodEntity nativeMethod
+                && nativeMethod.getClazz().getNativeClass() != null
+                && nativeMethod.getClazz().getNativeClass().isAnnotationPresent(php.runtime.annotation.Reflection.NativePhpSignature.class)
+                || getEntity() instanceof php.runtime.reflection.CompileFunctionEntity
+                && env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                || getEntity() instanceof php.runtime.reflection.FunctionEntity
                 && ((php.runtime.reflection.FunctionEntity) getEntity()).getModule() != null
                 && ((php.runtime.reflection.FunctionEntity) getEntity()).getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
                 || getEntity() instanceof php.runtime.reflection.MethodEntity

@@ -1,0 +1,3 @@
+Fatal error: A never returning function does not return a value, but #[\NoDiscard] requires a return value in G:\DevLine-QA\jphp-attributes-implementation-20261013\revision16-nodiscard\native\negative-never.php on line 2
+Stack trace:
+#0 {main}

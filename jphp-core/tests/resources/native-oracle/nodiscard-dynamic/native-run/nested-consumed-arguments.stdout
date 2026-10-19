@@ -1,0 +1,16 @@
+V|nested
+C|nested
+V|method-argument
+T|method-argument
+M|method-nested
+T|method-nested
+M|function-argument
+C|function-argument
+V|discarded-outer
+W|512|The return value of method ArgumentHolder::marked() should either be used or intentionally ignored by casting it as (void)|nested-consumed-arguments.php|29
+M|discarded-outer
+V|void-outer
+M|void-outer
+V|used-outer
+M|used-outer
+R|used-outer

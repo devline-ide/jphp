@@ -1,0 +1,1 @@
+[["json","{\"i\":{\"v\":1},\"v\":2}",["I","P"]],["vars",["i","v"],["P"]],["export","\\P::__set_state(array(\n   'i' => \n  \\I::__set_state(array(\n     'v' => 1,\n  )),\n   'v' => 2,\n))",["I","P"]]]

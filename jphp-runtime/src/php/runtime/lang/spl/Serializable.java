@@ -10,6 +10,6 @@ public interface Serializable extends Traversable {
     @Reflection.Signature
     public Memory serialize(Environment env, Memory... args);
 
-    @Reflection.Signature({@Reflection.Arg("serialized")})
+    @Reflection.Signature({@Reflection.Arg(value="serialized", type=php.runtime.common.HintType.STRING)})
     public Memory unserialize(Environment env, Memory... args);
 }

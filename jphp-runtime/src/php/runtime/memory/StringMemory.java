@@ -337,11 +337,16 @@ public class StringMemory extends Memory {
 
     @Override
     public boolean identical(Memory memory) {
-        return memory.getRealType() == Type.STRING && toString().equals(memory.toString());
+        Memory actual = memory.toValue();
+        if (actual instanceof php.runtime.memory.PhpByteStringMemory)
+            return php.runtime.memory.PhpByteStringMemory.compareBytes(this, actual) == 0;
+        return actual.getRealType() == Type.STRING && toString().equals(actual.toString());
     }
 
     @Override
     public boolean equal(Memory memory) {
+        if (memory instanceof php.runtime.memory.PhpByteStringMemory)
+            return php.runtime.PhpComparison.equal(this, memory, null, php.runtime.env.TraceInfo.UNKNOWN);
         switch (memory.type){
             case NULL: return toString().equals("");
             case DOUBLE:
@@ -391,6 +396,8 @@ public class StringMemory extends Memory {
 
     @Override
     public boolean smaller(Memory memory) {
+        if (memory instanceof php.runtime.memory.PhpByteStringMemory)
+            return php.runtime.PhpComparison.smaller(this, memory, null, php.runtime.env.TraceInfo.UNKNOWN);
         switch (memory.type){
             case STRING: return toString().compareTo(memory.toString()) < 0;
             case REFERENCE: return smaller(memory.toValue());
@@ -405,9 +412,14 @@ public class StringMemory extends Memory {
 
     @Override
     public boolean smallerEq(Memory memory) {
+        if (memory instanceof php.runtime.memory.PhpByteStringMemory)
+            return php.runtime.PhpComparison.smallerEq(this, memory, null, php.runtime.env.TraceInfo.UNKNOWN);
         switch (memory.type){
             case STRING: return toString().compareTo(memory.toString()) <= 0;
-            case REFERENCE: return smaller(memory.toValue());
+            case REFERENCE:
+                Memory actual = memory.toValue();
+                return actual instanceof php.runtime.memory.PhpByteStringMemory
+                        ? php.runtime.PhpComparison.smallerEq(this, actual, null, php.runtime.env.TraceInfo.UNKNOWN) : smaller(actual);
         }
         return toNumeric().smallerEq(memory);
     }
@@ -419,6 +431,8 @@ public class StringMemory extends Memory {
 
     @Override
     public boolean greater(Memory memory) {
+        if (memory instanceof php.runtime.memory.PhpByteStringMemory)
+            return php.runtime.PhpComparison.greater(this, memory, null, php.runtime.env.TraceInfo.UNKNOWN);
         switch (memory.type){
             case STRING: return toString().compareTo(memory.toString()) > 0;
             case REFERENCE: return greater(memory.toValue());
@@ -433,6 +447,8 @@ public class StringMemory extends Memory {
 
     @Override
     public boolean greaterEq(Memory memory) {
+        if (memory instanceof php.runtime.memory.PhpByteStringMemory)
+            return php.runtime.PhpComparison.greaterEq(this, memory, null, php.runtime.env.TraceInfo.UNKNOWN);
         switch (memory.type){
             case STRING: return toString().compareTo(memory.toString()) >= 0;
             case REFERENCE: return greaterEq(memory.toValue());

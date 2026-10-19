@@ -1,0 +1,146 @@
+[
+  {
+    "id": "plain-backed-weak",
+    "resource": "resources/property_hooks/inherited_defaults/plain-backed-weak",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\plain-backed-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "096e971f9f0d409a67c2fe953f7d8422ea1b2e448d78c8b23f4f33765651052a"
+  },
+  {
+    "id": "plain-backed-strict",
+    "resource": "resources/property_hooks/inherited_defaults/plain-backed-strict",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\plain-backed-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "8d519fcabef15bb8e26d2254fa588137d4f8bc9635b5409f6a19fdd97a6f9568"
+  },
+  {
+    "id": "hooked-backed-weak",
+    "resource": "resources/property_hooks/inherited_defaults/hooked-backed-weak",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\hooked-backed-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "14d7067845892179e938e054e9468ddac347b145e3be820a78686ab15dce4f9f"
+  },
+  {
+    "id": "hooked-backed-strict",
+    "resource": "resources/property_hooks/inherited_defaults/hooked-backed-strict",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\hooked-backed-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "701fd9c4e43a70fbcd69c3054a777e9d1bb4bdd2ad69aa046e041fb720b408c8"
+  },
+  {
+    "id": "grandparent-backed-weak",
+    "resource": "resources/property_hooks/inherited_defaults/grandparent-backed-weak",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\grandparent-backed-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "9d6cef0b7f56e0bbd231ddc832f6081aa6bd38af7ce1e0bd49c220463e11cc98"
+  },
+  {
+    "id": "grandparent-backed-strict",
+    "resource": "resources/property_hooks/inherited_defaults/grandparent-backed-strict",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\grandparent-backed-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "f29a9cf7bde02c8556f6105981355aec5543928acc8c6ffdfc3dab6c9c939586"
+  },
+  {
+    "id": "local-backed-weak",
+    "resource": "resources/property_hooks/inherited_defaults/local-backed-weak",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\local-backed-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "f92ded01b80329bbf47515ef0e728d7de4d4b6db69808b6c141c18138089e714"
+  },
+  {
+    "id": "local-backed-strict",
+    "resource": "resources/property_hooks/inherited_defaults/local-backed-strict",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\local-backed-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "f4d52b8ec0a70163f4574412b8ba5ad9fddce61c4558226bfd7f0ca5d47335e2"
+  },
+  {
+    "id": "no-parent-invalid-weak",
+    "resource": "resources/property_hooks/inherited_defaults/no-parent-invalid-weak",
+    "exit": 255,
+    "diagnostic": "Cannot specify default value for virtual hooked property ChildDefault::$x",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\no-parent-invalid-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "a96c3f46ccee4c7c322775935ab80433154ac78daeb1191be7c139e60bb2ae51"
+  },
+  {
+    "id": "no-parent-invalid-strict",
+    "resource": "resources/property_hooks/inherited_defaults/no-parent-invalid-strict",
+    "exit": 255,
+    "diagnostic": "Cannot specify default value for virtual hooked property ChildDefault::$x",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\no-parent-invalid-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "37708e2fca1813cbf0bf5804db464167d074b6a483907f93fe219487b372a03e"
+  },
+  {
+    "id": "virtual-parent-invalid-weak",
+    "resource": "resources/property_hooks/inherited_defaults/virtual-parent-invalid-weak",
+    "exit": 255,
+    "diagnostic": "Cannot specify default value for virtual hooked property ChildDefault::$x",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\virtual-parent-invalid-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "7125021bebf1f3c38d689268557ff40d4d6d655ca32a7110331faf876b464732"
+  },
+  {
+    "id": "virtual-parent-invalid-strict",
+    "resource": "resources/property_hooks/inherited_defaults/virtual-parent-invalid-strict",
+    "exit": 255,
+    "diagnostic": "Cannot specify default value for virtual hooked property ChildDefault::$x",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\virtual-parent-invalid-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "28630890cc53bd1d3d63aa19d5c5c01ce4a6716d2c4ccdfe45057b83746fc262"
+  },
+  {
+    "id": "private-parent-invalid-weak",
+    "resource": "resources/property_hooks/inherited_defaults/private-parent-invalid-weak",
+    "exit": 255,
+    "diagnostic": "Cannot specify default value for virtual hooked property ChildDefault::$x",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\private-parent-invalid-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "012e8ca7fe4588e39d139fc4be0cedf818681f4f9287827670c51b1456234d54"
+  },
+  {
+    "id": "private-parent-invalid-strict",
+    "resource": "resources/property_hooks/inherited_defaults/private-parent-invalid-strict",
+    "exit": 255,
+    "diagnostic": "Cannot specify default value for virtual hooked property ChildDefault::$x",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\private-parent-invalid-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "f7d9f889555c08a4f09765a09b7875379bb10f73995e85354a7c8344d687162f"
+  },
+  {
+    "id": "inherited-reference-invalid-weak",
+    "resource": "resources/property_hooks/inherited_defaults/inherited-reference-invalid-weak",
+    "exit": 255,
+    "diagnostic": "Get hook of backed property ChildDefault::x with set hook may not return by reference",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\inherited-reference-invalid-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "8702b92a75da06047176b3704601e10ab9cd3211b065ff8415bb34a1fce15646"
+  },
+  {
+    "id": "inherited-reference-invalid-strict",
+    "resource": "resources/property_hooks/inherited_defaults/inherited-reference-invalid-strict",
+    "exit": 255,
+    "diagnostic": "Get hook of backed property ChildDefault::x with set hook may not return by reference",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r1-native\\inherited-reference-invalid-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "cb0a0e93a136fc5df3d39419ab956d2e8a5cfd5c47959f01495fbe03fdbf95df"
+  },
+  {
+    "id": "anonymous-backed-weak",
+    "resource": "resources/property_hooks/inherited_defaults/anonymous-backed-weak",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r2-anonymous-native\\anonymous-backed-weak\\COMMAND.json",
+    "nativeReceiptSHA256": "305887ac4f7cfe09a8468b8510dbed3d554ad60db9f245be61d3489a0ba72856"
+  },
+  {
+    "id": "anonymous-backed-strict",
+    "resource": "resources/property_hooks/inherited_defaults/anonymous-backed-strict",
+    "exit": 0,
+    "diagnostic": "",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\inherited-default-r2-anonymous-native\\anonymous-backed-strict\\COMMAND.json",
+    "nativeReceiptSHA256": "00218a12f9e7c5b4a468435d1abdc96b97aacdc2c622eb92437edbf0d9e58e2b"
+  }
+]

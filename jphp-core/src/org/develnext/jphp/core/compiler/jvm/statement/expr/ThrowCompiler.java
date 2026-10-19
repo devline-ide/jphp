@@ -13,6 +13,10 @@ public class ThrowCompiler extends BaseStatementCompiler<ThrowStmtToken> {
 
     @Override
     public void write(ThrowStmtToken token) {
+        if (method.ownership().enabled()) {
+            expr.writeExpression(token.getException(), true, false, true); expr.writePopBoxing(); expr.writePopImmutable();
+            method.ownership().explicitThrow(expr, token, expr.stackPeek().ownershipEvalId); return;
+        }
         expr.writePushEnv();
         expr.writePushTraceInfo(token.getException());
         expr.writeExpression(token.getException(), true, false, true);

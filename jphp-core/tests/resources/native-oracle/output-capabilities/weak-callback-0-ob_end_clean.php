@@ -1,0 +1,8 @@
+<?php
+$warnings=[];$events=[];
+set_error_handler(function($n,$s)use(&$warnings){$handlers=ob_list_handlers();$active=$handlers[count($handlers)-1];$warnings[]=[$n,str_replace($active,'<active-handler>',$s)];return true;});
+$callback=function($s,$p)use(&$events){$events[]=[$s,$p];return $s;};
+ob_start($callback,0,0);
+echo 'held';$value=ob_end_clean();
+$result=[$value,ob_get_level(),ob_get_contents(),$warnings,$events];
+restore_error_handler();echo json_encode($result,JSON_THROW_ON_ERROR),"\n";

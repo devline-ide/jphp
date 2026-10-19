@@ -13,6 +13,8 @@ public class DieCompiler extends BaseExprCompiler<DieExprToken> {
 
     @Override
     public void write(DieExprToken token, boolean returnValue) {
+        method.getEntity().setImmutable(false);
+
         expr.writePushEnv();
         if (token.getValue() == null)
             expr.writePushConstNull();

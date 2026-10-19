@@ -1,0 +1,16 @@
+donor-trait:true:boolean
+donor-class:true:boolean
+consumer-trait:true:boolean
+consumer-alias:true:boolean
+consumer-ordinary:false:boolean
+donor-function:true:boolean
+consumer-before:true:boolean
+consumer-after:true:boolean
+consumer-closure:true:boolean
+donor-0:5013:5014:done:908
+donor-1:23:24:done:1008
+consumer-0:6013:6014:done:908
+consumer-1:6013:6014:done:908
+consumer-2:33:34:done:1108
+consumer-3:7043:7044:done:1208
+consumer-4:53:54:done:1308

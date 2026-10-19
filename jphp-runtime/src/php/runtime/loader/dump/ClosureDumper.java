@@ -93,7 +93,7 @@ public class ClosureDumper extends Dumper<ClosureEntity> {
     public ClosureEntity load(InputStream input, int compilerAbi) throws IOException {
         DumpInputStream data = new DumpInputStream(input);
         ClosureEntity entity = new ClosureEntity(context);
-        entity.setParent(env.scope.fetchUserClass(Closure.class));
+        if(compilerAbi<20) entity.setParent(env.scope.fetchUserClass(Closure.class));
 
         entity.setInternalName(data.readName());
         entity.setReturnReference(data.readBoolean());

@@ -132,6 +132,11 @@ abstract public class ForeachIterator implements Iterable<Memory> {
             return prevValue();
     }
 
+    /** Advance without fetching user values when a traversal consumer only counts positions. */
+    public boolean next(boolean fetchValue) {
+        return next();
+    }
+
     public boolean next() {
         currentKeyMemory = null;
         if (!init) {

@@ -24,9 +24,18 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     public final static int DUMP_STAMP = 479873682;
     public final static int LEGACY_DUMP_VERSION = 20141011;
     public final static int DUMP_VERSION = 20261007;
-    public final static int COMPILER_ABI_VERSION = 9;
+    // ABI24 bytecode may require PhpUnwindSignal in native-finally exception tables.
+    // ABI25 emitted lexical constant reads require the environment-local resolution cache.
+    public final static int COMPILER_ABI_VERSION = 25;
     public final static int COMPILER_PROVENANCE_STAMP = 0x43414249; // CABI, in the existing reserved module tail.
     public final static int COMPILER_PROVENANCE_VERSION = 1;
+
+    private static final int GENERATOR_LINKAGE_FRAME_STAMP = 0x474c4e4b;
+    private static final int GENERATOR_LINKAGE_FRAME_VERSION = 1;
+    private static final int GENERATOR_LINKAGE_MAX_BYTES = 16 * 1024 * 1024;
+
+    private static final int DECLARATION_CATALOG_STAMP = 0x44434C53; // DCLS
+    private static final int DECLARATION_CATALOG_VERSION = 1;
 
     public static final class Header {
         private final PhpLanguageProfile profile;
@@ -73,11 +82,17 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         if (entity.getData() == null)
             throw new DumpException("Module '" + entity.getName() + "' not compiled");
 
+        PhpPropertyHookDumper.validateModule(entity, includeData,env);
+        byte[] attributes=PhpAttributeDumper.save(entity,includeData);
         int compilerAbi = entity.getCompilerProvenance().getCompilerAbiVersion();
         if (compilerAbi > COMPILER_ABI_VERSION)
             throw new DumpException("Unsupported original compiler ABI: " + compilerAbi);
 
-        DumpOutputStream data = new DumpOutputStream(output);
+        // Attest before emitting transport bytes. Unknown/historical metadata remains explicitly unavailable.
+        byte[] generatorLinkage = includeData && entity.hasValidatedGeneratorLinkage()
+                ? PhpGeneratorLinkageDumper.save(entity, this::resolveGeneratorDonor) : null;
+
+        DumpOutputStream data = new DumpOutputStream(output, true);
 
         // version
         data.writeInt(DUMP_STAMP);
@@ -101,31 +116,49 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         // constants
         data.writeInt(entity.getConstants().size());
         for(ConstantEntity e : entity.getConstants()){
-            constantDumper.save(e, output);
+            constantDumper.save(e, data);
         }
 
+        // ABI20 declaration-only records; never registered as constants before module execution.
+        data.writeInt(entity.getDeferredGlobalConstantDeclarations().size());
+        for(ConstantEntity declaration:entity.getDeferredGlobalConstantDeclarations()) {
+            if(declaration.getModule()!=entity || declaration.getValue()!=null || declaration.getClazz()!=null)
+                throw new DumpException("Invalid deferred global constant declaration");
+            constantDumper.save(declaration,data);
+        }
         // closures
         data.writeInt(entity.getClosures().size());
         for(ClosureEntity e : entity.getClosures()){
-            closureDumper.save(e, output);
+            closureDumper.save(e, data);
         }
 
         // generators
         data.writeInt(entity.getGenerators().size());
         for(GeneratorEntity e : entity.getGenerators()){
-            generatorDumper.save(e, output);
+            generatorDumper.save(e, data);
         }
 
         // functions
         data.writeInt(entity.getFunctions().size());
         for(FunctionEntity e : entity.getFunctions()){
-            functionDumper.save(e, output);
+            functionDumper.save(e, data);
         }
 
         // classes
         data.writeInt(entity.getClasses().size());
         for(ClassEntity e : entity.getClasses()){
-            classDumper.save(e, output);
+            classDumper.save(e, data);
+        }
+
+        data.writeInt(DECLARATION_CATALOG_STAMP);
+        data.writeInt(DECLARATION_CATALOG_VERSION);
+        data.writeInt(entity.getDeferredClasses().size());
+        int declarationId = 0;
+        for (ClassEntity declaration : entity.getDeferredClasses()) {
+            if (declaration.getDeclarationId() != declarationId++ || declaration.getModule() != entity
+                    || declaration.isStatic() || declaration.getNativeClass() != null)
+                throw new DumpException("Invalid deferred class declaration catalog");
+            classDumper.save(declaration, data);
         }
 
         if (includeData) {
@@ -139,6 +172,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         // Current source ABI is already represented exactly by the header; retain its original empty tail.
         if (compilerAbi == COMPILER_ABI_VERSION) {
             data.writeRawData(null, 1024 * 1024 * 5);
+            writeGeneratorLinkage(data, generatorLinkage);
+            data.writeRawData(attributes,PhpAttributeDumper.MAX_BYTES);
             return;
         }
         // Keep the transport ABI/layout unchanged, without certifying old or manually supplied bytecode.
@@ -149,6 +184,18 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         provenance.writeInt(1); // Original compiler ABI field count.
         provenance.writeInt(compilerAbi);
         data.writeRawData(metadata.toByteArray(), 1024 * 1024 * 5); // Existing reserved field, consumed by older readers.
+        writeGeneratorLinkage(data, generatorLinkage);
+        data.writeRawData(attributes,PhpAttributeDumper.MAX_BYTES);
+    }
+
+    private ModuleEntity resolveGeneratorDonor(String physicalName) {
+        return env == null ? null : env.getScope().moduleIndexMap.get(physicalName);
+    }
+
+    private static void writeGeneratorLinkage(DumpOutputStream data, byte[] linkage) throws IOException {
+        data.writeInt(GENERATOR_LINKAGE_FRAME_STAMP);
+        data.writeInt(GENERATOR_LINKAGE_FRAME_VERSION);
+        data.writeRawData(linkage, GENERATOR_LINKAGE_MAX_BYTES);
     }
 
     /** Reads and validates only the header; no class dependency resolution or provenance certification. */
@@ -202,7 +249,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     public ModuleEntity load(InputStream input) throws IOException {
         DumpInputStream data = new DumpInputStream(input);
 
-        Header header = readHeader(input);
+        Header header = readHeader(data);
+        data = new DumpInputStream(data, header.getCompilerAbiVersion() >= 17);
         PhpLanguageProfile profile = header.getPhpLanguageProfile();
 
         data.readLangMode(); // legacy
@@ -215,25 +263,41 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         entity.setStrictTypes(data.readBoolean());
         entity.setTrace(data.readTrace(context));
 
+        boolean cold=header.getCompilerAbiVersion()>=20;
+        GeneratorDumper generatorDumper=new GeneratorDumper(context,env,debugInformation);
+        generatorDumper.setDeferLinking(cold);
         // constants
         int count = data.readInt();
         for(int i = 0; i < count; i++){
-            ConstantEntity el = constantDumper.load(input);
+            ConstantEntity el = constantDumper.load(data);
             el.setModule(entity);
             entity.addConstant(el);
         }
 
+        if(cold) {
+            count=data.readInt();
+            if(count<0 || count>65535) throw new DumpException("Invalid deferred global constant count");
+            java.util.Set<String> names=new java.util.HashSet<>();
+            for(ConstantEntity constant:entity.getConstants()) names.add(constant.getName());
+            for(int i=0;i<count;i++) {
+                ConstantEntity declaration=constantDumper.load(data);declaration.setModule(entity);
+                if(declaration.getValue()!=null || declaration.getClazz()!=null || declaration.getInitializerMethod()!=null
+                        || declaration.getName()==null || !names.add(declaration.getName()))
+                    throw new DumpException("Invalid deferred global constant declaration");
+                entity.addDeferredGlobalConstantDeclaration(declaration);
+            }
+        }
         // closures
         count = data.readInt();
         for(int i = 0; i < count; i++){
-            ClosureEntity el = closureDumper.load(input, header.getCompilerAbiVersion());
+            ClosureEntity el = closureDumper.load(data, header.getCompilerAbiVersion());
             el.setModule(entity);
             entity.addClosure(el);
         }
 
         count = data.readInt();
         for(int i = 0; i < count; i++){
-            GeneratorEntity el = generatorDumper.load(input);
+            GeneratorEntity el = generatorDumper.load(data);
             el.setModule(entity);
             entity.addGenerator(el);
         }
@@ -241,7 +305,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         // functions
         count = data.readInt();
         for(int i = 0; i < count; i++){
-            FunctionEntity el = functionDumper.load(input);
+            FunctionEntity el = functionDumper.load(data);
             el.setModule(entity);
             entity.addFunction(el);
         }
@@ -249,18 +313,64 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         // classes
         count = data.readInt();
         ClassDumper classDumper = new ClassDumper(context, entity, env, debugInformation);
+        classDumper.setDeferLinking(cold);
+        classDumper.setAllowPhpHooks(header.getCompilerAbiVersion()>=22);
+        classDumper.setAllowPhpSet(header.getCompilerAbiVersion()>=23);
         for(int i = 0; i < count; i++){
-            ClassEntity el = classDumper.load(input);
+            ClassEntity el = classDumper.load(data);
             el.setModule(entity);
             entity.addClass(el);
+        }
+
+        if (header.getCompilerAbiVersion() >= 16) {
+            if (data.readInt() != DECLARATION_CATALOG_STAMP || data.readInt() != DECLARATION_CATALOG_VERSION)
+                throw new DumpException("Unsupported deferred class declaration catalog");
+            count = data.readInt();
+            if (count < 0 || count > 1000000) throw new DumpException("Invalid deferred class declaration count");
+            java.util.Set<String> physicalNames = new java.util.HashSet<>();
+            for (ClassEntity ordinary : entity.getClasses()) {
+                if (ordinary.isDeferredDeclaration()) throw new DumpException("Deferred declaration in static class map");
+                physicalNames.add(ordinary.getCompiledInternalName());
+            }
+            for (int i = 0; i < count; i++) {
+                ClassEntity declaration = classDumper.load(data);
+                if (declaration.getDeclarationId() != i || declaration.isStatic()
+                        || !physicalNames.add(declaration.getCompiledInternalName())
+                        || declaration.getCompiledInternalName() == null
+                        || !declaration.getCompiledInternalName().equals(entity.getInternalName() + "_declaration" + i))
+                    throw new DumpException("Invalid deferred class declaration identity");
+                declaration.setModule(entity);
+                entity.addDeferredClass(declaration);
+            }
         }
 
         // byte code
         entity.setData(data.readRawData(Integer.MAX_VALUE));
 
         int compilerAbi = readCompilerProvenance(data.readRawData(1024 * 1024 * 5), header.getCompilerAbiVersion());
+        if (!cold) entity.recordDumpCompilerAbi(compilerAbi, header.getCompilerAbiVersion());
+        byte[] deferredLinkage=null;
+        if (header.getCompilerAbiVersion() >= 17) {
+            if (data.readInt() != GENERATOR_LINKAGE_FRAME_STAMP || data.readInt() != GENERATOR_LINKAGE_FRAME_VERSION)
+                throw new DumpException("Unsupported generator linkage frame");
+            byte[] linkage = data.readRawData(GENERATOR_LINKAGE_MAX_BYTES);
+            // Empty frames do not certify historical, unknown or metadata-only declarations.
+            if(cold) deferredLinkage=linkage;
+            else if (linkage.length != 0) PhpGeneratorLinkageDumper.restore(entity, linkage, this::resolveGeneratorDonor);
+        }
+        if(cold) {
+            PhpAttributeDumper.restore(entity,data.readRawData(PhpAttributeDumper.MAX_BYTES),context);
+            if(data.read()!=-1) throw new DumpException("Trailing compiled module data");
+            // All declaration/helper bytes and complete metadata were validated before any relation provider.
+            if(deferredLinkage!=null && deferredLinkage.length!=0)
+                PhpGeneratorLinkageDumper.restoreDecoded(entity,deferredLinkage,this::resolveGeneratorDonor,compilerAbi,header.getCompilerAbiVersion());
+            for(ClosureEntity closure:entity.getClosures()) {
+                closure.setParent(env.scope.fetchUserClass(php.runtime.lang.Closure.class));closure.doneDeclare();
+            }
+            generatorDumper.linkDecodedDeclarations();classDumper.linkDecodedDeclarations();
+        }
         entity.validateMethodSignatures(env);
-        entity.recordDumpCompilerAbi(compilerAbi, header.getCompilerAbiVersion());
+        if (cold) entity.recordDumpCompilerAbi(compilerAbi, header.getCompilerAbiVersion());
         return entity;
     }
 }

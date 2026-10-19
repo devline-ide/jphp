@@ -27,6 +27,28 @@ public class CompileFunctionSpec {
         methods.add(method);
     }
 
+    /** Explicit PHP declaration metadata, independent of the Java transport signature. */
+    public php.runtime.annotation.Reflection.Signature getSignature() {
+        php.runtime.annotation.Reflection.Signature signature = null;
+        for (Method method : methods) {
+            var declared = method.getAnnotation(php.runtime.annotation.Reflection.Signature.class);
+            if (declared == null) continue;
+            if (signature != null && !signature.equals(declared))
+                throw new IllegalArgumentException("Inconsistent PHP signatures for " + name);
+            signature = declared;
+        }
+        return signature;
+    }
+
+    /** Exact native declaration identity; reflection enumeration order is irrelevant. */
+    public boolean isSameNativeDeclaration(CompileFunctionSpec other) {
+        if (other == null || !name.equalsIgnoreCase(other.name) || asImmutable != other.asImmutable
+                || methods.size() != other.methods.size()) return false;
+        List<Method> remaining = new ArrayList<>(other.methods);
+        for (Method method : methods) if (!remaining.remove(method)) return false;
+        return remaining.isEmpty();
+    }
+
     public String getName() {
         return name;
     }

@@ -24,6 +24,7 @@ public class ReflectionClass extends Reflection {
     public final static int IS_IMPLICIT_ABSTRACT = 16;
     public final static int IS_EXPLICIT_ABSTRACT = 32;
     public final static int IS_FINAL = 64;
+    public final static int IS_READONLY = 65536;
 
     protected ClassEntity entity;
 
@@ -40,6 +41,15 @@ public class ReflectionClass extends Reflection {
         getProperties().put("name", new StringMemory(entity.getName()));
 
         return this;
+    }
+
+    @php.runtime.annotation.Reflection.Signature({
+            @php.runtime.annotation.Reflection.Arg(value="name",type=php.runtime.common.HintType.STRING,
+                    nullable=true,optional=@php.runtime.annotation.Reflection.Optional("null")),
+            @php.runtime.annotation.Reflection.Arg(value="flags",type=php.runtime.common.HintType.INT,
+                    optional=@php.runtime.annotation.Reflection.Optional("0"))})
+    public Memory getAttributes(Environment env,Memory...args) {
+        return ReflectionAttribute.collect(env,entity,args[0],args[1],"ReflectionClass");
     }
 
     @Signature(@Arg("argument"))
@@ -239,10 +249,12 @@ public class ReflectionClass extends Reflection {
     @Signature
     public Memory getModifiers(Environment env, Memory... args) {
         int mod = 0;
+        boolean modern=PhpReflectionModifiers.modern(env,env.trace());
         if (entity.isFinal())
-            mod |= IS_FINAL;
+            mod |= modern?32:IS_FINAL;
         if (entity.isAbstract())
-            mod |= IS_EXPLICIT_ABSTRACT;
+            mod |= modern?64:IS_EXPLICIT_ABSTRACT;
+        if(entity.isPhpReadonly()) mod |= 65536;
 
         return LongMemory.valueOf(mod);
     }
@@ -442,6 +454,7 @@ public class ReflectionClass extends Reflection {
 
     @Signature
     public Memory isCloneable(Environment env, Memory... args) {
+        if(entity.isEnum())return Memory.FALSE;
         if (!entity.isClass())
             return Memory.FALSE;
 
@@ -450,6 +463,9 @@ public class ReflectionClass extends Reflection {
         else
             return Memory.FALSE;
     }
+
+    @Signature
+    public Memory isReadOnly(Environment env, Memory... args) {return entity.isPhpReadonly()?Memory.TRUE:Memory.FALSE;}
 
     @Signature
     public Memory isFinal(Environment env, Memory... args) {
@@ -467,11 +483,15 @@ public class ReflectionClass extends Reflection {
 
     @Signature
     public Memory isInstantiable(Environment env, Memory... args) {
+        if(entity.isEnum())return Memory.FALSE;
         if (entity.isClass() && !entity.isAbstract()) {
             return entity.methodConstruct == null || !entity.methodConstruct.isPrivate() ? Memory.TRUE : Memory.FALSE;
         } else
             return Memory.FALSE;
     }
+
+    @Signature
+    public Memory isEnum(Environment env, Memory... args) {return entity.isEnum()?Memory.TRUE:Memory.FALSE;}
 
     @Signature
     public Memory isInterface(Environment env, Memory... args) {
@@ -500,6 +520,11 @@ public class ReflectionClass extends Reflection {
     }
 
     @Signature
+    public Memory isAnonymous(Environment env, Memory... args) {
+        return entity.isAnonymous() ? Memory.TRUE : Memory.FALSE;
+    }
+
+    @Signature
     public Memory isUserDefined(Environment env, Memory... args) {
         return entity.isInternal() ? Memory.FALSE : Memory.TRUE;
     }
@@ -512,13 +537,19 @@ public class ReflectionClass extends Reflection {
     @Signature(@Arg(value = "args", type = HintType.ARRAY, optional = @Optional(type = HintType.ARRAY)))
     public Memory newInstanceArgs(Environment env, Memory... args) throws Throwable {
         if (args[0].isArray()) {
-            return newInstance(env, args[0].toValue(ArrayMemory.class).values(true));
+            var values = args[0].toValue(ArrayMemory.class);
+            if (env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+                return php.runtime.invoke.PhpCallFrame.constructResolved(entity, env, env.trace(), values.size())
+                        .invokeKeyed(values, true);
+            return newInstance(env, values.values(true));
         } else
             return Memory.NULL;
     }
 
     @Signature
     public Memory newInstanceWithoutConstructor(Environment env, Memory... args) throws Throwable {
+        if (entity.getNativeClass() == php.runtime.lang.PhpWeakReference.class)
+            env.exception(ReflectionException.class, "Class WeakReference is an internal class marked as final that cannot be instantiated without invoking its constructor");
         return new ObjectMemory(entity.newObject(env, env.trace(), false, args));
     }
 

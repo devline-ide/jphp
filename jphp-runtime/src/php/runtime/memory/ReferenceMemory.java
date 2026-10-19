@@ -12,15 +12,110 @@ public class ReferenceMemory extends Memory {
     private static final Object SHARED_REFERENCE = new Object();
     private Memory _value;
     private transient Object ownershipAuthority;
+    /** Sealed native-map structure persists independently of the actual payload publisher. */
+    private static final class NativeGlobalAuthority {
+        final php.runtime.memory.support.ArrayMemoryMap.NativeGlobalSlot slot;
+        Object payload;
+        NativeGlobalAuthority(php.runtime.memory.support.ArrayMemoryMap.NativeGlobalSlot slot,Object payload) {this.slot=slot;this.payload=payload;}
+    }
+    private Object authority() {
+        Object result=ownershipAuthority instanceof NativeGlobalAuthority ? ((NativeGlobalAuthority)ownershipAuthority).payload : ownershipAuthority;
+        while(result instanceof GlobalsWriteObservation)result=((GlobalsWriteObservation)result).previous;
+        return result;
+    }
+    private void authority(Object next) {
+        Object current=ownershipAuthority instanceof NativeGlobalAuthority ? ((NativeGlobalAuthority)ownershipAuthority).payload : ownershipAuthority;
+        if(current instanceof GlobalsWriteObservation) {
+            GlobalsWriteObservation oldest=(GlobalsWriteObservation)current;
+            while(oldest.previous instanceof GlobalsWriteObservation)oldest=(GlobalsWriteObservation)oldest.previous;
+            oldest.previous=next;
+        } else if (ownershipAuthority instanceof NativeGlobalAuthority) ((NativeGlobalAuthority)ownershipAuthority).payload=next;
+        else ownershipAuthority=next;
+    }
+    /** Temporary embedding observation adds no field or owner to ordinary reference cells. */
+    public final GlobalsWriteObservation observeGlobalsWrites(Environment environment,Object key,ReferenceMemory source) {
+        if(environment.getRuntimeGlobalsTable().getByScalar(key)!=source
+                || this!=source && this!=source.getReference())
+            throw new IllegalArgumentException("Globals observation needs its actual Environment slot or canonical payload");
+        Object previous=ownershipAuthority instanceof NativeGlobalAuthority ? ((NativeGlobalAuthority)ownershipAuthority).payload : ownershipAuthority;
+        GlobalsWriteObservation observation=new GlobalsWriteObservation(this,previous);
+        if(ownershipAuthority instanceof NativeGlobalAuthority)((NativeGlobalAuthority)ownershipAuthority).payload=observation;
+        else ownershipAuthority=observation;
+        return observation;
+    }
+    public static final class GlobalsWriteObservation implements AutoCloseable {
+        private final ReferenceMemory carrier;
+        private Object previous;
+        private long writes;
+        private boolean closed;
+        private GlobalsWriteObservation(ReferenceMemory carrier,Object previous){this.carrier=carrier;this.previous=previous;}
+        public boolean wasWritten(){if(closed)throw new IllegalStateException("Closed globals observation");return writes!=0;}
+        @Override public void close() {
+            if(closed)return;
+            Object active=carrier.ownershipAuthority instanceof NativeGlobalAuthority
+                    ? ((NativeGlobalAuthority)carrier.ownershipAuthority).payload : carrier.ownershipAuthority;
+            if(active!=this)throw new IllegalStateException("Globals observations must close in reverse scope order");
+            if(carrier.ownershipAuthority instanceof NativeGlobalAuthority)((NativeGlobalAuthority)carrier.ownershipAuthority).payload=previous;
+            else carrier.ownershipAuthority=previous;
+            closed=true;
+        }
+    }
+    /** All attachments are allocated and validated before structural sealing publishes any tag. */
+    public final NativeGlobalAttachment prepareNativeGlobalSlot(php.runtime.memory.support.ArrayMemoryMap.NativeGlobalSlot slot) {
+        if (slot == null || ownershipAuthority instanceof NativeGlobalAuthority)
+            throw new IllegalArgumentException("Native global carrier already has a structural slot or lacks its exact slot");
+        slot.validateCarrierAttachment(this);
+        return new NativeGlobalAttachment(this,slot,ownershipAuthority);
+    }
+    public static final class NativeGlobalAttachment {
+        private final ReferenceMemory carrier;
+        private final Object expected;
+        private final NativeGlobalAuthority prepared;
+        private boolean stored;
+        private NativeGlobalAttachment(ReferenceMemory carrier,php.runtime.memory.support.ArrayMemoryMap.NativeGlobalSlot slot,Object expected) {
+            this.carrier=carrier;this.expected=expected;this.prepared=new NativeGlobalAuthority(slot,expected);
+        }
+        public void validate() {
+            if (stored || carrier.ownershipAuthority != expected)
+                throw new IllegalArgumentException("Prepared native global carrier attachment changed");
+            prepared.slot.validateCarrierAttachment(carrier);
+        }
+        public void store() {
+            validate();carrier.ownershipAuthority=prepared;stored=true;
+        }
+    }
+
     private php.runtime.memory.helper.PhpPropertyGuard.Source propertySource;
     private java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> propertySources;
 
     public void attachPropertySource(Environment env, php.runtime.reflection.PropertyEntity property) {
         if (property.getDeclaredType() == null || propertySource != null) return;
-        propertySource = new php.runtime.memory.helper.PhpPropertyGuard.Source(env, property);
+        attachPropertySource(new php.runtime.memory.helper.PhpPropertyGuard.Source(env,property));
+    }
+    public void attachPropertySource(Environment env, php.runtime.reflection.PropertyEntity property,IObject owner) {
+        if (property.getDeclaredType() == null || propertySource != null) return;
+        attachPropertySource(new php.runtime.memory.helper.PhpPropertyGuard.Source(env,property,
+                property.isStatic()?null:php.runtime.memory.helper.PhpPropertyGuard.instanceOwner(owner)));
+    }
+    /** Reuse one token across the typed properties of an actual initialization/clone, never untyped slots. */
+    public php.runtime.memory.helper.PhpPropertyGuard.OwnerToken attachInstancePropertySource(Environment env,
+            php.runtime.reflection.PropertyEntity property,IObject owner,php.runtime.memory.helper.PhpPropertyGuard.OwnerToken lifetime) {
+        if (property.getDeclaredType() == null) return lifetime;
+        if (lifetime == null) lifetime=php.runtime.memory.helper.PhpPropertyGuard.instanceOwner(owner);
+        else lifetime.validateOwner(owner);
+        if (propertySource == null) attachPropertySource(new php.runtime.memory.helper.PhpPropertyGuard.Source(env,property,lifetime));
+        return lifetime;
+    }
+    private void attachPropertySource(php.runtime.memory.helper.PhpPropertyGuard.Source source) {
+        propertySource=source;
         ReferenceMemory cell=getReference();
         if (cell.propertySources == null) cell.propertySources=new java.util.ArrayList<>();
-        cell.propertySources.add(propertySource); propertySource.cell=cell;
+        cell.propertySources.add(source);source.cell=cell;
+    }
+    /** Ordinary guard readers prune by copy; prevalidated publications keep their captured list identities. */
+    private void purgeDeadPropertySources() {
+        if (propertySources != null) propertySources=php.runtime.memory.helper.PhpPropertyGuard.liveSources(propertySources);
+        if (propertySource != null && propertySource.isExpired()) propertySource=null;
     }
 
     /** Validates a magic getter reference without attaching the missing property's source. */
@@ -31,36 +126,43 @@ public class ReferenceMemory extends Memory {
     }
 
     public boolean hasPropertySources() {
-        var cell=getReference();
+        var cell=getReference();cell.purgeDeadPropertySources();
         return cell.propertySources != null && !cell.propertySources.isEmpty();
     }
 
     /** Modern operators capture a zval, without making it a PHP reference. */
     public Memory incrementTarget(boolean decrement, boolean post, Environment env, TraceInfo trace) {
+        if(propertySource!=null && propertySource.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.checkWrite(propertySource,getReference().getRawValue());
         return php.runtime.PhpArithmetic.incrementReference(this, decrement, post, env, trace);
     }
 
     /** Capture an overloaded array receiver once before walking another offset. */
-    public Memory incrementArrayCarrier(Environment env, TraceInfo trace) { return this; }
+    public Memory incrementArrayCarrier(Environment env, TraceInfo trace) { prepareRuntimeArrayWrite();return this; }
 
-    public boolean isSharedIncrementCell() { return getReference().hasSharedReference(); }
+    public boolean isSharedIncrementCell() {
+        ReferenceMemory cell=getReference();
+        return cell.getRuntimeCell() == null ? cell.hasSharedReference() : cell.getRuntimeCell().node().incoming() > 1;
+    }
 
     public void checkIncrementOverflow(Memory before, boolean decrement, Environment env, TraceInfo trace) {
         if (before.type != Type.INT || before.toLong() != (decrement ? Long.MIN_VALUE : Long.MAX_VALUE)) return;
-        ReferenceMemory cell = getReference();
+        ReferenceMemory cell = getReference();cell.purgeDeadPropertySources();
         if (cell.propertySources == null) return;
         Memory candidate = DoubleMemory.valueOf((double) before.toLong() + (decrement ? -1 : 1));
         for (var source : cell.propertySources) {
             if (!source.type().check(env, candidate, false, source.property.getClazz().getName())) {
                 env.exception(trace, php.runtime.lang.exception.BaseTypeError.class,
                         "Cannot %s %sproperty %s of type %s past its %s value",
-                        decrement ? "decrement" : "increment", cell.hasSharedReference() ? "a reference held by " : "",
+                        decrement ? "decrement" : "increment", cell.isSharedIncrementCell() ? "a reference held by " : "",
                         source.label(), source.type().getErrorSignature(), decrement ? "minimal" : "maximal");
             }
         }
     }
 
     public IncrementCell captureIncrementCell() { return new IncrementCell(this); }
+    public final IncrementCell captureIncrementCell(php.runtime.PhpArithmetic.RuntimeIncrementTarget proof) {
+        proof.validateTarget(this);return new IncrementCell(this,proof);
+    }
 
     public static final class IncrementCell {
         private final ReferenceMemory origin;
@@ -68,19 +170,65 @@ public class ReferenceMemory extends Memory {
         private final php.runtime.memory.helper.PhpPropertyGuard.Source direct;
         private final boolean shared;
         private final boolean initiallyGuarded;
+        private php.runtime.PhpArithmetic.RuntimeIncrementTarget runtimeProof;
+        private php.runtime.PhpRuntimeOwnership.Holder runtimeHolder;
+        private php.runtime.PhpRuntimeOwnership.IncrementLease runtimeLease;
+        private Memory runtimeApproved;
+        private boolean runtimeRestore,runtimeStored;
+        private IncrementCell(ReferenceMemory origin,php.runtime.PhpArithmetic.RuntimeIncrementTarget proof) {
+            this.cell=origin.getReference();cell.purgeDeadPropertySources();this.shared=origin.isSharedIncrementCell();
+            this.initiallyGuarded=cell.propertySources!=null&&!cell.propertySources.isEmpty();
+            this.origin=shared?cell:origin;this.direct=shared?null:origin.propertySource;
+            if(direct!=null)throw new IllegalArgumentException("ARRAY increment proof cannot restore a property declaration");
+            runtimeProof=proof;runtimeHolder=this.origin.getRuntimeHolder();
+            if(runtimeHolder==null)throw new IllegalArgumentException("Captured scalar lacks its actual runtime publisher");
+            runtimeLease=runtimeHolder.captureIncrement(this);
+        }
+        public ReferenceMemory runtimeCarrier() {
+            if(runtimeProof==null)throw new IllegalArgumentException("Passive increment has no runtime operator proof");return origin;
+        }
+        public php.runtime.PhpRuntimeOwnership.Frame runtimeFrame() {
+            if(runtimeProof==null)throw new IllegalArgumentException("Passive increment has no runtime operator frame");return runtimeProof.frame();
+        }
+        public Memory runtimeScalar() {
+            if(runtimeProof==null)throw new IllegalArgumentException("Passive increment has no captured runtime scalar");return runtimeProof.scalar();
+        }
+        public void validateRuntimeCarrier(php.runtime.PhpRuntimeOwnership.Holder actual,ReferenceMemory carrier) {
+            if(runtimeProof==null||actual!=runtimeHolder||carrier!=origin)
+                throw new IllegalArgumentException("Increment lease belongs to another captured publisher");
+        }
+        public void validateRuntimeValue(Memory candidate,boolean restore) {
+            if(runtimeProof==null||candidate!=runtimeApproved||restore!=runtimeRestore)
+                throw new IllegalArgumentException("Increment candidate was not approved by the captured operator");
+        }
+        private Memory publishRuntime(Memory requested,boolean restore) {
+            runtimeProof.validateValue(requested,restore);
+            Memory checked=requested;
+            if(!restore&&shared&&initiallyGuarded&&cell.propertySources!=null)
+                checked=php.runtime.memory.helper.PhpPropertyGuard.write(cell.propertySources,requested,null);
+            runtimeApproved=checked;runtimeRestore=restore;
+            try(var publication=runtimeLease.prepare(this,checked,restore)) {
+                if(publication!=null){origin.publishRuntimeRaw(publication);runtimeStored=true;publication.commit();}
+                return checked;
+            }catch(Throwable failure){return ReferenceMemory.<Memory,RuntimeException>incrementFailure(failure);}
+            finally{runtimeApproved=null;}
+        }
+        public boolean hasRuntimeStore(){return runtimeStored;}
+        public void closeRuntime()throws Exception {if(runtimeLease!=null)runtimeLease.close();}
         private IncrementCell(ReferenceMemory origin) {
-            this.cell = origin.getReference(); this.shared = cell.hasSharedReference();
+            this.cell = origin.getReference();cell.purgeDeadPropertySources(); this.shared = origin.isSharedIncrementCell();
             this.initiallyGuarded = cell.propertySources != null && !cell.propertySources.isEmpty();
             // ArrayValueMemory and other storage wrappers are not semantic PHP aliases.
             this.origin = !shared && origin.propertySource == null ? cell : origin;
             this.direct = shared ? null : this.origin.propertySource;
         }
         public Memory commit(Memory value) {
+            if(runtimeProof!=null)return publishRuntime(value,false);
             cell.rejectUnmanagedOwnershipMutation();origin.rejectUnmanagedOwnershipMutation();
             if (shared) {
                 Memory checked = !initiallyGuarded || cell.propertySources == null ? value
                         : php.runtime.memory.helper.PhpPropertyGuard.write(cell.propertySources, value, null);
-                cell._value = checked;
+                cell.storeRaw(checked);
                 return checked;
             }
             if (direct != null)
@@ -89,8 +237,9 @@ public class ReferenceMemory extends Memory {
         }
         /** No-effect operators and failed typed writes restore the original zval without a second type check. */
         public Memory restore(Memory value) {
+            if(runtimeProof!=null)return publishRuntime(value,true);
             cell.rejectUnmanagedOwnershipMutation();origin.rejectUnmanagedOwnershipMutation();
-            if (shared) { cell._value = value; return value; }
+            if (shared) { cell.storeRaw(value); return value; }
             if (direct != null) {
                 // A direct property retains its declaration when a warning handler rebinds/unsets it.
                 if (direct.cell != origin) {
@@ -103,10 +252,12 @@ public class ReferenceMemory extends Memory {
                     direct.cell = origin; origin.propertySource = direct;
                 }
             }
-            origin._value = value;
+            origin.storeRaw(value);
             return value;
         }
     }
+
+    @SuppressWarnings("unchecked") private static <T,E extends Throwable>T incrementFailure(Throwable failure)throws E{throw (E)failure;}
 
     public void detachPropertySource() {
         if (propertySource == null) return;
@@ -118,87 +269,265 @@ public class ReferenceMemory extends Memory {
         propertySource.cell=null; propertySource=null;
     }
 
+    /** Unserialization replaces the property's own zval; old aliases retain their separate CELL. */
+    public Memory restorePropertyValue(Memory value) {
+        rejectUnmanagedOwnershipMutation();
+        if (isCanonicalReferenceCell()) throw new IllegalArgumentException("Restoration needs the property's address carrier");
+        var source=propertySource;
+        Memory checked=source == null ? value : php.runtime.memory.helper.PhpPropertyGuard.write(java.util.List.of(source),value,source);
+        detachPropertySource();
+        storeRaw(checked == null ? NULL : checked);
+        if (source != null) attachPropertySource(source.freshDeclaration());
+        return _value;
+    }
+    /** Ordinary parser path: clear the real property before resolving/constructing its child. */
+    public final PropertyRestoration beginPropertyRestoration(Memory placeholder) {
+        rejectUnmanagedOwnershipMutation();
+        if (isCanonicalReferenceCell()) throw new IllegalArgumentException("Restoration needs the property's address carrier");
+        return new PropertyRestoration(this,placeholder);
+    }
+    public static final class PropertyRestoration implements AutoCloseable {
+        private final ReferenceMemory origin;
+        private final OwnershipDeclaration declaration;
+        private boolean finished;
+        private PropertyRestoration(ReferenceMemory origin,Memory placeholder) {
+            this.origin=origin;var source=origin.propertySource;
+            declaration=source == null ? null : new OwnershipDeclaration(origin,source.environment,source.property,source.ownerToken());
+            origin.detachPropertySource();origin.storeRaw(placeholder == null ? NULL : placeholder);
+        }
+        private void open() {
+            origin.rejectUnmanagedOwnershipMutation();
+            if (finished || origin.propertySource != null) throw new IllegalStateException("Property restoration was consumed or replaced");
+        }
+        public void store(Memory child) {open();origin.storeRaw(child == null ? NULL : child);}
+        public void complete() throws Throwable {
+            open();
+            try {
+                if (declaration != null) {
+                    var change=new OwnershipRestorationCompletion(origin,declaration,false);
+                    change.validate();change.store();
+                }
+                finished=true;
+            } catch (Throwable failure) {origin.storeRaw(UNDEFINED);finished=true;throw failure;}
+        }
+        public void abort() {
+            open();
+            if (declaration != null && origin._value instanceof ReferenceMemory && origin.getReference().isCanonicalReferenceCell()) {
+                var change=new OwnershipRestorationCompletion(origin,declaration,true);change.validate();change.store();
+            }
+            finished=true;
+        }
+        @Override public void close() {if (!finished) {open();finished=true;}}
+    }
+
     /** Removal detaches exactly the declaring property's Source, never other reference constraints. */
     public final OwnershipSourceRemoval prepareOwnershipSourceRemoval() {return new OwnershipSourceRemoval(this);}
     public static final class OwnershipSourceRemoval {
         private final ReferenceMemory origin,cell;
         private final php.runtime.memory.helper.PhpPropertyGuard.Source source;
         private final java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> before,after;
+        private final php.runtime.memory.helper.PhpPropertyGuard.Source[] contents;
         private OwnershipSourceRemoval(ReferenceMemory origin) {
             this.origin=origin;source=origin.propertySource;cell=source == null ? null : source.cell;
             before=cell == null ? null : cell.propertySources;
+            contents=before == null ? null : before.toArray(new php.runtime.memory.helper.PhpPropertyGuard.Source[0]);
             after=before == null ? null : new java.util.ArrayList<>(before);
             if (after != null) after.remove(source);
         }
         public void validate() {
             if (origin.propertySource != source || source != null && (source.cell != cell || cell.propertySources != before))
                 throw new IllegalArgumentException("Property Source changed during removal preparation");
+            if (before != null) {
+                if (before.size() != contents.length) throw new IllegalArgumentException("Property Source membership changed during removal preparation");
+                for (int i=0;i<contents.length;i++) if (before.get(i) != contents[i]) throw new IllegalArgumentException("Property Source membership changed during removal preparation");
+            }
         }
-        public OwnershipDeclaration declaration() {return source == null ? null : new OwnershipDeclaration(origin,source.environment,source.property);}
+        public OwnershipDeclaration declaration() {return source == null ? null : new OwnershipDeclaration(origin,source.environment,source.property,source.ownerToken());}
         private void store() {
             if (source != null) {cell.propertySources=after == null || after.isEmpty() ? null : after;source.cell=null;origin.propertySource=null;}
         }
+    }
+    public final OwnershipRestorationClear prepareOwnershipRestorationClear(OwnershipDeclaration prior) {
+        return new OwnershipRestorationClear(this,prior);
+    }
+    public static final class OwnershipRestorationClear {
+        private final ReferenceMemory origin;
+        private final Memory before;
+        private final OwnershipSourceRemoval removal;
+        private final OwnershipDeclaration declaration;
+        private OwnershipRestorationClear(ReferenceMemory origin,OwnershipDeclaration prior) {
+            this.origin=origin;before=origin._value;removal=new OwnershipSourceRemoval(origin);
+            if (prior != null) prior.freshSource();
+            var direct=origin.propertySource;
+            declaration=direct != null ? new OwnershipDeclaration(origin,direct.environment,direct.property,direct.ownerToken(),Memory.NULL)
+                    : prior == null ? null : new OwnershipDeclaration(origin,prior.environment,prior.property,prior.owner,Memory.NULL);
+            validate();
+        }
+        public OwnershipDeclaration declaration() {return declaration;}
+        public void validate() {removal.validate();if (origin._value != before) throw new IllegalArgumentException("Restoration cleanup address changed");}
+        private void store() {removal.store();origin.storeRaw(Memory.NULL);}
+    }
+    public final void publishOwnershipRestorationClear(php.runtime.PhpOwnershipArrays.RestorationClearPublication publication) {
+        publication.consumeCarrier(this);publication.sourceChange().store();
+    }
+    /** Reader owner replacement validates only this declaration, preserving old shared aliases. */
+    public final OwnershipRestoration prepareOwnershipRestoration(Memory value,OwnershipDeclaration unset) {
+        return new OwnershipRestoration(this,value,unset,false);
+    }
+    public final OwnershipRestoration prepareOwnershipPendingRestoration(php.runtime.PhpOwnershipArrays.RestorationPublication publication,Memory value,OwnershipDeclaration unset) {
+        publication.validatePendingPreparation(this,value);return new OwnershipRestoration(this,value,unset,true);
+    }
+    public static final class OwnershipRestoration {
+        private final ReferenceMemory origin;
+        private final Memory before,checked;
+        private final OwnershipSourceRemoval removal;
+        private final java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> originalSources,nextSources;
+        private final php.runtime.memory.helper.PhpPropertyGuard.Source[] contents;
+        private final php.runtime.memory.helper.PhpPropertyGuard.Source fresh;
+        private OwnershipRestoration(ReferenceMemory origin,Memory value,OwnershipDeclaration unset,boolean pending) {
+            this.origin=origin;before=origin._value;removal=new OwnershipSourceRemoval(origin);originalSources=origin.propertySources;
+            contents=originalSources == null ? null : originalSources.toArray(new php.runtime.memory.helper.PhpPropertyGuard.Source[0]);
+            var direct=origin.propertySource;
+            if (unset != null && unset.origin != origin) throw new IllegalArgumentException("Foreign declaration address");
+            fresh=direct != null ? direct.freshDeclaration()
+                    : unset == null ? null : unset.freshSource();
+            checked=fresh == null || pending ? value : php.runtime.memory.helper.PhpPropertyGuard.write(java.util.List.of(fresh),value,fresh);
+            nextSources=fresh == null || pending ? null : new java.util.ArrayList<>(java.util.List.of(fresh));validate();
+        }
+        public Memory checked() {return checked;}
+        public OwnershipDeclaration pendingDeclaration() {return fresh == null ? null : new OwnershipDeclaration(origin,fresh.environment,fresh.property,fresh.ownerToken());}
+        public void validate() {
+            removal.validate();
+            if (origin._value != before || origin.propertySources != originalSources)
+                throw new IllegalArgumentException("Restoration address changed during validation");
+            if (originalSources != null) {
+                if (originalSources.size() != contents.length) throw new IllegalArgumentException("Restoration Source membership changed");
+                for (int i=0;i<contents.length;i++) if (originalSources.get(i) != contents[i]) throw new IllegalArgumentException("Restoration Source membership changed");
+            }
+        }
+        private void store() {
+            removal.store();origin.propertySources=nextSources;origin.propertySource=nextSources == null ? null : fresh;
+            if (origin.propertySource != null) fresh.cell=origin;
+        }
+    }
+    public final void publishOwnershipRestoration(php.runtime.PhpOwnershipArrays.RestorationPublication publication) {
+        Memory next=publication.consumeCarrier(this);
+        if (publication.sourceChange() != null) publication.sourceChange().store();
+        storeRaw(next);
+    }
+    public final void relocateOwnershipRestoration(php.runtime.PhpOwnershipArrays.RestorationPublication publication,ReferenceMemory replacement) {
+        var entry=publication.consumeRelocation(this,replacement);
+        if (authority() == entry) authority(null);
+        replacement.authority(entry);
+    }
+    public final OwnershipRestorationCompletion prepareOwnershipRestorationCompletion(php.runtime.PhpOwnershipArrays.RestorationCompletionPublication publication) {
+        publication.validatePreparation(this);return new OwnershipRestorationCompletion(this,publication.declaration(),publication.unchecked());
+    }
+    public static final class OwnershipRestorationCompletion {
+        private final ReferenceMemory origin,target;
+        private final Memory before,payload,checked;
+        private final php.runtime.memory.helper.PhpPropertyGuard.Source fresh;
+        private final java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> sources,after;
+        private final php.runtime.memory.helper.PhpPropertyGuard.Source[] contents;
+        private OwnershipRestorationCompletion(ReferenceMemory origin,OwnershipDeclaration declaration,boolean unchecked) {
+            this.origin=origin;target=origin.getReference();before=origin._value;payload=target._value;sources=target.propertySources;
+            if (declaration == null || declaration.origin != origin || origin.propertySource != null)
+                throw new IllegalArgumentException("Pending declaration no longer identifies this property");
+            contents=sources == null ? null : sources.toArray(new php.runtime.memory.helper.PhpPropertyGuard.Source[0]);
+            fresh=new php.runtime.memory.helper.PhpPropertyGuard.Source(declaration.environment,declaration.property,declaration.owner);
+            checked=unchecked ? payload : php.runtime.memory.helper.PhpPropertyGuard.bind(fresh,target,sources);
+            if (checked != payload && (payload instanceof ArrayMemory || payload instanceof ObjectMemory))
+                throw new IllegalArgumentException("Completed container validation changed its allocation");
+            after=sources == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(sources);after.add(fresh);validate();
+        }
+        public void validate() {
+            if (origin._value != before || origin.propertySource != null || origin.getReference() != target
+                    || target._value != payload || target.propertySources != sources)
+                throw new IllegalArgumentException("Pending property/CELL changed during Source completion");
+            if (sources != null) {
+                if (sources.size() != contents.length) throw new IllegalArgumentException("Pending CELL Source membership changed");
+                for (int i=0;i<contents.length;i++) if (sources.get(i) != contents[i]) throw new IllegalArgumentException("Pending CELL Source membership changed");
+            }
+        }
+        private void store() {target.storeRaw(checked);target.propertySources=after;origin.propertySource=fresh;fresh.cell=target;}
+    }
+    public final void publishOwnershipRestorationCompletion(php.runtime.PhpOwnershipArrays.RestorationCompletionPublication publication,OwnershipRestorationCompletion change) {
+        publication.consume(this,change);change.store();
     }
     /** Declaration provenance only: never retain the removed CELL or its old value/Sources. */
     public static final class OwnershipDeclaration {
         private final ReferenceMemory origin;
         private final Environment environment;
         private final php.runtime.reflection.PropertyEntity property;
-        private OwnershipDeclaration(ReferenceMemory origin,Environment environment,php.runtime.reflection.PropertyEntity property) {
-            this.origin=origin;this.environment=environment;this.property=property;
+        private final php.runtime.memory.helper.PhpPropertyGuard.OwnerToken owner;
+        private final Memory placeholder;
+        private OwnershipDeclaration(ReferenceMemory origin,Environment environment,php.runtime.reflection.PropertyEntity property,php.runtime.memory.helper.PhpPropertyGuard.OwnerToken owner) {
+            this(origin,environment,property,owner,Memory.UNDEFINED);
+        }
+        private OwnershipDeclaration(ReferenceMemory origin,Environment environment,php.runtime.reflection.PropertyEntity property,php.runtime.memory.helper.PhpPropertyGuard.OwnerToken owner,Memory placeholder) {
+            this.origin=origin;this.environment=environment;this.property=property;this.owner=owner;this.placeholder=placeholder;
         }
         private php.runtime.memory.helper.PhpPropertyGuard.Source freshSource() {
-            if (origin.propertySource != null || !origin._value.isUndefined()) throw new IllegalArgumentException("Unset declaration changed");
-            return new php.runtime.memory.helper.PhpPropertyGuard.Source(environment,property);
+            if (origin.propertySource != null || origin._value != placeholder) throw new IllegalArgumentException("Unset declaration changed");
+            return new php.runtime.memory.helper.PhpPropertyGuard.Source(environment,property,owner);
         }
         public void initializeReference() {php.runtime.memory.helper.PhpPropertyGuard.initializeReference(freshSource());}
-        public OwnershipRevival prepareRevival(Memory value) {return new OwnershipRevival(origin,freshSource(),value);}
+        public OwnershipRevival prepareRevival(Memory value) {return new OwnershipRevival(origin,freshSource(),value,placeholder);}
     }
     public static final class OwnershipRevival {
         private final ReferenceMemory origin;
         private final php.runtime.memory.helper.PhpPropertyGuard.Source source;
         private final java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> before,after;
-        private final Memory checked;
-        private OwnershipRevival(ReferenceMemory origin,php.runtime.memory.helper.PhpPropertyGuard.Source source,Memory value) {
-            this.origin=origin;this.source=source;before=origin.propertySources;
+        private final Memory checked,placeholder;
+        private OwnershipRevival(ReferenceMemory origin,php.runtime.memory.helper.PhpPropertyGuard.Source source,Memory value,Memory placeholder) {
+            this.origin=origin;this.source=source;this.placeholder=placeholder;before=origin.propertySources;
             checked=php.runtime.memory.helper.PhpPropertyGuard.write(java.util.List.of(source),value,source);
             after=before == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(before);after.add(source);validate();
         }
         public Memory checked() {return checked;}
         public void validate() {
-            if (origin.propertySource != null || origin.propertySources != before || !origin._value.isUndefined())
+            if (origin.propertySource != null || origin.propertySources != before || origin._value != placeholder)
                 throw new IllegalArgumentException("Unset declaration changed during revival validation");
         }
         private void store() {origin.propertySource=source;origin.propertySources=after;source.cell=origin;}
     }
     public final void publishOwnershipUnset(php.runtime.PhpOwnershipArrays.UnsetPublication publication) {
-        publication.consumeCarrier(this);publication.sourceRemoval().store();_value=Memory.UNDEFINED;
+        publication.consumeCarrier(this);publication.sourceRemoval().store();storeRaw(Memory.UNDEFINED);
     }
     public final void publishOwnershipRemovalSource(php.runtime.PhpOwnershipArrays.UnsetPublication publication) {
         publication.consumeSource(this);publication.sourceRemoval().store();
     }
     public final void relocateOwnershipEntry(php.runtime.PhpOwnershipArrays.UnsetPublication publication,ReferenceMemory replacement) {
         var entry=publication.consumeRelocation(this,replacement);
-        if (ownershipAuthority == entry) ownershipAuthority=null;
-        replacement.ownershipAuthority=entry;
+        if (authority() == entry) authority(null);
+        replacement.authority(entry);
     }
 
-    private boolean guarded() {return propertySource != null || propertySources != null;}
+    private boolean guarded() {
+        if (propertySource == null && propertySources == null) return false;
+        purgeDeadPropertySources();return propertySource != null || propertySources != null;
+    }
     private Memory assignProperty(Memory value, php.runtime.memory.helper.PhpPropertyGuard.Source direct) {
         ReferenceMemory cell=getReference();
-        cell.rejectUnmanagedOwnershipMutation();
+        cell.rejectUnmanagedOwnershipMutation();cell.purgeDeadPropertySources();
+        if(direct!=null && direct.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.checkWrite(direct,cell.getRawValue());
         Memory checked=cell.propertySources == null ? value
                 : php.runtime.memory.helper.PhpPropertyGuard.write(cell.propertySources, value, direct);
-        cell._value=checked; return checked;
+        if(direct!=null && direct.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.checkWrite(direct,cell.getRawValue());
+        cell.storeRaw(checked);
+        if(direct!=null && direct.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.wrote(direct);
+        return checked;
     }
 
     protected ReferenceMemory(Type type, Memory value) {
         super(type);
+        php.runtime.PhpPrimitiveCellRuntime.beforeUntrackedConstruction(value);
         this._value = value == null ? NULL : value;
     }
 
     public ReferenceMemory(Memory value) {
         super(Type.REFERENCE);
+        php.runtime.PhpPrimitiveCellRuntime.beforeUntrackedConstruction(value);
         this._value = value == null ? Memory.NULL : value;
     }
 
@@ -216,35 +545,168 @@ public class ReferenceMemory extends Memory {
     }
 
     public Memory getValue() {
+        php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
         return _value;
     }
 
+    /** Origin tags occupy the existing authority union; neither tag adds a PHP owner. */
+    public final Environment.SyntheticGlobalsOrigin getSyntheticGlobalsOrigin() {
+        return authority() instanceof Environment.SyntheticGlobalsOrigin ? (Environment.SyntheticGlobalsOrigin) authority() : null;
+    }
+    public final void attachSyntheticGlobalsOrigin(Environment.SyntheticGlobalsOrigin origin) {
+        if (origin == null || authority() != null) throw new IllegalArgumentException("Constructor GLOBALS origin conflicts with an existing publisher");
+        origin.validateCarrier(this);authority(origin);
+    }
+    public final php.runtime.PhpRuntimeOwnership.GlobalTableBorrow getGlobalTableBorrow() {
+        return authority() instanceof php.runtime.PhpRuntimeOwnership.GlobalTableBorrow ? (php.runtime.PhpRuntimeOwnership.GlobalTableBorrow) authority() : null;
+    }
+    public final void attachGlobalTableBorrow(php.runtime.PhpRuntimeOwnership.GlobalTableBorrow borrow) {
+        if (borrow == null || authority() != null) throw new IllegalArgumentException("Literal GLOBALS borrow conflicts with an existing publisher");
+        borrow.validateCarrier(this);authority(borrow);
+    }
+    private void rejectGlobalTableBorrow() {
+        var borrow=getGlobalTableBorrow();if (borrow != null) borrow.rejectMutation();
+    }
+    /** Nonthrowing metadata retirement follows successful validation, immediately before the raw store. */
+    public final void retireSyntheticGlobalsOrigin() {
+        var origin=getSyntheticGlobalsOrigin();if (origin != null) {origin.retire();authority(null);}
+    }
+    private Memory storeRaw(Memory value) {
+        php.runtime.PhpPrimitiveCellRuntime.beforeRawStore(this,value);
+        retireSyntheticGlobalsOrigin();_value=value;
+        Object active=ownershipAuthority instanceof NativeGlobalAuthority ? ((NativeGlobalAuthority)ownershipAuthority).payload : ownershipAuthority;
+        while(active instanceof GlobalsWriteObservation) {
+            GlobalsWriteObservation observation=(GlobalsWriteObservation)active;
+            observation.writes++;active=observation.previous;
+        }
+        return value;
+    }
+    protected final void prepareUnownedKeyStore() {
+        if (ownershipAuthority instanceof NativeGlobalAuthority) throw new IllegalStateException("Sealed native global carrier cannot be rekeyed");
+        rejectUnmanagedOwnershipMutation();retireSyntheticGlobalsOrigin();
+    }
+
+    /** Actual ordinary PHP holders are registered by their producer/address, never by wrapper construction. */
+    public final php.runtime.PhpRuntimeOwnership.Holder getRuntimeHolder() {
+        return authority() instanceof php.runtime.PhpRuntimeOwnership.Holder ? (php.runtime.PhpRuntimeOwnership.Holder)authority()
+                : authority() instanceof php.runtime.PhpRuntimeOwnership.CellOrigin ? ((php.runtime.PhpRuntimeOwnership.CellOrigin)authority()).payload() : null;
+    }
+    public final php.runtime.PhpRuntimeOwnership.CellOrigin getRuntimeCell() {
+        return authority() instanceof php.runtime.PhpRuntimeOwnership.CellOrigin ? (php.runtime.PhpRuntimeOwnership.CellOrigin)authority() : null;
+    }
+    public final void attachRuntimeHolder(php.runtime.PhpRuntimeOwnership.Holder holder) {
+        if (holder == null || !holder.matches(this)) throw new IllegalArgumentException("Runtime holder does not identify this physical carrier");
+        if (getSyntheticGlobalsOrigin() != null || getGlobalTableBorrow() != null) throw new IllegalArgumentException("Special GLOBALS carrier cannot become a runtime holder");
+        var present=getRuntimeHolder();
+        if (present != null && present != holder) throw new IllegalArgumentException("Physical carrier already has a runtime holder");
+        if (getOwnershipEntry() != null || getOwnershipCell() != null) throw new IllegalArgumentException("Certified physical carrier already has its ownership publisher");
+        if (getRuntimeCell() == null) authority(holder);
+    }
+    public final void attachRuntimeCell(php.runtime.PhpRuntimeOwnership.CellOrigin origin) {
+        if (origin == null || origin.cell() != this || getClass() != ReferenceMemory.class || _value instanceof ReferenceMemory)
+            throw new IllegalArgumentException("Runtime CELL origin does not identify this canonical payload");
+        if (getSyntheticGlobalsOrigin() != null || getGlobalTableBorrow() != null) throw new IllegalArgumentException("Special GLOBALS carrier cannot become a runtime CELL");
+        var present=getRuntimeCell();
+        if (present != null && present != origin) throw new IllegalArgumentException("Canonical CELL already has a runtime origin");
+        if (getRuntimeHolder() != null && getRuntimeHolder() != origin.payload()) throw new IllegalArgumentException("Canonical CELL already has another runtime payload holder");
+        if (getOwnershipCell() != null || getOwnershipEntry() != null) throw new IllegalArgumentException("Certified canonical CELL already has its payload publisher");
+        authority(origin);
+    }
+    /** A single-use publisher permit is the only ordinary route to the private raw field. */
+    public final void publishRuntimeRaw(php.runtime.PhpRuntimeOwnership.Publication publication) {
+        boolean borrowed=publication.claimsRuntimeBorrowCarrier();
+        var attachment=publication.claimsRuntimeCarrierAttachment() ? publication.holder() : null;
+        if (attachment != null && (borrowed || authority() != null))
+            throw new IllegalArgumentException("Borrowed CV cannot install conflicting ownership publishers");
+        if (borrowed && authority() != publication.holder())
+            throw new IllegalArgumentException("Borrowed CV does not identify its retiring publisher");
+        storeRaw(publication.consumeRaw(this));
+        if (borrowed) authority(null);
+        else if (attachment != null) authority(attachment);
+    }
+    public final void publishRuntimeUnset(php.runtime.PhpRuntimeOwnership.Publication publication,OwnershipSourceRemoval removal) {
+        if (removal.origin != this) throw new IllegalArgumentException("Source removal belongs to another carrier");
+        removal.validate();
+        if (publication.next() != UNDEFINED) throw new IllegalArgumentException("Unset publication requires UNDEFINED");
+        Memory next=publication.consumeRaw(this);removal.store();storeRaw(next);
+    }
+    public final OwnershipReferenceChange prepareRuntimeReference(ReferenceMemory target,boolean promotion) {
+        if (target == this || !target.isCanonicalReferenceCell() || target.getRuntimeCell() == null)
+            throw new IllegalArgumentException("Reference binding needs a distinct runtime canonical CELL");
+        if (promotion && _value.isUndefined() && propertySources != null)
+            for (var source:propertySources) php.runtime.memory.helper.PhpPropertyGuard.initializeReference(source);
+        Memory checked=propertySource == null || propertySource.cell == target ? target._value
+                : php.runtime.memory.helper.PhpPropertyGuard.bind(propertySource,target,target.propertySources);
+        return new OwnershipReferenceChange(this,target,promotion,checked);
+    }
+    public final void publishRuntimeReference(OwnershipReferenceChange change,php.runtime.PhpRuntimeOwnership.Publication publication) {
+        change.validate();
+        if (change.origin != this || change.target._value != change.checked || publication.next() != change.target)
+            throw new IllegalArgumentException("Runtime reference source/target no longer matches its permit");
+        var attachment=publication.claimsRuntimeCarrierAttachment() ? publication.holder() : null;
+        if (attachment != null && authority() != null)
+            throw new IllegalArgumentException("Borrowed CV already has an ownership publisher");
+        change.publishPointer(publication.consumeReference(this,change));
+        if (attachment != null) authority(attachment);
+    }
+
     /** Ownership adapters may inspect a carrier without evaluating its overridden PHP getter. */
-    public final Memory getRawValue() { return _value; }
+    public final Memory getRawValue() { php.runtime.PhpPrimitiveCellRuntime.beforeRawRead(this);return _value; }
+    public final Memory readPrimitiveRaw(php.runtime.PhpPrimitiveCellRuntime.ReadAccess access) { access.validate();return _value; }
+    public final php.runtime.PhpPrimitiveCellRuntime.Attachment getPrimitiveCellAttachment() {
+        return authority() instanceof php.runtime.PhpPrimitiveCellRuntime.Attachment ? (php.runtime.PhpPrimitiveCellRuntime.Attachment)authority() : null;
+    }
+    public final boolean hasPrimitiveStaticUnknown() { return php.runtime.PhpPrimitiveCellRuntime.isUnknownStatic(authority()); }
+    public final void markPrimitiveStaticUnknown(Object tag) {
+        if (!php.runtime.PhpPrimitiveCellRuntime.isUnknownStatic(tag)) throw new IllegalArgumentException("Foreign static origin tag");
+        if (authority()==null) authority(tag);
+    }
+    public final void attachPrimitiveCell(php.runtime.PhpPrimitiveCellRuntime.Attachment attachment) {
+        attachment.validateCarrier(this);
+        if (getRuntimeHolder()!=null || getOwnershipEntry()!=null || getOwnershipCell()!=null || getSyntheticGlobalsOrigin()!=null || getGlobalTableBorrow()!=null)
+            throw new IllegalArgumentException("Physical CELL conflicts with another publisher");
+        authority(attachment);
+    }
+    public final void clearPrimitiveCell(php.runtime.PhpPrimitiveCellRuntime.Attachment expected) {
+        expected.validateCarrier(this);if (authority()!=expected) throw new IllegalArgumentException("CELL slot generation changed");authority(null);
+    }
 
     public final php.runtime.PhpOwnershipArrays.Entry getOwnershipEntry() {
-        return ownershipAuthority instanceof php.runtime.PhpOwnershipArrays.Entry ? (php.runtime.PhpOwnershipArrays.Entry)ownershipAuthority : null;
+        return authority() instanceof php.runtime.PhpOwnershipArrays.Entry ? (php.runtime.PhpOwnershipArrays.Entry)authority() : null;
     }
     public final void attachOwnershipEntry(php.runtime.PhpOwnershipArrays.Entry entry) {
         entry.validateCarrierAttachment(this);
-        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE && ownershipAuthority != entry
-                && (!(ownershipAuthority instanceof php.runtime.PhpOwnershipArrays.CellCertificate)
-                    || entry.cellCertificate() != ownershipAuthority))
+        if (authority() != null && authority() != SHARED_REFERENCE && authority() != entry
+                && (!(authority() instanceof php.runtime.PhpOwnershipArrays.CellCertificate)
+                    || entry.cellCertificate() != authority()))
             throw new IllegalArgumentException("Physical field already belongs to another ownership publisher");
-        ownershipAuthority = entry;
+        authority(entry);
+    }
+    /** Actual unpromoted CV storage; SHARED_REFERENCE is a binding certificate, not a reference count. */
+    public final boolean isExclusiveTypedObjectCv(IObject actual) {
+        return (getClass() == ReferenceMemory.class || getClass() == php.runtime.memory.support.ArrayMapEntryMemory.class)
+                && getReference() == this && !hasSharedReference() && getRuntimeHolder() == null
+                && getOwnershipCell() == null && getOwnershipEntry() == null && getPrimitiveCellAttachment() == null
+                && getValue() instanceof php.runtime.memory.ObjectMemory
+                && ((php.runtime.memory.ObjectMemory)getValue()).value == actual;
     }
     private boolean hasSharedReference() {
-        return ownershipAuthority == SHARED_REFERENCE
-                || ownershipAuthority instanceof php.runtime.PhpOwnershipArrays.CellCertificate
-                || ownershipAuthority instanceof php.runtime.PhpOwnershipArrays.Entry
-                    && ((php.runtime.PhpOwnershipArrays.Entry) ownershipAuthority).cellCertificate() != null;
+        return getRuntimeCell() != null || php.runtime.PhpPrimitiveCellRuntime.isCellAttachment(getPrimitiveCellAttachment()) || authority() == SHARED_REFERENCE
+                || authority() instanceof php.runtime.PhpOwnershipArrays.CellCertificate
+                || authority() instanceof php.runtime.PhpOwnershipArrays.Entry
+                    && ((php.runtime.PhpOwnershipArrays.Entry) authority()).cellCertificate() != null;
     }
     private void markSharedReference() {
         if (hasSharedReference()) return;
-        rejectUnmanagedOwnershipMutation();ownershipAuthority = SHARED_REFERENCE;
+        rejectUnmanagedOwnershipMutation();retireSyntheticGlobalsOrigin();authority(SHARED_REFERENCE);
     }
     private void rejectUnmanagedOwnershipMutation() {
-        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE)
+        rejectGlobalTableBorrow();
+        var origin=getSyntheticGlobalsOrigin();
+        if (origin != null) {origin.validateCarrier(this);return;}
+        if (getRuntimeHolder() != null || getRuntimeCell() != null)
+            throw new IllegalStateException("Runtime Memory mutation requires its actual ownership publisher");
+        if (authority() != null && authority() != SHARED_REFERENCE && getPrimitiveCellAttachment()==null && !hasPrimitiveStaticUnknown())
             throw new IllegalStateException("Certified Memory mutation requires its actual ownership publisher");
     }
 
@@ -279,6 +741,7 @@ public class ReferenceMemory extends Memory {
         private final php.runtime.memory.helper.PhpPropertyGuard.Source direct,originalDirect;
         private final java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> originSources,targetSources,oldSources;
         private final java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> nextTarget,nextOld;
+        private final php.runtime.memory.helper.PhpPropertyGuard.Source[] originContents,targetContents,oldContents;
         private final boolean promotion;
         private boolean consumed;
         private OwnershipReferenceChange(ReferenceMemory origin,ReferenceMemory target,boolean promotion,Memory checked) {
@@ -289,6 +752,7 @@ public class ReferenceMemory extends Memory {
             this.direct=direct;originalDirect=origin.propertySource;oldSourceCell=direct == null ? null : direct.cell;
             originSources=origin.propertySources;targetSources=target.propertySources;
             oldSources=oldSourceCell == null ? null : oldSourceCell.propertySources;
+            originContents=contents(originSources);targetContents=contents(targetSources);oldContents=contents(oldSources);
             nextTarget=targetSources == null ? new java.util.ArrayList<>() : new java.util.ArrayList<>(targetSources);
             if (promotion && originSources != null) {
                 for (var source : originSources) if (!nextTarget.contains(source)) nextTarget.add(source);
@@ -296,17 +760,33 @@ public class ReferenceMemory extends Memory {
             nextOld=oldSources == null ? null : new java.util.ArrayList<>(oldSources);
             if (nextOld != null && direct != null) nextOld.remove(direct);
         }
+        private static php.runtime.memory.helper.PhpPropertyGuard.Source[] contents(java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> sources) {
+            return sources == null ? null : sources.toArray(new php.runtime.memory.helper.PhpPropertyGuard.Source[0]);
+        }
+        private static boolean matches(java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> sources,php.runtime.memory.helper.PhpPropertyGuard.Source[] snapshot) {
+            if (sources == null) return snapshot == null;
+            if (snapshot == null || sources.size() != snapshot.length) return false;
+            for (int i=0;i<snapshot.length;i++) if (sources.get(i) != snapshot[i]) return false;
+            return true;
+        }
         public Memory checkedTarget() {return checked;}
         public void validate() {
             if (consumed || origin._value != oldRaw || origin.propertySource != originalDirect
                     || origin.propertySources != originSources || target.propertySources != targetSources
                     || direct != null && (direct.cell != oldSourceCell || oldSourceCell != null && oldSourceCell.propertySources != oldSources))
                 throw new IllegalArgumentException("Reference source address changed during validation");
+            if (!matches(originSources,originContents) || !matches(targetSources,targetContents) || !matches(oldSources,oldContents))
+                throw new IllegalArgumentException("Reference Source membership changed during validation");
         }
         private void publish(ReferenceMemory actual,php.runtime.PhpOwnershipArrays.RawPublication publication) {
-            validate();if (actual != origin || target._value != checked)
-                throw new IllegalArgumentException("Reference source/target no longer matches its permit");
-            Memory pointer=publication.consume(origin);
+            validate();if (actual != origin || target._value != checked) throw new IllegalArgumentException("Reference source/target no longer matches its permit");
+            publishPointer(publication.consume(origin));
+        }
+        private void publish(ReferenceMemory actual,php.runtime.PhpOwnershipArrays.RestorationPublication publication) {
+            validate();if (actual != origin || target._value != checked) throw new IllegalArgumentException("Restoration reference source/target no longer matches its permit");
+            publishPointer(publication.consumeCarrier(origin));
+        }
+        private void publishPointer(Memory pointer) {
             if (pointer != target) throw new IllegalArgumentException("Reference permit has a different canonical target");
             consumed=true;
             if (promotion) origin.propertySources=null;
@@ -315,32 +795,35 @@ public class ReferenceMemory extends Memory {
             target.propertySources=nextTarget.isEmpty() ? null : nextTarget;
             if (promotion && originSources != null) for (var source : originSources) source.cell=target;
             if (direct != null) {direct.cell=target;origin.propertySource=direct;}
-            origin._value=target;
+            origin.storeRaw(target);
         }
     }
     public final void publishOwnershipReference(OwnershipReferenceChange change,php.runtime.PhpOwnershipArrays.RawPublication publication) {
         change.publish(this,publication);
     }
+    public final void publishOwnershipRestorationReference(OwnershipReferenceChange change,php.runtime.PhpOwnershipArrays.RestorationPublication publication) {
+        change.publish(this,publication);
+    }
 
     /** Only an already validated, single-use target permit may publish the private raw field. */
     public final void publishOwnershipRaw(php.runtime.PhpOwnershipArrays.RawPublication publication) {
-        _value = publication.consume(this);
+        storeRaw(publication.consume(this));
         if (publication.revival() != null) publication.revival().store();
     }
     public final php.runtime.PhpOwnershipArrays.CellCertificate getOwnershipCell() {
-        return ownershipAuthority instanceof php.runtime.PhpOwnershipArrays.CellCertificate
-                ? (php.runtime.PhpOwnershipArrays.CellCertificate) ownershipAuthority
-                : ownershipAuthority instanceof php.runtime.PhpOwnershipArrays.Entry
-                    ? ((php.runtime.PhpOwnershipArrays.Entry) ownershipAuthority).cellCertificate() : null;
+        return authority() instanceof php.runtime.PhpOwnershipArrays.CellCertificate
+                ? (php.runtime.PhpOwnershipArrays.CellCertificate) authority()
+                : authority() instanceof php.runtime.PhpOwnershipArrays.Entry
+                    ? ((php.runtime.PhpOwnershipArrays.Entry) authority()).cellCertificate() : null;
     }
     public final void attachOwnershipCell(php.runtime.PhpOwnershipArrays.CellCertificate certificate) {
         certificate.validateAttachment(this);
-        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE) {
+        if (authority() != null && authority() != SHARED_REFERENCE) {
             if (getOwnershipCell() != certificate)
                 throw new IllegalArgumentException("Reference allocation already belongs to another ownership certificate");
             return;
         }
-        ownershipAuthority = certificate;
+        authority(certificate);
     }
 
     /** A terminal explicit-reference allocation, never an ArrayValue/ArrayAccess carrier. */
@@ -349,9 +832,10 @@ public class ReferenceMemory extends Memory {
     }
 
     public Memory setValue(Memory value) {
+        if (getRuntimeHolder() != null) return getRuntimeHolder().assign(value == null ? NULL : value);
         rejectUnmanagedOwnershipMutation();
         if (guarded()) return assignProperty(value, propertySource);
-        return this._value = value == null ? NULL : value;
+        return storeRaw(value == null ? NULL : value);
     }
 
     @Override
@@ -954,6 +1438,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory assign(Memory memory) {
+        if (getRuntimeHolder() != null) return getRuntimeHolder().assign(memory);
         rejectUnmanagedOwnershipMutation();
         if (guarded()) return assignProperty(memory, propertySource);
         switch (getValue().type){
@@ -983,16 +1468,24 @@ public class ReferenceMemory extends Memory {
     }
 
     public static Memory exportReference(Memory value) {
+        if (value instanceof ReferenceMemory) ((ReferenceMemory) value).rejectGlobalTableBorrow();
         rejectStringOffsetReference(value);
         return value instanceof ReferenceMemory ? ((ReferenceMemory) value).getReferenceForBinding() : value;
     }
 
     public ReferenceMemory getReferenceForBinding() {
-        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE && !hasSharedReference() && !(_value instanceof ReferenceMemory))
+        if(propertySource!=null && propertySource.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.indirect(propertySource,this);
+        php.runtime.PhpPrimitiveCellRuntime.beforeExport(this);
+        rejectGlobalTableBorrow();
+        rejectStringOffsetReference(this);purgeDeadPropertySources();
+        if (getRuntimeCell() != null) return this;
+        if (getRuntimeHolder() != null) return getRuntimeHolder().reference();
+        if (authority() != null && authority() != SHARED_REFERENCE && !hasSharedReference() && !(_value instanceof ReferenceMemory))
             rejectUnmanagedOwnershipMutation();
         rejectStringOffsetReference(this);
         if (getValue().isReference()) {
-            ReferenceMemory shared = getReference();
+            ReferenceMemory shared = getReference();shared.purgeDeadPropertySources();
+            if (shared.getRuntimeHolder() != null || shared.getRuntimeCell() != null) return shared.getReferenceForBinding();
             shared.markSharedReference();
             if (shared.getValue().isUndefined()) {
                 if (shared.propertySources != null) for (var source : shared.propertySources)
@@ -1008,11 +1501,12 @@ public class ReferenceMemory extends Memory {
         shared.markSharedReference();
         shared.propertySources=propertySources; propertySources=null;
         if (shared.propertySources != null) for (var source : shared.propertySources) source.cell=shared;
-        _value=shared;
+        storeRaw(shared);
         return shared;
     }
 
     public ReferenceMemory getReference(){
+        php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
         if (getValue().type == Type.REFERENCE){
             return ((ReferenceMemory)getValue()).getReference();
         } else
@@ -1021,6 +1515,13 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory assignRef(Memory reference){
+        if(propertySource!=null && propertySource.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.indirect(propertySource,this);
+        if (getRuntimeHolder() != null) {
+            rejectStringOffsetReference(reference);
+            if (!(reference instanceof ReferenceMemory)) return getRuntimeHolder().assign(reference);
+            ReferenceMemory target=((ReferenceMemory)reference).getReferenceForBinding();
+            return target == this ? target : getRuntimeHolder().rebind(target);
+        }
         rejectUnmanagedOwnershipMutation();
         rejectStringOffsetReference(reference);
         if (reference.isReference()){
@@ -1042,11 +1543,11 @@ public class ReferenceMemory extends Memory {
                     old.propertySources.remove(propertySource);
                     if (old.propertySources.isEmpty()) old.propertySources=null;
                 }
-                target._value=checked;
+                target.storeRaw(checked);
                 if (target.propertySources == null) target.propertySources=new java.util.ArrayList<>();
                 target.propertySources.add(propertySource); propertySource.cell=target;
             }
-            _value=target; return target;
+            storeRaw(target); return target;
         }
         setValue(reference);
         return reference;
@@ -1054,6 +1555,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory assign(long memory) {
+        if (getRuntimeHolder() != null) return assign(LongMemory.valueOf(memory));
         rejectUnmanagedOwnershipMutation();
         if (guarded()) return assign(LongMemory.valueOf(memory));
         switch (getValue().type){
@@ -1066,6 +1568,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory assign(String memory) {
+        if (getRuntimeHolder() != null) return assign(StringMemory.valueOf(memory));
         rejectUnmanagedOwnershipMutation();
         if (guarded()) return assign(StringMemory.valueOf(memory));
         switch (getValue().type){
@@ -1078,6 +1581,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory assign(boolean memory) {
+        if (getRuntimeHolder() != null) return assign(memory ? TRUE : FALSE);
         rejectUnmanagedOwnershipMutation();
         if (guarded()) return assign(memory ? TRUE : FALSE);
         switch (getValue().type){
@@ -1090,6 +1594,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory assign(double memory) {
+        if (getRuntimeHolder() != null) return assign(DoubleMemory.valueOf(memory));
         rejectUnmanagedOwnershipMutation();
         if (guarded()) return assign(DoubleMemory.valueOf(memory));
         switch (getValue().type){
@@ -1120,18 +1625,39 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public void unset() {
+        if (getRuntimeHolder() != null) {getRuntimeHolder().unset();return;}
         rejectUnmanagedOwnershipMutation();
         detachPropertySource();
-        this._value=UNDEFINED;
+        storeRaw(UNDEFINED);
     }
 
     @Override
     public void manualUnset(Environment env){
+        if (getRuntimeHolder() != null) {unset();return;}
         rejectUnmanagedOwnershipMutation();
         if (this.getValue().isObject())
             this.getValue().manualUnset(env);
 
         this.unset();
+    }
+
+    /** COW is selected by the actual writer holder, never by a borrowed Java array view. */
+    public final void checkPhpReadonlyArrayWrite() {
+        if(propertySource!=null && propertySource.property.isPhpReadonly() && !toValue().isObject()) php.runtime.PhpReadonlyProperty.indirect(propertySource,this);
+    }
+    private void prepareRuntimeArrayWrite() {
+        checkPhpReadonlyArrayWrite();
+        rejectGlobalTableBorrow();
+        var holder = getRuntimeHolder();
+        if (holder == null) return;
+        Memory payload = holder.raw();
+        if (holder.role() == php.runtime.PhpRuntimeOwnership.Role.CELL) {
+            if (payload.getClass() != ReferenceMemory.class || ((ReferenceMemory) payload).getRuntimeCell() == null)
+                throw new IllegalArgumentException("Ordinary ARRAY write needs its canonical payload publisher");
+            payload = ((ReferenceMemory) payload).getRuntimeCell().payload().raw();
+        }
+        if (payload instanceof ArrayMemory)
+            php.runtime.PhpOwnershipArrays.runtimeWritable(holder);
     }
 
     public void needArray(){
@@ -1142,12 +1668,14 @@ public class ReferenceMemory extends Memory {
     }
 
     public Memory initializeArray() {
+        if(propertySource!=null && propertySource.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.indirect(propertySource,this);
         ArrayMemory initialized=new ArrayMemory();
         ReferenceMemory cell=getReference();
         if (cell.propertySources != null) for (var source : cell.propertySources)
             if (!source.type().check(source.writer(),initialized,false,source.property.getClazz().getName()))
                 source.writer().exception(source.trace(),php.runtime.lang.exception.BaseTypeError.class,
                         "Cannot auto-initialize an array inside property %s of type %s",source.label(),source.type().getErrorSignature());
+        if (getRuntimeHolder() != null) return php.runtime.PhpOwnershipArrays.runtimeEmpty(getRuntimeHolder());
         return assign(initialized);
     }
 
@@ -1190,13 +1718,13 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory refOfPush(TraceInfo trace) {
-        needArray();
+        needArray();prepareRuntimeArrayWrite();
         return getValue().refOfPush(trace);
     }
 
     @Override
     public Memory refOfIndexAsShortcut(TraceInfo trace, Memory index){
-        needArray();
+        needArray();prepareRuntimeArrayWrite();
         switch (getValue().type){
             case STRING:
                 return refOfIndex(trace, index);
@@ -1206,7 +1734,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, Memory index) {
-        needArray();
+        needArray();prepareRuntimeArrayWrite();
         switch (getValue().type){
             case STRING:
                 if (index.isString()){
@@ -1224,7 +1752,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, long index) {
-        needArray();
+        needArray();prepareRuntimeArrayWrite();
         switch (getValue().type){
             case STRING: return CharMemory.valueOf(this, (StringMemory)this.getValue(), (int)index);
             default: return getValue().refOfIndex(trace, index);
@@ -1233,7 +1761,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, double index) {
-        needArray();
+        needArray();prepareRuntimeArrayWrite();
         switch (getValue().type){
             case STRING: return CharMemory.valueOf(this, (StringMemory)this.getValue(), (int)index);
             default: return getValue().refOfIndex(trace, index);
@@ -1242,7 +1770,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, String index) {
-        needArray();
+        needArray();prepareRuntimeArrayWrite();
         int _index = -1;
         Memory tmp = StringMemory.toLong(index);
         if (tmp != null)
@@ -1256,7 +1784,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory refOfIndex(TraceInfo trace, boolean index) {
-        needArray();
+        needArray();prepareRuntimeArrayWrite();
         switch (getValue().type){
             case STRING: return CharMemory.valueOf(this, (StringMemory)this.getValue(), index ? 1 : 0);
             default: return getValue().refOfIndex(trace, index);
@@ -1265,7 +1793,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public void unsetOfIndex(TraceInfo trace, Memory index) {
-        getValue().unsetOfIndex(trace, index);
+        prepareRuntimeArrayWrite();getValue().unsetOfIndex(trace, index);
     }
 
     @Override
@@ -1310,6 +1838,7 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public ForeachIterator getNewIterator(Environment env, boolean getReferences, boolean getKeyReferences) {
+        if (getReferences || getKeyReferences) prepareRuntimeArrayWrite();
         return getValue().getNewIterator(env, getReferences, getKeyReferences);
     }
 

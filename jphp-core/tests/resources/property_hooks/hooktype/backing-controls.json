@@ -1,0 +1,12 @@
+[
+  {
+    "id": "backing/weak",
+    "case": "backing-weak",
+    "resource": "resources/property_hooks/hooktype/backing-weak"
+  },
+  {
+    "id": "backing/strict",
+    "case": "backing-strict",
+    "resource": "resources/property_hooks/hooktype/backing-strict"
+  }
+]

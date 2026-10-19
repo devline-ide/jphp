@@ -1,0 +1,1 @@
+<?php interface I{public int $x{get;set;}}abstract class A{abstract function f():int;}class C extends A implements I{public int $x=2;function f():int{return 1;}}$c=new C;echo $c->x+$c->f();

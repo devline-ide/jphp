@@ -98,7 +98,7 @@ public final class PhpComparison {
             Memory scalar = leftObject ? b : a;
             if (scalar.isString()) {
                 if (object.getReflection().methodMagicToString == null) return leftObject ? 1 : -1;
-                Memory string = StringMemory.valueOf(object.toString());
+                Memory string = PhpByteStrings.comparisonStringValue(object, env, trace);
                 return leftObject ? compare(string, scalar, env, trace, active)
                         : compare(scalar, string, env, trace, active);
             }
@@ -111,8 +111,8 @@ public final class PhpComparison {
         boolean rightNumber = b.isNumber();
         if (leftNumber && rightNumber) return numeric(a, b);
         if (a.isString() && b.isString()) {
-            Memory left = StringMemory.toNumericStrict(a.toString());
-            Memory right = StringMemory.toNumericStrict(b.toString());
+            Memory left = StringMemory.toNumericStrict(PhpByteStrings.numericText(a));
+            Memory right = StringMemory.toNumericStrict(PhpByteStrings.numericText(b));
             if (left != null && right != null) {
                 // Infinite numeric strings need the textual fallback used by Zend.
                 if (left.type == Memory.Type.DOUBLE && right.type == Memory.Type.DOUBLE && !Double.isFinite(left.toDouble())
@@ -142,33 +142,18 @@ public final class PhpComparison {
 
     private static int numberString(Memory number, Memory string, Environment env) {
         if (number.type == Memory.Type.DOUBLE && Double.isNaN(number.toDouble())) return UNORDERED;
-        Memory numeric = StringMemory.toNumericStrict(string.toString());
+        Memory numeric = StringMemory.toNumericStrict(PhpByteStrings.numericText(string));
         if (numeric != null) return numeric(number, numeric);
         return lexical(StringMemory.valueOf(number.type == Memory.Type.INT ? number.toString()
                 : floatString(number.toDouble(), env)), string);
     }
 
     private static int lexical(Memory a, Memory b) {
-        return Integer.signum(Arrays.compareUnsigned(a.getBinaryBytes(StandardCharsets.UTF_8),
-                b.getBinaryBytes(StandardCharsets.UTF_8)));
+        return php.runtime.memory.PhpByteStringMemory.compareBytes(a, b);
     }
 
     private static String floatString(double value, Environment env) {
-        if (value == Double.POSITIVE_INFINITY) return "INF";
-        if (value == Double.NEGATIVE_INFINITY) return "-INF";
-        int precision = env.getConfigValue("precision", LongMemory.valueOf(14)).toInteger();
-        String text = precision < 0 ? Double.toString(value)
-                : String.format(Locale.ROOT, "%." + Math.max(1, Math.min(precision, 100)) + "G", value);
-        int exponent = text.indexOf('E');
-        String mantissa = exponent < 0 ? text : text.substring(0, exponent);
-        if (mantissa.indexOf('.') >= 0) {
-            while (mantissa.endsWith("0")) mantissa = mantissa.substring(0, mantissa.length() - 1);
-            if (mantissa.endsWith(".")) mantissa = mantissa.substring(0, mantissa.length() - 1);
-        }
-        if (exponent < 0) return mantissa;
-        if (mantissa.indexOf('.') < 0) mantissa += ".0";
-        int power = Integer.parseInt(text.substring(exponent + 1));
-        return mantissa + "E" + (power >= 0 ? "+" : "") + power;
+        return PhpByteStrings.floatString(value, env);
     }
 
     private static int arrays(ArrayMemory a, ArrayMemory b, Environment env, TraceInfo trace,

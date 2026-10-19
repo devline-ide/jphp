@@ -32,10 +32,21 @@ public final class PhpConstantExpression {
     private record Literal(Token token, int baseStart) {}
     private final Map<Token, Literal> literals = new IdentityHashMap<>();
     private final ExpressionStmtCompiler calculator;
+    private boolean parameterDefault;
     private PhpConstantExpression(ExpressionStmtCompiler calculator) { this.calculator = calculator; }
 
+    public static Memory checkAttribute(ExprStmtToken expression, ExpressionStmtCompiler calculator) {
+        return check(expression,calculator,true);
+    }
+    public static Memory checkParameter(ExprStmtToken expression, ExpressionStmtCompiler calculator) {
+        return check(expression,calculator,true);
+    }
     public static Memory check(ExprStmtToken expression, ExpressionStmtCompiler calculator) {
+        return check(expression,calculator,false);
+    }
+    private static Memory check(ExprStmtToken expression, ExpressionStmtCompiler calculator, boolean parameterDefault) {
         PhpConstantExpression validator = new PhpConstantExpression(calculator);
+        validator.parameterDefault=parameterDefault;
         Result result = validator.expression(expression);
         if (result.error != null) calculator.getCompiler().getEnvironment().error(
                 result.at.toTraceInfo(calculator.getCompiler().getContext()), ErrorType.E_COMPILE_ERROR, result.error);
@@ -118,7 +129,18 @@ public final class PhpConstantExpression {
             return new Result(result.at, result.error, index, result.foldable);
         }
         if (token instanceof StaticAccessExprToken access) return access(access, index, null);
-        if (token instanceof NewExprToken) return Result.invalid(token, "New expressions are not supported in this context", index);
+        if (token instanceof NewExprToken creation) {
+            if (!parameterDefault) return Result.invalid(token, "New expressions are not supported in this context", index);
+            if (creation.getAnonymousClass() != null) return Result.invalid(token,"Cannot use anonymous class in constant expression",index);
+            if (creation.isDynamic() || !(creation.getName() instanceof NameToken || creation.getName() instanceof SelfExprToken))
+                return Result.invalid(token,"Cannot use dynamic class name in constant expression",index);
+            for (ExprStmtToken argument : creation.getParameters()) {
+                if (argument.getTokens().stream().anyMatch(t -> t instanceof ArgumentUnpackExprToken))
+                    return Result.invalid(token,"Argument unpacking in constant expressions is not supported",index);
+                Result value=expression(argument);if (value.error != null) return value;
+            }
+            return Result.valid(index,false);
+        }
         if (token instanceof IntegerExprToken || token instanceof DoubleExprToken
                 || token instanceof BooleanExprToken || token instanceof NullExprToken) return Result.valid(index, true);
         if (token instanceof StringExprToken string && string.getSegments().isEmpty()) return Result.valid(index, true);
@@ -155,6 +177,8 @@ public final class PhpConstantExpression {
 
     static Memory constantValue(StaticAccessExprToken access, ExpressionStmtCompiler calculator, Memory dynamicClass) {
         var owner = calculator.getMethod().clazz.getEntity();
+        // A module constant has no lexical ClassEntity; retain its checked runtime initializer.
+        if (owner == null) return null;
         var clazz = access.getClazz();
         php.runtime.reflection.ClassEntity target = clazz instanceof SelfExprToken ? owner
                 : clazz instanceof ParentExprToken ? owner.getParent()

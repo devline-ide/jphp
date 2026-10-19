@@ -1,0 +1,3 @@
+Fatal error: Readonly property H::$x must have type in G:\DevLine-QA\jphp-property-hooks-20261013\asymmetric-agent-contract-r1\native\weak\readonly_no_type.php on line 2
+Stack trace:
+#0 {main}

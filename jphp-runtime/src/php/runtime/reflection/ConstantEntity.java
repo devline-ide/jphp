@@ -65,6 +65,7 @@ public class ConstantEntity extends Entity {
 
     public ConstantEntity duplicateForTrait(ClassEntity owner, String traitName) {
         ConstantEntity copy = new ConstantEntity(name, value, caseSensitise);
+        copy.setPhpAttributes(getPhpAttributes());
         copy.setContext(context);
         copy.setTrace(trace);
         copy.setModifier(modifier);
@@ -79,6 +80,10 @@ public class ConstantEntity extends Entity {
 
     protected DocumentComment docComment;
     protected Memory value;
+    private boolean enumCase;
+    public boolean isEnumCase() {return enumCase;}
+    public void setEnumCase(boolean value) {enumCase=value;}
+    public Memory getStoredValue() {return value;}
     public final boolean caseSensitise;
 
     public ConstantEntity(Context context) {
@@ -144,7 +149,7 @@ public class ConstantEntity extends Entity {
     }
 
     public Memory getValue() {
-        return value;
+        return enumCase ? null : value;
     }
 
     public Memory getValue(Environment env){
@@ -152,7 +157,10 @@ public class ConstantEntity extends Entity {
     }
 
     public Memory getValue(Environment env, php.runtime.env.TraceInfo callTrace) {
-        if (clazz != null && clazz.getNativeClass() == php.runtime.ext.core.reflection.ReflectionProperty.class) {
+        if(enumCase) return php.runtime.PhpEnums.resolveCase(this,env);
+        if (clazz != null && (clazz.getNativeClass() == php.runtime.ext.core.reflection.ReflectionProperty.class
+                || clazz.getNativeClass() == php.runtime.ext.core.reflection.ReflectionClass.class
+                || clazz.getNativeClass() == php.runtime.ext.core.reflection.ReflectionMethod.class)) {
             Memory profileValue = php.runtime.ext.core.reflection.PhpReflectionModifiers.constantValue(this,
                     php.runtime.ext.core.reflection.PhpReflectionModifiers.modern(env, callTrace));
             if (profileValue != null) return profileValue;

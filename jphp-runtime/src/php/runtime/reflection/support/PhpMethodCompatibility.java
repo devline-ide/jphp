@@ -19,25 +19,26 @@ public final class PhpMethodCompatibility {
     private PhpMethodCompatibility() {}
 
     public static void validate(ModuleEntity module, Environment env) {
-        for (ClassEntity clazz : module.getClasses()) {
-            ClassEntity parent = clazz.getParent();
-            if (parent != null) {
-                for (MethodEntity method : parent.getMethods().values()) {
-                    if (method.isPrivate()) continue;
-                    // Concrete constructors do not constrain a child's signature.
-                    if (method.getLowerName().equals("__construct") && !method.isAbstractable()) continue;
-                    check(clazz.findMethod(method.getLowerName()), method, module, env);
-                }
+        for (ClassEntity clazz : module.getClasses()) if (!clazz.isUnresolvedDeclaration()) validateClass(clazz,module,env);
+    }
+    public static void validateClass(ClassEntity clazz, ModuleEntity module, Environment env) {
+        ClassEntity parent = clazz.getParent();
+        if (parent != null) {
+            for (MethodEntity method : parent.getMethods().values()) {
+                if (method.isPrivate()) continue;
+                // Concrete constructors do not constrain a child's signature.
+                if (method.getLowerName().equals("__construct") && !method.isAbstractable()) continue;
+                check(clazz.findMethod(method.getLowerName()), method, module, env);
             }
-            for (ClassEntity contract : clazz.getInterfaces().values()) {
-                for (MethodEntity method : contract.getMethods().values()) {
-                    MethodEntity impl = clazz.findMethod(method.getLowerName());
-                    if (impl != null && !impl.isPublic()) {
-                        throw new FatalException("Access level to " + impl.getSignatureString(false)
-                                + " must be public (as in interface " + contract.getName() + ")", impl.getTrace());
-                    }
-                    check(impl, method, module, env);
+        }
+        for (ClassEntity contract : clazz.getInterfaces().values()) {
+            for (MethodEntity method : contract.getMethods().values()) {
+                MethodEntity impl = clazz.findMethod(method.getLowerName());
+                if (impl != null && !impl.isPublic()) {
+                    throw new FatalException("Access level to " + impl.getSignatureString(false)
+                            + " must be public (as in interface " + contract.getName() + ")", impl.getTrace());
                 }
+                check(impl, method, module, env);
             }
         }
     }
@@ -51,6 +52,17 @@ public final class PhpMethodCompatibility {
     }
 
     public static boolean compatible(MethodEntity child, MethodEntity parent, ModuleEntity module, Environment env) {
+        return compatible(child, parent, module, env, null);
+    }
+
+    /** Native wrapping has a CompileScope but deliberately no executable Environment or synthetic Module. */
+    public static boolean compatibleNative(MethodEntity child, MethodEntity parent, php.runtime.env.CompileScope scope) {
+        return compatible(child, parent, null, null,
+                name -> scope.fetchUserClass(name, PhpClassNames.canonicalKey(name), true));
+    }
+
+    private static boolean compatible(MethodEntity child, MethodEntity parent, ModuleEntity module, Environment env,
+                                     java.util.function.Function<String, ClassEntity> nativeResolver) {
         if (parent.isReturnReference() && !child.isReturnReference()) return false;
         ParameterEntity[] from = parameters(parent), to = parameters(child);
         boolean parentVariadic = variadic(from), childVariadic = variadic(to);
@@ -62,7 +74,7 @@ public final class PhpMethodCompatibility {
             if (parameter == null) break;
             if (implementation == null || parameter.isReference() != implementation.isReference()) return false;
             if (!subtype(parameter.getTypeChecker(), parameter.isNullableOrDefaultNull(), parent.getClazz(),
-                    implementation.getTypeChecker(), implementation.isNullableOrDefaultNull(), child.getClazz(), module, env)) {
+                    implementation.getTypeChecker(), implementation.isNullableOrDefaultNull(), child.getClazz(), module, env, nativeResolver)) {
                 return false;
             }
         }
@@ -70,7 +82,7 @@ public final class PhpMethodCompatibility {
         // An undeclared return type imposes no constraint, including on void returns.
         return parent.getReturnTypeChecker() == null || (child.getReturnTypeChecker() != null
                 && subtype(child.getReturnTypeChecker(), child.isReturnTypeNullable(), child.getClazz(),
-                parent.getReturnTypeChecker(), parent.isReturnTypeNullable(), parent.getClazz(), module, env));
+                parent.getReturnTypeChecker(), parent.isReturnTypeNullable(), parent.getClazz(), module, env, nativeResolver));
     }
 
     private static ParameterEntity[] parameters(MethodEntity method) {
@@ -109,12 +121,13 @@ public final class PhpMethodCompatibility {
 
     private static boolean subtype(TypeChecker sub, boolean subNullable, ClassEntity subOwner,
                                    TypeChecker sup, boolean supNullable, ClassEntity supOwner,
-                                   ModuleEntity module, Environment env) {
+                                   ModuleEntity module, Environment env,
+                                   java.util.function.Function<String, ClassEntity> nativeResolver) {
         if (sub instanceof PhpTypeDeclaration || sup instanceof PhpTypeDeclaration) {
             if (sub != null && sub.getSignature().equals("never")) return true;
             if (sup != null && sup.getSignature().equals("mixed") && sub != null && sub.getSignature().equals("void")) return false;
             return PhpTypeDeclaration.fromChecker(sub, subNullable).isSubtypeOf(
-                    PhpTypeDeclaration.fromChecker(sup, supNullable), subOwner, supOwner, module, env);
+                    PhpTypeDeclaration.fromChecker(sup, supNullable), subOwner, supOwner, module, env, nativeResolver);
         }
         if (sub instanceof TypeChecker.Simple && ((TypeChecker.Simple) sub).getType() == HintType.NEVER) return true;
         if (top(sup)) {
@@ -132,25 +145,26 @@ public final class PhpMethodCompatibility {
         boolean subClass = subStatic || !sub.isBuiltin(), supClass = !sup.isBuiltin();
         if (supName.equals("object")) return subClass;
         if (supName.equals("callable") && subClass) {
-            ClassEntity entity = resolve(subName, subOwner, module, env);
+            ClassEntity entity = resolve(subName, subOwner, module, env, nativeResolver);
             return entity != null && entity.isInstanceOfLower("closure");
         }
         if (supName.equals("iterable")) {
             if (subName.equals("array")) return true;
-            ClassEntity entity = subClass ? resolve(subName, subOwner, module, env) : null;
+            ClassEntity entity = subClass ? resolve(subName, subOwner, module, env, nativeResolver) : null;
             return entity != null && entity.isInstanceOfLower("traversable");
         }
         if (subClass && supClass) {
-            ClassEntity entity = resolve(subName, subOwner, module, env);
+            ClassEntity entity = resolve(subName, subOwner, module, env, nativeResolver);
             return entity != null && PhpClassNames.matches(entity, supName, env);
         }
         return false;
     }
 
-    private static ClassEntity resolve(String name, ClassEntity owner, ModuleEntity module, Environment env) {
+    private static ClassEntity resolve(String name, ClassEntity owner, ModuleEntity module, Environment env,
+                                       java.util.function.Function<String, ClassEntity> nativeResolver) {
         if (PhpClassNames.canonicalKey(owner.getName()).equals(PhpClassNames.canonicalKey(name))) return owner;
-        ClassEntity entity = module.findClass(name);
+        ClassEntity entity = nativeResolver == null ? module.findClass(name) : nativeResolver.apply(name);
         if (entity == null && owner.getModule() != null) entity = owner.getModule().findClass(name);
-        return entity != null ? entity : env.fetchClass(name, false, php.runtime.common.PhpLanguageProfile.PHP_8_5);
+        return entity != null || nativeResolver != null ? entity : env.fetchClass(name, false, php.runtime.common.PhpLanguageProfile.PHP_8_5);
     }
 }

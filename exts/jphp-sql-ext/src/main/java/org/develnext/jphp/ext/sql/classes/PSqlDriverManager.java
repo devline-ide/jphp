@@ -32,6 +32,7 @@ final public class PSqlDriverManager extends BaseObject {
         put("mysql", "com.mysql.jdbc.jdbc2.optional.MysqlDataSource");
 
         put("psql", "org.postgresql.ds.PGPoolingDataSource");
+        put("pgsql", "org.postgresql.ds.PGPoolingDataSource");
         put("postgres", "org.postgresql.ds.PGPoolingDataSource");
         put("postgresql", "org.postgresql.ds.PGPoolingDataSource");
 
@@ -46,8 +47,10 @@ final public class PSqlDriverManager extends BaseObject {
 
     protected final static Map<String, String> driverClasses = new HashMap<String, String>() {{
         put("db2", "COM.ibm.db2.jdbc.app.DB2Driver");
-        put("mysql", "com.mysql.jdbc.Driver");
+        put("mysql", "com.mysql.cj.jdbc.Driver");
+        put("com.mysql.jdbc.driver", "com.mysql.cj.jdbc.Driver");
         put("psql", "org.postgresql.Driver");
+        put("pgsql", "org.postgresql.Driver");
         put("postgres", "org.postgresql.Driver");
         put("postgresql", "org.postgresql.Driver");
         put("postgresql", "org.postgresql.Driver");
@@ -89,14 +92,14 @@ final public class PSqlDriverManager extends BaseObject {
     public static PSqlConnectionPool getPool(Environment env, String url, String driverName, @Nullable Properties properties) throws SQLException {
         HikariConfig config = new HikariConfig(properties == null ? new Properties() : properties);
 
-        if (config.getDataSourceClassName() == null) {
-            config.setDataSourceClassName(dataSourceClasses.get(driverName));
+        if (config.getDataSourceClassName() == null && config.getDataSource() == null) {
+            config.setDriverClassName(_getDriverClass(driverName));
+            config.setJdbcUrl("jdbc:" + (url.startsWith(":") ? url.substring(1) : url));
         }
 
-        HikariDataSource pool = new HikariDataSource(config);
-
-        pool.setDriverClassName(_getDriverClass(driverName));
-        pool.setJdbcUrl("jdbc:" + url);
+        // Start on first checkout, after the PHP caller has configured the pool.
+        HikariDataSource pool = new HikariDataSource();
+        config.copyStateTo(pool);
 
         return new PSqlConnectionPool(env, pool);
     }

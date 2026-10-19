@@ -1,0 +1,3 @@
+Fatal error: Cannot override final property A::$x in G:\DevLine-QA\jphp-property-hooks-20261013\asymmetric-agent-contract-r1\native\strict\private_set_override.php on line 3
+Stack trace:
+#0 {main}

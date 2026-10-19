@@ -1,0 +1,3 @@
+Fatal error: A void function does not return a value, but #[\NoDiscard] requires a return value in G:\DevLine-QA\jphp-attributes-20261013\native\negative-delayed-nodiscard-void.php on line 2
+Stack trace:
+#0 {main}

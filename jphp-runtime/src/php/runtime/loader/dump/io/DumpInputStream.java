@@ -10,6 +10,7 @@ import php.runtime.memory.ArrayMemory;
 import php.runtime.memory.DoubleMemory;
 import php.runtime.memory.LongMemory;
 import php.runtime.memory.StringMemory;
+import php.runtime.memory.PhpByteStringMemory;
 import php.runtime.memory.helper.ClassConstantMemory;
 import php.runtime.memory.helper.ConstantMemory;
 import php.runtime.reflection.ClassEntity;
@@ -19,9 +20,18 @@ import java.io.IOException;
 import java.io.InputStream;
 
 public class DumpInputStream extends DataInputStream {
+    private final boolean rawStrings;
+
     public DumpInputStream(InputStream in) {
-        super(in);
+        this(in, in instanceof DumpInputStream && ((DumpInputStream) in).rawStrings);
     }
+
+    public DumpInputStream(InputStream in, boolean rawStrings) {
+        super(in);
+        this.rawStrings = rawStrings;
+    }
+
+    public boolean isRawStringEnabled() { return rawStrings; }
 
     public String readName(int max) throws IOException {
         int nameLength = readInt();
@@ -98,6 +108,15 @@ public class DumpInputStream extends DataInputStream {
         if (tmp == -3)
             return new ClassConstantMemory(readUTF(), readUTF());
 
+        if (tmp == -4) {
+            if (!rawStrings) throw new DumpException("Raw PHP strings require compiler ABI 17");
+            if (readInt() != DumpOutputStream.RAW_STRING_STAMP)
+                throw new DumpException("Invalid raw PHP string stamp");
+            if (readInt() != DumpOutputStream.RAW_STRING_VERSION)
+                throw new DumpException("Unsupported raw PHP string version");
+            return new PhpByteStringMemory(readRawData(DumpOutputStream.MAX_RAW_STRING_BYTES));
+        }
+
         if (tmp >= 0 && tmp < Memory.Type.values().length){
             Memory.Type type = Memory.Type.values()[tmp];
             switch (type){
@@ -143,11 +162,10 @@ public class DumpInputStream extends DataInputStream {
                 throw new DumpException(
                         "Invalid raw-data size, max " + max + " bytes");
             } else {
-                byte[] raw = new byte[length];
-
-                readFully(raw);
-                /*if (read != length)
-                    throw new DumpException("Cannot read raw-data, length = " + length + ", but returns " + read);*/
+                // Read actual payload bytes before committing to the declared allocation.
+                byte[] raw = in.readNBytes(length);
+                if (raw.length != length)
+                    throw new java.io.EOFException("Truncated raw-data payload");
                 return raw;
             }
         }

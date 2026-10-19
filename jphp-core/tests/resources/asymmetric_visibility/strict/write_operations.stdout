@@ -1,0 +1,12 @@
+read:ok:2
+assign:Error:Cannot modify private(set) property H::$i from global scope
+inc:Error:Cannot modify private(set) property H::$i from global scope
+compound:Error:Cannot modify private(set) property H::$i from global scope
+arraydim:Error:Cannot indirectly modify private(set) property H::$a from global scope
+append:Error:Cannot indirectly modify private(set) property H::$a from global scope
+arrayunset:Error:Cannot indirectly modify private(set) property H::$a from global scope
+reference:Error:Cannot indirectly modify private(set) property H::$i from global scope
+refbind:Error:Cannot indirectly modify private(set) property H::$i from global scope
+unset:Error:Cannot unset private(set) property H::$i from global scope
+object_inner:ok:3
+state:2:[1]

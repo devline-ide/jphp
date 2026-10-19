@@ -1,0 +1,2 @@
+bound:7
+unbound:Error:Cannot modify private(set) property H::$x from global scope

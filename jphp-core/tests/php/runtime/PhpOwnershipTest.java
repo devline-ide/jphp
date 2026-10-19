@@ -198,4 +198,59 @@ public class PhpOwnershipTest {
         }
         assertEquals(0,graph.liveNodes());
     }
+    @Test public void receiverRetainTransferAndDeferredBorrowLeavePendingSiblingUntilBodyCompletes() throws Throwable {
+        var graph=new PhpOwnership();var log=new ArrayList<String>();
+        var storage=graph.storage(new Object());
+        var first=graph.object(new Object(),new PhpOwnership.Lifecycle() {
+            @Override public void destruct(PhpOwnership.Node node) throws Throwable {
+                log.add("B:start");var source=graph.root();var destination=graph.root();
+                try(var publication=source.preparePublication(node)) {publication.commit();}
+                try(var publication=source.prepareTransferTo(destination)) {publication.commit();}
+                destination.close();source.close();
+                graph.deferDestruction(()->{var borrowed=graph.root();borrowed.replace(node);borrowed.close();});
+                try(var pin=graph.pin(node)) {assertSame(node,pin.target());}
+                log.add("B:end");
+            }
+        });
+        var sibling=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){log.add("T");}});
+        graph.edge(storage).replace(first);graph.edge(storage).replace(sibling);root(graph,storage).close();
+        assertEquals(Arrays.asList("B:start","B:end","T"),log);assertEquals(0,graph.liveNodes());
+    }
+    @Test public void nestedReleaseRunsSynchronouslyAheadOfAlreadyPendingOuterSibling() throws Throwable {
+        var graph=new PhpOwnership();var log=new ArrayList<String>();var childOwner=new AtomicReference<PhpOwnership.Slot>();
+        var child=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){log.add("C");}});childOwner.set(root(graph,child));
+        var storage=graph.storage(new Object());var first=graph.object(new Object(),new PhpOwnership.Lifecycle(){
+            @Override public void destruct(PhpOwnership.Node node)throws Throwable{log.add("B:start");childOwner.get().close();log.add("B:end");}
+        });
+        var sibling=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){log.add("T");}});
+        graph.edge(storage).replace(first);graph.edge(storage).replace(sibling);root(graph,storage).close();
+        assertEquals(Arrays.asList("B:start","C","B:end","T"),log);assertEquals(0,graph.liveNodes());
+    }
+    @Test public void nestedReleaseFailureKeepsPendingSiblingOrderAndFailureComposition() throws Throwable {
+        var graph=new PhpOwnership();var log=new ArrayList<String>();var childOwner=new AtomicReference<PhpOwnership.Slot>();var childFailure=new Exception("child");var siblingFailure=new Exception("sibling");
+        var child=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node)throws Throwable{log.add("C");throw childFailure;}});childOwner.set(root(graph,child));
+        var storage=graph.storage(new Object());var first=graph.object(new Object(),new PhpOwnership.Lifecycle(){
+            @Override public void destruct(PhpOwnership.Node node)throws Throwable{log.add("B:start");childOwner.get().close();log.add("B:end");}
+        });
+        var sibling=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node)throws Throwable{log.add("T");throw siblingFailure;}});
+        graph.edge(storage).replace(first);graph.edge(storage).replace(sibling);
+        try {root(graph,storage).close();fail("lost nested failure");}catch(Throwable error){assertSame(childFailure,error);assertArrayEquals(new Throwable[]{siblingFailure},error.getSuppressed());}
+        assertEquals(Arrays.asList("B:start","C","T"),log);assertEquals(0,graph.liveNodes());
+    }
+    @Test public void deepStorageCleanupRemainsIterativeAfterCallbackQueueIsolation() throws Throwable {
+        var graph=new PhpOwnership();var first=graph.storage(new Object());var next=first;
+        for(int i=0;i<20000;i++){var child=graph.storage(new Object());graph.edge(next).replace(child);next=child;}
+        int[] destroyed={0};var leaf=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){destroyed[0]++;}});
+        graph.edge(next).replace(leaf);root(graph,first).close();assertEquals(1,destroyed[0]);assertEquals(0,graph.liveNodes());
+    }
+    @Test public void ownedDescendantCleanupFinishesBeforeAlreadyPendingOuterSibling() throws Throwable {
+        var graph=new PhpOwnership();var log=new ArrayList<String>();var storage=graph.storage(new Object());
+        var first=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){log.add("B");}});
+        var child=graph.storage(new Object());var deep=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){log.add("D");}});
+        var nextChild=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){log.add("E");}});
+        graph.edge(first).replace(child);graph.edge(child).replace(deep);graph.edge(first).replace(nextChild);
+        var sibling=graph.object(new Object(),new PhpOwnership.Lifecycle(){@Override public void destruct(PhpOwnership.Node node){log.add("T");}});
+        graph.edge(storage).replace(first);graph.edge(storage).replace(sibling);root(graph,storage).close();
+        assertEquals(Arrays.asList("B","D","E","T"),log);assertEquals(0,graph.liveNodes());
+    }
 }

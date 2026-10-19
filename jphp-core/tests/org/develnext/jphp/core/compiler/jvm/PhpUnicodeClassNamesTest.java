@@ -261,9 +261,39 @@ public class PhpUnicodeClassNamesTest extends JvmCompilerCase {
         };
         try {
             ModuleEntity dependent = compile(env, "class VirtualChild extends VirtualController {}", PhpLanguageProfile.PHP_8_5, false);
-            assertNotNull(dependent.findClass("VirtualChild")); assertEquals(2, calls[0]);
+            assertNotNull(dependent.findClass("VirtualChild")); assertEquals(0, calls[0]);
+            include(env, dependent); assertEquals(2, calls[0]);
             assertNull(env.getGlobals().getByScalar("hook_top_level")); assertFalse(env.isModernClassLookup());
         } finally { env.doFinal(); }
+    }
+
+    @Test public void testDeferredRelationsUsePublicVirtualFetchAndModuleProfile() throws Throwable {
+        for (boolean dump : new boolean[] {false, true}) {
+            final Map<String, Integer> calls = new HashMap<>();
+            Environment env = new Environment(newScope()) {
+                @Override public ClassEntity fetchClass(String name, String lower, boolean autoLoad) {
+                    if (name.equals("HookParentÉ") || name.equals("HookContractÉ") || name.equals("HookTraitÉ")) {
+                        assertTrue(isModernClassLookup());
+                        assertEquals(PhpClassNames.key(name, PhpLanguageProfile.PHP_8_5), lower);
+                        assertTrue(autoLoad); calls.merge(name, 1, Integer::sum);
+                    }
+                    return super.fetchClass(name, lower, autoLoad);
+                }
+            };
+            try {
+                include(env, compile(env, "class HookParentÉ {} interface HookContractÉ {} "
+                        + "trait HookTraitÉ { function probe(){ return 42; } }", PhpLanguageProfile.PHP_8_5, dump));
+                assertFalse(env.isModernClassLookup());
+                ModuleEntity child = compile(env, "if(true){ class HookChild extends HookParentÉ implements HookContractÉ "
+                        + "{ use HookTraitÉ; } } return (new HookChild)->probe();", PhpLanguageProfile.PHP_8_5, dump);
+                assertTrue(calls.isEmpty());
+                assertEquals(42, include(env, child).toInteger());
+                assertEquals(Integer.valueOf(1), calls.get("HookParentÉ"));
+                assertEquals(Integer.valueOf(1), calls.get("HookContractÉ"));
+                assertEquals(Integer.valueOf(1), calls.get("HookTraitÉ"));
+                assertFalse(env.isModernClassLookup());
+            } finally { env.doFinal(); }
+        }
     }
 
     @Test public void testExistingVirtualFetchOverridesAndNestedPhpFrame() throws Throwable {

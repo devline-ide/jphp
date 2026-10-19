@@ -1,0 +1,2 @@
+<?php function ro_result($f){try{return ["ok",$f()];}catch(Throwable $e){return [get_class($e),$e->getMessage()];}}
+function anon_result($f){try{$f();return "ok";}catch(Throwable $e){return get_class($e);}}$r=new readonly class(3){function __construct(public int $x){}};$c=new ReflectionClass($r);echo serialize([$c->isReadOnly(),$r->x,anon_result(function()use($r){$r->x=4;}),anon_result(function()use($r){$r->y=4;})]);

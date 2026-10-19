@@ -31,6 +31,7 @@ import php.runtime.exceptions.FatalException;
 import php.runtime.exceptions.support.ErrorType;
 import php.runtime.invoke.cache.*;
 import php.runtime.lang.BaseObject;
+import org.develnext.jphp.core.tokenizer.token.stmt.EnumCaseStmtToken;
 import php.runtime.reflection.*;
 import php.runtime.reflection.helper.GeneratorEntity;
 
@@ -41,10 +42,109 @@ import java.util.*;
 import static org.objectweb.asm.Opcodes.*;
 
 public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
+    public void compilePhpAttributes(php.runtime.reflection.support.Entity declaration,
+            org.develnext.jphp.core.tokenizer.token.stmt.StmtToken source,int target) {
+        compilePhpAttributes(declaration,source,target,
+                target==php.runtime.reflection.support.PhpAttribute.FUNCTION && isSystem ? functionName : declaration.getName());
+    }
+    public void compilePhpAttributes(php.runtime.reflection.support.Entity declaration,
+            org.develnext.jphp.core.tokenizer.token.stmt.StmtToken source,int target,String logicalName) {
+        if(source.getPhpAttributes().isEmpty()) return;
+        var attributes=new ArrayList<php.runtime.reflection.support.PhpAttribute>();
+        int occurrence=0;
+        for(var attribute:source.getPhpAttributes()) {
+            if(target==php.runtime.reflection.support.PhpAttribute.PARAMETER
+                    && source instanceof org.develnext.jphp.core.tokenizer.token.stmt.ArgumentStmtToken parameter && parameter.getPromotionModifier()!=null
+                    && attribute.getName().getName().equalsIgnoreCase("Override")) continue;
+            if(target==php.runtime.reflection.support.PhpAttribute.CLASS && attribute.getName().getName().equalsIgnoreCase("Attribute")
+                    && (entity.isAbstract() || entity.isInterface() || entity.isTrait() || entity.isEnum()))
+                compiler.getEnvironment().error(attribute.toTraceInfo(compiler.getContext()),php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,
+                        "Only non-abstract classes can be declared as attribute classes");
+            int argumentIndex=0;
+            var arguments=new ArrayList<php.runtime.reflection.support.PhpAttribute.Argument>();
+            for(var argument:attribute.getArguments()) {
+                MethodNode initializer=new MethodNodeImpl();
+                initializer.access=ACC_PUBLIC | ACC_STATIC;
+                initializer.name="__$attributeArgument"+entity.nextMethodIndex();
+                initializer.desc=Type.getMethodDescriptor(Type.getType(Memory.class),Type.getType(Environment.class));
+                var certificate=new AnnotationNode(Type.getDescriptor(php.runtime.annotation.PhpAttributeInitializer.class));
+                certificate.values=Arrays.asList("site",php.runtime.loader.dump.PhpAttributeDumper.site(target,
+                        logicalName,
+                        attribute.getName().getName(),occurrence,argumentIndex++));
+                initializer.invisibleAnnotations=new ArrayList<>(List.of(certificate));
+                MethodStmtCompiler method=new MethodStmtCompiler(this,initializer);
+                method.setInitializer(true);
+                String callableName="";
+                if(target==php.runtime.reflection.support.PhpAttribute.PARAMETER)
+                    callableName=logicalName.substring(0,logicalName.lastIndexOf("/P"));
+                else if(target==php.runtime.reflection.support.PhpAttribute.METHOD)
+                    callableName=logicalName;
+                else if(target==php.runtime.reflection.support.PhpAttribute.FUNCTION)
+                    callableName=logicalName==null ? "{closure}" : logicalName;
+                method.setAttributeCallableName(callableName);
+                ExpressionStmtCompiler expression=new ExpressionStmtCompiler(method,null);
+                PhpConstantExpression.checkAttribute(argument.getExpression(),expression);
+                method.writeHeader();
+                LabelNode start=expression.makeLabel();method.addLocalVariable("~env",start,Environment.class);
+                expression.writeExpression(argument.getExpression(),true,false,true);expression.writePopBoxing(true);
+                initializer.instructions.add(new InsnNode(ARETURN));expression.stackPop();method.writeFooter();
+                node.methods.add(initializer);
+                arguments.add(new php.runtime.reflection.support.PhpAttribute.Argument(argument.getName(),
+                        new php.runtime.reflection.support.PhpAttribute.Initializer(compiler.getModule().getInternalName(),
+                                node.name.replace('/','.'),initializer.name,isSystem ? classContext==null ? null : classContext.getFulledName() : entity.getName())));
+            }
+            TraceInfo occurrenceTrace=attribute.toTraceInfo(compiler.getContext());
+            occurrenceTrace=TraceInfo.valueOf(occurrenceTrace.getFileName(),occurrenceTrace.getStartLine(),occurrenceTrace.getStartPosition(),compiler.getModule().getInternalName());
+            attributes.add(new php.runtime.reflection.support.PhpAttribute(attribute.getName().getName(),
+                    occurrenceTrace,target,compiler.getModule().isStrictTypes(),arguments));
+            occurrence++;
+        }
+        declaration.setPhpAttributes(attributes);
+        php.runtime.reflection.support.PhpAllowDynamicProperties.validate(declaration,entity,compiler.getEnvironment());
+        php.runtime.reflection.support.PhpNoDiscardValidation.validate(declaration,entity,compiler.getEnvironment());
+    }
+    private void importPhpAttributeHelpers(php.runtime.reflection.support.Entity source,
+            php.runtime.reflection.support.Entity target,ClassEntity donor) {
+        importPhpAttributeHelpers(source,target,donor,target.getName());
+    }
+    private void importPhpAttributeHelpers(php.runtime.reflection.support.Entity source,
+            php.runtime.reflection.support.Entity target,ClassEntity donor,String logicalName) {
+        if(source.getPhpAttributes().isEmpty()) return;
+        try {php.runtime.loader.dump.PhpAttributeDumper.validateDeclaration(donor.getModule(),source,donor);}
+        catch(java.io.IOException invalid) {throw new CriticalException(invalid);}
+        var attributes=new ArrayList<php.runtime.reflection.support.PhpAttribute>();int occurrence=0;
+        for(var attribute:source.getPhpAttributes()) {
+            var arguments=new ArrayList<php.runtime.reflection.support.PhpAttribute.Argument>();int argumentIndex=0;
+            for(var argument:attribute.arguments()) {
+                var init=argument.initializer();
+                if(!init.moduleName().equals(donor.getModule().getInternalName())
+                        || !init.javaClass().replace('.','/').equals(donor.getCompiledInternalName().replace('.','/')))
+                    throw new CriticalException("Attribute import lacks its exact physical trait donor");
+                ClassNode physical=new ClassNode();new ClassReader(donor.getData()).accept(physical,0);
+                MethodNode selected=null;for(MethodNode method:physical.methods) if(method.name.equals(init.method())) {
+                    if(selected!=null) throw new CriticalException("Ambiguous trait attribute helper");selected=method;
+                }
+                if(selected==null) throw new CriticalException("Missing trait attribute helper");
+                MethodNode copied=new MethodNodeImpl();copied.desc=selected.desc;copied.signature=selected.signature;
+                copied.exceptions=new ArrayList<>(selected.exceptions);selected.accept(copied);
+                copied.name="__$attributeArgument"+entity.nextMethodIndex();copied.access=ACC_PUBLIC|ACC_STATIC;
+                if(copied.invisibleAnnotations==null) copied.invisibleAnnotations=new ArrayList<>();
+                copied.invisibleAnnotations.removeIf(annotation->annotation.desc.equals(Type.getDescriptor(php.runtime.annotation.PhpAttributeInitializer.class)));
+                var certificate=new AnnotationNode(Type.getDescriptor(php.runtime.annotation.PhpAttributeInitializer.class));
+                certificate.values=Arrays.asList("site",php.runtime.loader.dump.PhpAttributeDumper.site(attribute.target(),logicalName,attribute.name(),occurrence,argumentIndex++));
+                copied.invisibleAnnotations.add(certificate);node.methods.add(copied);
+                arguments.add(new php.runtime.reflection.support.PhpAttribute.Argument(argument.name(),
+                        new php.runtime.reflection.support.PhpAttribute.Initializer(compiler.getModule().getInternalName(),node.name.replace('/','.'),copied.name,entity.getName())));
+            }
+            attributes.add(new php.runtime.reflection.support.PhpAttribute(attribute.name(),attribute.trace(),attribute.target(),attribute.strictTypes(),arguments));occurrence++;
+        }
+        target.setPhpAttributes(attributes);
+    }
     protected JPHPClassWriter cw;
     public final ClassNode node;
     public final ClassStmtToken statement;
     public final List<TraceInfo> traceList = new ArrayList<TraceInfo>();
+    private Map<TraceInfo,TraitHookBodyCompiler.TraceOrigin> importedHookTraces;
     public final List<Memory> memoryConstants = new ArrayList<Memory>();
     public final List<Collection<Memory>> memoryArrayConstants = new ArrayList<Collection<Memory>>();
 
@@ -52,6 +152,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     private boolean isSystem = false;
     private boolean isInterfaceCheck = true;
     private String functionName = "";
+    private String noDiscardClosureName;
+    public void setNoDiscardClosureName(String name){noDiscardClosureName=name;}
 
     private boolean initDynamicExists = false;
     private int callFuncCount = 0;
@@ -177,38 +279,11 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             ExpressionStmtCompiler expressionCompiler = new ExpressionStmtCompiler(methodCompiler, null);
             methodCompiler.writeHeader();
 
-            LabelNode end = new LabelNode();
             LabelNode l0 = writeLabel(destructor, statement.getMeta().getStartLine());
             methodCompiler.addLocalVariable("~this", l0);
-
             expressionCompiler.writeVarLoad("~this");
-            expressionCompiler.writeSysDynamicCall(null, "isFinalized", Boolean.TYPE);
-            destructor.instructions.add(new JumpInsnNode(IFEQ, end));
-
-            // --- if (!__finalized__) {
-            expressionCompiler.writeVarLoad("~this");
-            expressionCompiler.writePushDup();
-            expressionCompiler.writeSysDynamicCall(null, "doFinalize", void.class);
-
-            expressionCompiler.writePushEnvFromSelf();
-            expressionCompiler.writePushConstNull();
-
-            expressionCompiler.writeSysDynamicCall(
-                    null, entity.methodDestruct.getInternalName(), Memory.class, Environment.class, Memory[].class
-            );
-            expressionCompiler.writePopAll(1);
-            // ---- }
-            destructor.instructions.add(end);
-
-            // call parent
-            // WARNING!!! It's commented for better performance, super.finalize empty in JDK 1.6, 1.7, 1.8
-            /*expressionCompiler.writeVarLoad("~this");
-            destructor.instructions.add(new MethodInsnNode(
-                    INVOKEVIRTUAL,
-                    Type.getInternalName(Object.class),
-                    destructor.name,
-                    destructor.desc
-            ));*/
+            expressionCompiler.writeSysStaticCall(php.runtime.invoke.PhpObjectLifecycle.class,
+                    "enqueueJvmFinalizer", void.class, php.runtime.lang.IObject.class);
 
             destructor.instructions.add(new InsnNode(Opcodes.RETURN));
             methodCompiler.writeFooter();
@@ -369,6 +444,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
                 PropertyEntity prop = new PropertyEntity(compiler.getContext());
                 prop.setName(property.getVariable().getName());
+                compilePhpAttributes(prop,property,php.runtime.reflection.support.PhpAttribute.PROPERTY);
                 prop.setModifier(property.getModifier());
                 prop.setStatic(property.isStatic());
                 prop.setDefaultValue(value);
@@ -376,6 +452,14 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 prop.setTrace(property.toTraceInfo(compiler.getContext()));
                 prop.setDeclaredType(property.getDeclaredType());
                 prop.setFinal(property.isFinal());
+                prop.setPromoted(property.isPromoted());
+                prop.setPhpReadonly(property.isPhpReadonly());
+                prop.setPhpSetModifier(property.getPhpSetModifier());
+                if(modern && prop.isPhpReadonly()) {
+                    if(prop.getDeclaredType()==null) compiler.getEnvironment().error(prop.getTrace(),ErrorType.E_COMPILE_ERROR,"Readonly property %s::$%s must have type",entity.getName(),prop.getName());
+                    if(prop.isDefault()) compiler.getEnvironment().error(prop.getTrace(),ErrorType.E_COMPILE_ERROR,"Readonly property %s::$%s cannot have default value",entity.getName(),prop.getName());
+                    if(prop.isStatic()) compiler.getEnvironment().error(prop.getTrace(),ErrorType.E_COMPILE_ERROR,"Static property %s::$%s cannot be readonly",entity.getName(),prop.getName());
+                }
                 if (modern && property.isFinal() && prop.isPrivate())
                     compiler.getEnvironment().error(prop.getTrace(), ErrorType.E_COMPILE_ERROR,
                             "Private property %s::$%s cannot be final", entity.getName(), prop.getName());
@@ -408,6 +492,51 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         node.methods.add(constructor);
     }
 
+    protected void writePropertyHooks() {
+        if(statement.getProperties()==null) return;
+        for(ClassVarStmtToken declaration:statement.getProperties()) {
+            if(!declaration.hasPropertyHooks()) continue;
+            PropertyEntity property=entity.findProperty(declaration.getVariable().getName());
+            if(property==null || property.getClazz()!=entity) {
+                // Interface properties have no instance constructor/storage emitter.
+                property=new PropertyEntity(compiler.getContext());property.setClazz(entity);
+                property.setName(declaration.getVariable().getName());property.setModifier(declaration.getModifier());
+                property.setDeclaredType(declaration.getDeclaredType());property.setFinal(declaration.isFinal());
+                property.setPhpSetModifier(declaration.getPhpSetModifier());
+                property.setPromoted(declaration.isPromoted());property.setTrace(declaration.toTraceInfo(compiler.getContext()));
+                property.setDefault(false);property.setDefaultValue(Memory.UNDEFINED);
+                entity.addProperty(property).check(compiler.getEnvironment());
+            }
+            java.util.List<php.runtime.reflection.support.PhpPropertyHooks.Hook> hooks=new java.util.ArrayList<>();
+            for(org.develnext.jphp.core.tokenizer.token.stmt.PropertyHookStmtToken hook:declaration.getPropertyHooks()) {
+                MethodEntity method=compiler.compileMethod(this,hook.getMethod(),external,generatorEntity);
+                // Hidden hook bodies publish their actual generator through the same module ordinal catalog.
+                if(method.getGeneratorEntity()!=null)compiler.getModule().addGenerator(method.getGeneratorEntity());
+                method.setImmutable(false);method.setResult(null);
+                if(hook.getKind()==org.develnext.jphp.core.tokenizer.token.stmt.PropertyHookStmtToken.Kind.SET) {
+                    var type=property.getDeclaredType()==null
+                            ?php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(null,false):property.getDeclaredType();
+                    var parameter=method.getParameters()[0];
+                    var accepted=php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(parameter.getTypeChecker(),parameter.isNullable());
+                    // Builtin-only declarations are fully decidable before any PHP body; named relations resolve at cold class binding.
+                    boolean builtinType=type.getAlternatives().stream().flatMap(java.util.Collection::stream)
+                            .allMatch(name->new php.runtime.reflection.support.PhpTypeDeclaration(java.util.List.of(java.util.List.of(name))).isBuiltin());
+                    boolean builtinParameter=accepted.getAlternatives().stream().flatMap(java.util.Collection::stream)
+                            .allMatch(name->new php.runtime.reflection.support.PhpTypeDeclaration(java.util.List.of(java.util.List.of(name))).isBuiltin());
+                    if(builtinType && builtinParameter && !type.isSubtypeOf(accepted,entity,entity,compiler.getModule(),compiler.getEnvironment()))
+                        compiler.getEnvironment().error(method.getTrace(),ErrorType.E_COMPILE_ERROR,
+                                "Type of parameter $%s of hook %s::$%s::set must be compatible with property type",
+                                parameter.getName(),entity.getName(),property.getName());
+                }
+                hooks.add(new php.runtime.reflection.support.PhpPropertyHooks.Hook(
+                        hook.getKind()==org.develnext.jphp.core.tokenizer.token.stmt.PropertyHookStmtToken.Kind.GET
+                                ?php.runtime.reflection.support.PhpPropertyHooks.Kind.GET:php.runtime.reflection.support.PhpPropertyHooks.Kind.SET,
+                        property,method));
+            }
+            property.installPhpHookDeclaration(new php.runtime.reflection.support.PhpPropertyHooks(declaration.isVirtualProperty(),hooks));
+        }
+    }
+
     protected void writeConstant(ConstStmtToken constant) {
         MethodStmtCompiler methodStmtCompiler = new MethodStmtCompiler(this, (MethodStmtToken) null);
         methodStmtCompiler.setInitializer(true);
@@ -420,9 +549,13 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
         boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         for (ConstStmtToken.Item el : constant.items) {
-            Memory value = modern ? PhpConstantExpression.check(el.value, expressionStmtCompiler)
+            if(entity.isEnum() && entity.findConstant(el.getFulledName())!=null)
+                compiler.getEnvironment().error(constant.toTraceInfo(compiler.getContext()),ErrorType.E_COMPILE_ERROR,"Cannot redefine class constant %s::%s",entity.getName(),el.getFulledName());
+            Memory value = constant instanceof EnumCaseStmtToken && el.value==null ? Memory.NULL : modern ? PhpConstantExpression.check(el.value, expressionStmtCompiler)
                     : expressionStmtCompiler.writeExpression(el.value, true, true, false);
             ConstantEntity constantEntity = new ConstantEntity(el.getFulledName(), value, true);
+            constantEntity.setEnumCase(constant instanceof EnumCaseStmtToken);
+            compilePhpAttributes(constantEntity,constant,php.runtime.reflection.support.PhpAttribute.CLASS_CONSTANT);
             constantEntity.setTrace(el.name.toTraceInfo(compiler.getContext()));
             constantEntity.setDocComment(documentComment);
             constantEntity.setModifier(constant.getModifier());
@@ -461,6 +594,10 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
     @SuppressWarnings("unchecked")
     protected void writeSystemInfo() {
+        if(noDiscardClosureName!=null)node.fields.add(new FieldNode(ACC_PUBLIC|ACC_STATIC|ACC_FINAL,
+                "__$noDiscardClosureName",Type.getDescriptor(String.class),null,noDiscardClosureName));
+        if(isSystem && classContext!=null) node.fields.add(new FieldNode(ACC_PUBLIC|ACC_STATIC|ACC_FINAL,
+                "__$attributeLexicalScope",Type.getDescriptor(String.class),null,classContext.getFulledName()));
         node.fields.add(new FieldNode(
                 ACC_PUBLIC + ACC_FINAL + ACC_STATIC, "$FN",
                 Type.getDescriptor(String.class),
@@ -539,7 +676,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         int index = 0;
         for (ConstStmtToken.Item item : dynamicConstants) {
             ConstantEntity constant = entity.findConstant(item.getFulledName());
-            if (constant.getValue() != null) continue;
+            if (constant.getStoredValue() != null) continue;
             MethodNode node = new MethodNodeImpl();
             node.access = ACC_PUBLIC | ACC_STATIC;
             node.name = "__$constant" + index++;
@@ -684,7 +821,11 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         methodCompiler.writeHeader();
 
         ClassArrayTableCompiler.write(this, expressionCompiler, "$TRC", TraceInfo[].class, TraceInfo.class,
-                traceList, (expr, trace) -> expr.writePushCreateTraceInfo(trace.getStartLine(), trace.getStartPosition()));
+                traceList, (expr, trace) -> {
+                    var imported=importedHookTraces==null?null:importedHookTraces.get(trace);
+                    if(imported==null) expr.writePushCreateTraceInfo(trace.getStartLine(), trace.getStartPosition());
+                    else expr.writePushImportedHookTrace(imported.owner(),imported.index());
+                });
         ClassArrayTableCompiler.write(this, expressionCompiler, "$MEM", Memory[].class, Memory.class,
                 memoryConstants, (expr, memory) -> {expr.writePushMemory(memory);expr.writePopBoxing(true, false);});
         ClassArrayTableCompiler.write(this, expressionCompiler, "$AMEM", Memory[][].class, Memory[].class,
@@ -810,7 +951,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                         needWriteInterfaceMethods = writeInterfaces(implement);
                 }
                 ClassEntity.ImplementsResult addResult = entity.addInterface(implement);
-                addResult.check(env);
+                if (!entity.isUnresolvedDeclaration()) addResult.check(env);
 
                 for (ClassEntity el : needWriteInterfaceMethods) {
                     if (el.isInternal()) {
@@ -822,13 +963,17 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     }
 
     protected void writeCopiedMethod(ClassStmtToken.Alias alias, String methodName, ClassEntity trait) {
-        final MethodEntity methodEntity = fetchClassAndCheck(alias.getTrait()).findMethod(methodName.toLowerCase());
+        writeCopiedMethod(alias,methodName,trait,
+                fetchClassAndCheck(alias.getTrait()).findMethod(methodName.toLowerCase()),null);
+    }
+    private MethodEntity writeCopiedMethod(ClassStmtToken.Alias alias,String methodName,ClassEntity trait,
+            final MethodEntity methodEntity,php.runtime.reflection.support.PhpPropertyHooks.Hook hook) {
 
         String name = alias.getName();
         if (name == null)
             name = methodName;
 
-        MethodEntity origin = entity.findMethod(name.toLowerCase());
+        MethodEntity origin = hook==null ? entity.findMethod(name.toLowerCase()) : null;
         if (origin != null) {
             if (origin.getClazz() == entity) {
                 if (origin.getTrait() != null) {
@@ -839,7 +984,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                             )
                     );
                 }
-                return;
+                return null;
             }
         }
 
@@ -848,7 +993,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                     entity.getTrace(),
                     Messages.ERR_METHOD_NOT_FOUND.fetch(alias.getTrait(), methodName)
             );
-            return;
+            return null;
         }
 
         MethodEntity dup = methodEntity.duplicateForInject();
@@ -859,8 +1004,28 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
         if (alias.getModifier() != null)
             dup.setModifier(alias.getModifier());
+        if (alias.isMakeFinal()) dup.setFinal(true);
+        importPhpAttributeHelpers(methodEntity,dup,methodEntity.getClazz());
+        if(methodEntity.getParameters()!=null) {
+            ParameterEntity[] parameters=new ParameterEntity[methodEntity.getParameters().length];
+            for(int i=0;i<parameters.length;i++) {
+                var from=methodEntity.getParameters()[i];var to=new ParameterEntity(from.getContext());
+                to.setName(from.getName());to.setTrace(from.getTrace());to.setTypeChecker(from.getTypeChecker());
+                to.setNullable(from.isNullable());to.setReference(from.isReference());to.setVariadic(from.isVariadic());
+                to.setMutable(from.isMutable());to.setUsed(from.isUsed());to.setPromoted(from.isPromoted());
+                to.setDefaultValue(from.getDefaultValue());to.setDefaultValueConstName(from.getDefaultValueConstName());
+                to.setDefaultInitializer(from.getDefaultInitializer());
+                importPhpAttributeHelpers(from,to,methodEntity.getClazz(),dup.getName()+"/P"+i);parameters[i]=to;
+            }
+            dup.setParameters(parameters);
+        }
 
-        MethodNodeImpl methodNode = MethodNodeImpl.duplicate(methodEntity.getAdditionalData("methodNode", MethodNode.class, new Function<MethodNode>() {
+        if(hook!=null && methodEntity.isAbstractable()) {
+            dup.setInternalName(dup.getName()+"$"+entity.nextMethodIndex());
+            return dup;
+        }
+        MethodNodeImpl methodNode = hook!=null ? TraitHookBodyCompiler.copy(hook,compiler.getEnvironment())
+                : MethodNodeImpl.duplicate(methodEntity.getAdditionalData("methodNode", MethodNode.class, new Function<MethodNode>() {
             @Override
             public MethodNode call() {
                 ClassNode classNode = methodEntity.getClazz().getAdditionalData("classNode", ClassNode.class, new Function<ClassNode>() {
@@ -877,7 +1042,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                             }
                         }
                         ClassNode classNode = new ClassNode();
-                        classReader.accept(classNode, 0);
+                        classReader.accept(classNode, new org.objectweb.asm.Attribute[]{
+                                new TraitStaticSitesCompiler.SitesAttribute(new byte[0])}, 0);
 
                         return classNode;
                     }
@@ -900,11 +1066,24 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
         dup.setInternalName(dup.getName() + "$" + entity.nextMethodIndex());
         methodNode.name = dup.getInternalName();
+        if(hook!=null) {
+            var trace=TraitHookBodyCompiler.rebind(methodNode,hook,compiler.getEnvironment(),entity.getCompiledInternalName(),dup.getInternalName(),traceList.size());
+            if(trace!=null) {
+                TraceInfo identity=new TraceInfo(methodEntity.getTrace().getFileName(),methodEntity.getTrace().getStartLine(),0);
+                traceList.add(identity);if(importedHookTraces==null)importedHookTraces=new IdentityHashMap<>();
+                importedHookTraces.put(identity,trace);
+            }
+        }
+        if(hook==null)TraitStaticSitesCompiler.rebindCopiedMethod(methodNode,methodEntity.getClazz().getCompiledInternalName(),
+                methodEntity.getInternalName(),entity.getCompiledInternalName(),dup.getInternalName());
+        if (alias.isMakeFinal()) methodNode.access |= ACC_FINAL;
 
-        ClassEntity.SignatureResult result = entity.addMethod(dup, null);
-        result.check(compiler.getEnvironment());
-
+        if(hook==null) {
+            ClassEntity.SignatureResult result = entity.addMethod(dup, null);
+            result.check(compiler.getEnvironment());
+        }
         node.methods.add(methodNode);
+        return dup;
     }
 
     protected void writeCopiedMethod(MethodEntity methodEntity, ClassEntity trait) {
@@ -944,6 +1123,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
     protected void writeTraitProperties(ClassEntity trait, Collection<PropertyEntity> props) {
         for (PropertyEntity el : props) {
+            if(entity.isPhpReadonly() && !el.isPhpReadonly()) compiler.getEnvironment().error(el.getTrace(),ErrorType.E_COMPILE_ERROR,
+                    "Readonly class %s cannot use trait with a non-readonly property %s::$%s",entity.getName(),trait.getName(),el.getName());
             PropertyEntity origin = (el.isStatic() ? entity.staticProperties : entity.properties).get(el.getName());
 
             if (origin != null) {
@@ -952,7 +1133,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 if (origin.getTrait() != null && origin.getTrait().equals(trait))
                     isSkip = true;
 
-                if (!isSkip) {
+                if (!isSkip && (origin.getClazz()==entity
+                        || compiler.getModule().getPhpLanguageProfile()!=php.runtime.common.PhpLanguageProfile.PHP_8_5)) {
                     Environment env = compiler.getEnvironment();
                     String ownerName = origin.getClazz().getName();
                     if (origin.getTrait() != null)
@@ -961,8 +1143,9 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                     boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
                     boolean sameType = origin.getDeclaredType() == null ? el.getDeclaredType() == null
                             : el.getDeclaredType() != null && origin.getDeclaredType().equivalentTo(el.getDeclaredType());
-                    boolean isFatal = origin.getModifier() != el.getModifier()
-                            || modern && (!sameType || origin.isStatic() != el.isStatic() || origin.isFinal() != el.isFinal()
+                    boolean isFatal = modern && (origin.getPhpHooks()!=null || el.getPhpHooks()!=null) && origin!=el
+                            || origin.getModifier() != el.getModifier()
+                            || modern && (!sameType || origin.isStatic() != el.isStatic() || origin.isFinal() != el.isFinal() || origin.isPhpReadonly() != el.isPhpReadonly() || origin.effectiveSetModifier()!=el.effectiveSetModifier()
                                 || origin.getDeclaredType() != null && origin.isDefault() != el.isDefault());
                     if (origin.getDefaultValue() != null && el.getDefaultValue() == null)
                         isFatal = true;
@@ -999,8 +1182,22 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 continue;
 
             PropertyEntity p = el.duplicate();
+            p.setPhpHooks(null);
             p.setClazz(entity);
             p.setTrait(trait);
+            importPhpAttributeHelpers(el,p,el.getClazz());
+            var catalog=el.getPhpHooks();
+            if(catalog!=null) {
+                var hooks=new ArrayList<php.runtime.reflection.support.PhpPropertyHooks.Hook>();
+                for(var hook:catalog.declaredOrder()) {
+                    if(hook.declaration()!=el || hook.method().getClazz()!=el.getClazz())
+                        throw new CriticalException("Trait hook lacks its exact property declaration");
+                    MethodEntity copied=writeCopiedMethod(new ClassStmtToken.Alias(trait.getName(),null,hook.method().getName()),
+                            hook.method().getName(),trait,hook.method(),hook);
+                    hooks.add(new php.runtime.reflection.support.PhpPropertyHooks.Hook(hook.kind(),p,copied));
+                }
+                if(!hooks.isEmpty())p.setPhpHooks(new php.runtime.reflection.support.PhpPropertyHooks(catalog.isDeclaredVirtual(),hooks));
+            }
             ClassEntity.PropertyResult r = entity.addProperty(p);
             r.check(compiler.getEnvironment());
         }
@@ -1031,7 +1228,9 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 if (origin.getTraitName() == null) origin.setTraitName(trait.getName());
                 continue;
             }
-            entity.addConstant(candidate.duplicateForTrait(entity, trait.getName())).check(compiler.getEnvironment());
+            var imported=candidate.duplicateForTrait(entity,trait.getName());
+            importPhpAttributeHelpers(candidate,imported,candidate.getClazz());
+            entity.addConstant(imported).check(compiler.getEnvironment());
         }
     }
 
@@ -1108,6 +1307,45 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         }
     }
 
+    private PhpClassRelations.Name relationName(NameToken name) {
+        return new PhpClassRelations.Name(name.getName(), name.toTraceInfo(compiler.getContext()));
+    }
+
+    /** Store names and directives only; conditional declarations resolve their relations when executed. */
+    private PhpClassRelations declarationRelations() {
+        PhpClassRelations.Name parent = statement.getExtend() == null ? null
+                : relationName(statement.getExtend().getName());
+        List<PhpClassRelations.InterfaceUse> interfaces = new ArrayList<>();
+        if (statement.getImplement() != null) {
+            PhpClassRelations.InterfaceKind kind = statement.isInterface()
+                    ? PhpClassRelations.InterfaceKind.EXTENDS : PhpClassRelations.InterfaceKind.IMPLEMENTS;
+            for (NameToken name : statement.getImplement().getNames())
+                interfaces.add(new PhpClassRelations.InterfaceUse(relationName(name), kind));
+        }
+        List<PhpClassRelations.TraitGroup> groups = new ArrayList<>();
+        for (ClassStmtToken.TraitUseGroup group : statement.getTraitUseGroups()) {
+            List<PhpClassRelations.Name> traits = new ArrayList<>();
+            for (NameToken name : group.traits()) traits.add(relationName(name));
+            List<PhpClassRelations.Adaptation> adaptations = new ArrayList<>();
+            for (ClassStmtToken.TraitAdaptation adaptation : group.adaptations()) {
+                TraceInfo trace = adaptation.traceToken().toTraceInfo(compiler.getContext());
+                if (adaptation instanceof ClassStmtToken.TraitAlias alias) {
+                    adaptations.add(new PhpClassRelations.Alias(
+                            alias.trait() == null ? null : alias.trait().getName(), alias.method().getName(),
+                            alias.alias() == null ? null : alias.alias().getName(), alias.visibility(), alias.makeFinal(), trace));
+                } else if (adaptation instanceof ClassStmtToken.TraitPrecedence precedence) {
+                    List<PhpClassRelations.Name> excluded = new ArrayList<>();
+                    for (NameToken name : precedence.excluded()) excluded.add(relationName(name));
+                    adaptations.add(new PhpClassRelations.Precedence(precedence.preferredTrait().getName(),
+                            precedence.method().getName(), excluded, trace));
+                } else throw new IllegalArgumentException("Unknown trait adaptation");
+            }
+            groups.add(new PhpClassRelations.TraitGroup(traits, adaptations,
+                    group.traceToken().toTraceInfo(compiler.getContext())));
+        }
+        return new PhpClassRelations(parent, interfaces, groups);
+    }
+
     @Override
     public ClassEntity compile() {
         entity = new ClassEntity(compiler.getContext());
@@ -1115,7 +1353,10 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         entity.setId(compiler.getScope().nextClassIndex());
 
         entity.setFinal(statement.isFinal());
+        entity.setPhpReadonly(statement.isPhpReadonly());
         entity.setAbstract(statement.isAbstract());
+        entity.setAnonymous(statement.isAnonymous());
+        if (statement.isDeferredDeclaration()) entity.setDeclarationId(statement.getDeclarationId());
         entity.setName(statement.getFulledName());
 
         if (statement.getDocComment() != null) {
@@ -1124,16 +1365,27 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
 
         entity.setTrace(statement.toTraceInfo(compiler.getContext()));
         entity.setType(statement.getClassType());
+        if(statement.isEnum()) {
+            entity.setEnumBackingType(statement.getEnumBackingType());entity.setFinal(true);
+            if(!statement.getProperties().isEmpty())compiler.getEnvironment().error(entity.getTrace(),ErrorType.E_COMPILE_ERROR,"Enum %s cannot include properties",entity.getName());
+        }
 
-        List<ClassEntity> traits = fetchTraits();
+        boolean declarationTemplate = statement.isDeferredDeclaration();
+        if (declarationTemplate) entity.setDeclarationRelations(declarationRelations());
+        List<ClassEntity> traits = declarationTemplate ? Collections.emptyList() : fetchTraits();
         for (ClassEntity e : traits) {
             entity.addTrait(e);
         }
 
-        checkAliasAndReplacementsTraits();
+        if (!declarationTemplate) checkAliasAndReplacementsTraits();
 
         if (statement.getExtend() != null) {
-            ClassEntity parent = fetchClass(statement.getExtend().getName().getName());
+            String parentName=statement.getExtend().getName().getName();
+            boolean modern=compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5 && !isSystem;
+            ClassEntity parent=statement.isDeferredDeclaration() ? null : modern ? compiler.getModule().findClass(parentName) : fetchClass(parentName);
+            if (modern && !statement.isDeferredDeclaration() && parent==null) parent=compiler.getEnvironment().fetchClass(parentName,false,php.runtime.common.PhpLanguageProfile.PHP_8_5);
+            if (modern && (statement.isDeferredDeclaration() || parent==null || parent.isUnresolvedDeclaration())) entity.setDeferredParentName(parentName);
+            if (entity.getDeferredParentName()==null) {
             if (parent == null)
                 compiler.getEnvironment().error(
                         statement.getExtend().toTraceInfo(compiler.getContext()),
@@ -1147,8 +1399,13 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             }
         }
 
+            }
         if (!isSystem) {
-            if (entity.isUseJavaLikeNames()) {
+            if (statement.isDeferredDeclaration()) {
+                entity.setInternalName(compiler.getModule().getInternalName() + "_declaration" + statement.getDeclarationId());
+            } else if (statement.isAnonymous()) {
+                entity.setInternalName(compiler.getModule().getInternalName() + "_anonymous" + entity.getId());
+            } else if (entity.isUseJavaLikeNames()) {
                 entity.setInternalName(
                         entity.getName().replace('\\', '/')
                 );
@@ -1159,8 +1416,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             }
         }
 
-        if (compiler.getModule().findClass(entity.getLowerName()) != null
-                || compiler.getEnvironment().isLoadedClass(entity.getName(), compiler.getModule().getPhpLanguageProfile())) {
+        if (!statement.isDeferredDeclaration() && (compiler.getModule().findClass(entity.getLowerName()) != null
+                || compiler.getEnvironment().isLoadedClass(entity.getName(), compiler.getModule().getPhpLanguageProfile()))) {
             throw new FatalException(
                     Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(entity.getName()),
                     statement.getName().toTraceInfo(compiler.getContext())
@@ -1176,7 +1433,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                     : statement.getFulledName(Constants.NAME_DELIMITER);
 
             node.superName = entity.getParent() == null
-                    ? Type.getInternalName(BaseObject.class)
+                    ? Type.getInternalName(entity.isEnum()?php.runtime.lang.BaseEnum.class:BaseObject.class)
                     : entity.getParent().getInternalName();
 
             node.sourceFile = compiler.getSourceFile();
@@ -1203,6 +1460,14 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             writeSystemInfo();
         }
 
+        compilePhpAttributes(entity,statement,php.runtime.reflection.support.PhpAttribute.CLASS);
+        if(external && isSystem) for(var constant:compiler.getAnalyzer().getConstants())
+            for(var item:constant.items) {
+                var declaration=compiler.getModule().getConstants().stream()
+                        .filter(candidate->candidate.getName().equals(item.getFulledName())).findFirst().orElse(null);
+                if(declaration==null) declaration=compiler.getModule().getDeferredGlobalConstantDeclaration(item.getFulledName());
+                if(declaration!=null) compilePhpAttributes(declaration,constant,php.runtime.reflection.support.PhpAttribute.CONSTANT);
+            }
         // constants
         if (statement.getConstants() != null)
             for (ConstStmtToken constant : statement.getConstants()) {
@@ -1222,14 +1487,25 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             }
         }
 
-        if (deferred) writeConstantInitializers();
-        writeTraits(traits);
-        ClassEntity.SignatureResult result = entity.updateParentBody();
-        if (isInterfaceCheck) {
-            result.check(compiler.getEnvironment());
+        if(entity.isEnum()) {
+            php.runtime.PhpEnums.validateDeclaration(entity,compiler.getEnvironment());
+            php.runtime.PhpEnums.addProperties(entity,compiler.getEnvironment());
+            writeEnumMethod("cases");
+            if(entity.getEnumBackingType()!=null){writeEnumMethod("from");writeEnumMethod("tryFrom");}
+            if(!declarationTemplate) {
+                ClassEntity marker=compiler.getEnvironment().fetchClass(entity.getEnumBackingType()==null?"UnitEnum":"BackedEnum",true,php.runtime.common.PhpLanguageProfile.PHP_8_5);
+                entity.addInterface(marker).check(compiler.getEnvironment());
+            }
         }
-
-        writeImplements();
+        writePropertyHooks();
+        if (deferred) writeConstantInitializers();
+        if (!declarationTemplate) {
+            writeTraits(traits);
+            ClassEntity.SignatureResult result = entity.updateParentBody();
+            if (isInterfaceCheck) result.check(compiler.getEnvironment());
+            writeImplements();
+        }
+        php.runtime.PhpEnums.validateDeclaration(entity,compiler.getEnvironment());
         entity.doneDeclare();
 
         if (!statement.isInterface() || deferred) {
@@ -1240,6 +1516,11 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             }
 
             writeInitStatic();
+            if(entity.isEnum()) {
+                MethodNode witness=new MethodNodeImpl();witness.access=ACC_PRIVATE|ACC_STATIC|ACC_SYNTHETIC;witness.name="__$enum$declaration";witness.desc="()Ljava/lang/String;";
+                witness.instructions.add(new LdcInsnNode(php.runtime.loader.dump.PhpEnumMetadata.declarationWitness(entity,new java.util.ArrayList<>(entity.getConstants()))));
+                witness.instructions.add(new InsnNode(ARETURN));node.methods.add(witness);
+            }
             cw = new JPHPClassWriter(entity.isTrait());
             try {
                 node.accept(cw);
@@ -1250,10 +1531,37 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             }
 
             entity.setData(cw.toByteArray());
+            if(entity.isEnum())try {
+                php.runtime.loader.dump.PhpEnumMetadata.validate(entity,new java.util.ArrayList<>(entity.getConstants()),new java.util.ArrayList<>(entity.getProperties()),entity.getOwnedMethods());
+            }catch(java.io.IOException invalid){throw new CriticalException(invalid);}
         }
+        php.runtime.reflection.support.PhpOverrideValidation.validate(entity,compiler.getEnvironment());
         return entity;
     }
 
+    private void writeEnumMethod(String name) {
+        String lower=name.toLowerCase(java.util.Locale.ROOT);
+        MethodEntity method=new MethodEntity(compiler.getContext());method.setClazz(entity);method.setName(name);method.setInternalName("__$enum$"+lower);
+        method.setStatic(true);method.setModifier(php.runtime.common.Modifier.PUBLIC);method.setTrace(entity.getTrace());
+        boolean listing=lower.equals("cases");
+        if(listing)method.setParameters(new ParameterEntity[0]);
+        else {
+            ParameterEntity parameter=new ParameterEntity(compiler.getContext());parameter.setName("value");
+            parameter.setTypeChecker(new php.runtime.reflection.support.PhpTypeDeclaration(java.util.List.of(java.util.List.of("string"),java.util.List.of("int"))));
+            method.setParameters(new ParameterEntity[]{parameter});
+        }
+        method.setReturnTypeChecker(new php.runtime.reflection.support.PhpTypeDeclaration(listing?java.util.List.of(java.util.List.of("array")):
+                lower.equals("tryfrom")?java.util.List.of(java.util.List.of("static"),java.util.List.of("null")):java.util.List.of(java.util.List.of("static"))));
+        entity.addMethod(method,null).check(compiler.getEnvironment());
+        MethodNode generated=new MethodNodeImpl();generated.access=ACC_PUBLIC|ACC_STATIC;generated.name=method.getInternalName();
+        generated.desc=Type.getMethodDescriptor(Type.getType(Memory.class),Type.getType(Environment.class),Type.getType(Memory[].class));
+        generated.instructions.add(new VarInsnNode(ALOAD,0));generated.instructions.add(new LdcInsnNode(entity.getName()));
+        if(!listing){generated.instructions.add(new VarInsnNode(ALOAD,1));generated.instructions.add(new InsnNode(lower.equals("tryfrom")?ICONST_1:ICONST_0));}
+        generated.instructions.add(new MethodInsnNode(INVOKESTATIC,Type.getInternalName(php.runtime.PhpEnums.class),listing?"cases":"from",
+                listing?Type.getMethodDescriptor(Type.getType(Memory.class),Type.getType(Environment.class),Type.getType(String.class)):
+                Type.getMethodDescriptor(Type.getType(Memory.class),Type.getType(Environment.class),Type.getType(String.class),Type.getType(Memory[].class),Type.BOOLEAN_TYPE),false));
+        generated.instructions.add(new InsnNode(ARETURN));node.methods.add(generated);
+    }
     public void setClassContext(ClassStmtToken classContext) {
         this.classContext = classContext;
     }

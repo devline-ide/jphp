@@ -3,6 +3,7 @@ package org.develnext.jphp.core.tokenizer.token.stmt;
 import org.develnext.jphp.core.tokenizer.TokenMeta;
 import org.develnext.jphp.core.tokenizer.TokenType;
 import org.develnext.jphp.core.tokenizer.token.CommentToken;
+import org.develnext.jphp.core.tokenizer.token.Token;
 import org.develnext.jphp.core.tokenizer.token.expr.value.NameToken;
 import php.runtime.common.Modifier;
 import php.runtime.common.PhpClassNames;
@@ -13,8 +14,26 @@ import java.util.*;
 
 public class ClassStmtToken extends StmtToken {
     private Modifier modifier;
+    private String enumBackingType;
+    public boolean isEnum() {return classType==ClassEntity.Type.ENUM;}
+    public String getEnumBackingType() {return enumBackingType;}
+    public void setEnumBackingType(String value) {enumBackingType=value;}
     private boolean isFinal;
     private boolean isAbstract;
+    private boolean phpReadonly;
+    public boolean isPhpReadonly() {return phpReadonly;}
+    public void setPhpReadonly(boolean value) {phpReadonly=value;}
+    private boolean anonymous;
+    private int declarationId = -1;
+    public int getDeclarationId() { return declarationId; }
+    public boolean isDeferredDeclaration() { return declarationId >= 0; }
+    public void setDeclarationId(int id) {
+        if (id < 0 || anonymous || declarationId >= 0)
+            throw new IllegalArgumentException("Invalid deferred class declaration identity");
+        declarationId = id;
+    }
+    public boolean isAnonymous() { return anonymous; }
+    public void setAnonymous(boolean value) { anonymous = value; }
 
     private NamespaceStmtToken namespace;
     private NameToken name;
@@ -27,6 +46,7 @@ public class ClassStmtToken extends StmtToken {
     private List<ClassVarStmtToken> properties;
     private List<MethodStmtToken> methods;
     private List<NameToken> uses;
+    private final List<TraitUseGroup> traitUseGroups = new ArrayList<>();
 
     private Map<String, List<Alias>> aliases;
     private Map<String, Replacement> replacements;
@@ -157,7 +177,7 @@ public class ClassStmtToken extends StmtToken {
     }
 
     public String getFulledName(char delimiter){
-        return namespace == null || namespace.getName() == null
+        return anonymous || namespace == null || namespace.getName() == null
                 ? name.getName()
                 : namespace.getName().toName(delimiter) + delimiter + name.getName();
     }
@@ -174,7 +194,84 @@ public class ClassStmtToken extends StmtToken {
         this.uses = uses;
     }
 
+    /** Ordered relation recipe; the old flattened maps remain for existing compiler paths. */
+    public List<TraitUseGroup> getTraitUseGroups() {
+        return List.copyOf(traitUseGroups);
+    }
+
+    public void addTraitUseGroup(TraitUseGroup group) {
+        traitUseGroups.add(Objects.requireNonNull(group));
+    }
+
+    public record TraitUseGroup(List<NameToken> traits, List<TraitAdaptation> adaptations, Token traceToken) {
+        public TraitUseGroup {
+            traits = traits.stream().map(ClassStmtToken::snapshotTraitName).toList();
+            if (traits.isEmpty()) throw new IllegalArgumentException("Empty trait use group");
+            adaptations = List.copyOf(adaptations);
+            traceToken = snapshotTraitToken(Objects.requireNonNull(traceToken));
+        }
+    }
+
+    public sealed interface TraitAdaptation permits TraitAlias, TraitPrecedence {
+        Token traceToken();
+    }
+
+    public record TraitAlias(NameToken trait, NameToken method, NameToken alias, Modifier visibility,
+                             boolean makeFinal, Token traceToken) implements TraitAdaptation {
+        public TraitAlias {
+            trait = snapshotTraitName(trait);
+            method = snapshotTraitName(Objects.requireNonNull(method));
+            alias = snapshotTraitName(alias);
+            traceToken = snapshotTraitToken(Objects.requireNonNull(traceToken));
+        }
+    }
+
+    public record TraitPrecedence(NameToken preferredTrait, NameToken method, List<NameToken> excluded,
+                                  Token traceToken) implements TraitAdaptation {
+        public TraitPrecedence {
+            preferredTrait = snapshotTraitName(Objects.requireNonNull(preferredTrait));
+            method = snapshotTraitName(Objects.requireNonNull(method));
+            excluded = excluded.stream().map(ClassStmtToken::snapshotTraitName).toList();
+            if (excluded.isEmpty()) throw new IllegalArgumentException("Empty trait precedence exclusion");
+            traceToken = snapshotTraitToken(Objects.requireNonNull(traceToken));
+        }
+    }
+
+    private static TokenMeta snapshotTraitMeta(TokenMeta source) {
+        TokenMeta meta = new TokenMeta(source.getWord(), source.getStartLine(), source.getEndLine(),
+                source.getStartPosition(), source.getEndPosition());
+        meta.setStartIndex(source.getStartIndex()); meta.setEndIndex(source.getEndIndex());
+        return meta;
+    }
+
+    private static NameToken snapshotTraitName(NameToken source) {
+        return source == null ? null : new TraitNameSnapshot(source);
+    }
+
+    private static Token snapshotTraitToken(Token source) {
+        return new TraitTokenSnapshot(source);
+    }
+
+    /** Defensive metadata copies make the consumer view immutable despite mutable legacy TokenMeta. */
+    private static final class TraitNameSnapshot extends NameToken {
+        private final String resolvedName;
+        private TraitNameSnapshot(NameToken source) {
+            super(snapshotTraitMeta(source.getMeta())); resolvedName = source.getName();
+        }
+        @Override public String getName() { return resolvedName; }
+        @Override public TokenMeta getMeta() { return snapshotTraitMeta(super.getMeta()); }
+    }
+
+    private static final class TraitTokenSnapshot extends Token {
+        private TraitTokenSnapshot(Token source) { super(snapshotTraitMeta(source.getMeta()), source.getType()); }
+        @Override public TokenMeta getMeta() { return snapshotTraitMeta(super.getMeta()); }
+    }
+
     public void addAlias(String className, String methodName, Modifier modifier, String name) {
+        addAlias(className, methodName, modifier, name, false);
+    }
+
+    public void addAlias(String className, String methodName, Modifier modifier, String name, boolean makeFinal) {
         if (aliases == null)
             aliases = new LinkedHashMap<String, List<Alias>>();
 
@@ -183,7 +280,7 @@ public class ClassStmtToken extends StmtToken {
             aliases.put(methodName.toLowerCase(), l = new ArrayList<Alias>());
         }
 
-        l.add(new Alias(className, modifier, name));
+        l.add(new Alias(className, modifier, name, makeFinal));
     }
 
     public List<Alias> findAliases(String methodName) {
@@ -320,12 +417,20 @@ public class ClassStmtToken extends StmtToken {
         protected final String trait;
         protected final Modifier modifier;
         protected final String name;
+        protected final boolean makeFinal;
 
         public Alias(String trait, Modifier modifier, String name) {
+            this(trait, modifier, name, false);
+        }
+
+        public Alias(String trait, Modifier modifier, String name, boolean makeFinal) {
             this.trait = trait;
             this.modifier = modifier;
             this.name = name;
+            this.makeFinal = makeFinal;
         }
+
+        public boolean isMakeFinal() { return makeFinal; }
 
         public Modifier getModifier() {
             return modifier;

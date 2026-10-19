@@ -1,0 +1,3 @@
+Fatal error: Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (I::$x::get, J::$y::set) in G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\weak\top\multiple_missing.php on line 1
+Stack trace:
+#0 {main}

@@ -543,6 +543,8 @@ abstract public class Memory implements Comparable<Memory> {
 
     public Memory assign(IObject object) { return this.assign(new ObjectMemory(object)); }
 
+    /** Legacy byte-aware operator dispatch; address implementations may capture their overloaded read once. */
+    public Memory assignConcatLegacy(Memory memory) { return PhpByteStrings.assignConcatLegacyDefault(this, memory); }
     public Memory assignConcat(Memory memory) { return assign(concat(memory)); }
     public Memory assignConcat(long memory) { return assign(concat(memory)); }
     public Memory assignConcat(double memory) { return assign(concat(memory)); }

@@ -1,0 +1,3 @@
+Fatal error: Method C::__clone cannot be #[\NoDiscard] in G:\DevLine-QA\jphp-attributes-implementation-20261013\revision16-nodiscard\native\negative-clone.php on line 2
+Stack trace:
+#0 {main}

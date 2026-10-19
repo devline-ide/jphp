@@ -27,6 +27,11 @@ import java.util.*;
 
 public class ClassGenerator extends Generator<ClassStmtToken> {
 
+    private boolean isReadonly(Token token) {
+        return analyzer.getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5 && token instanceof NameToken
+                && token.getWord().equalsIgnoreCase("readonly");
+    }
+
     private static final Set<String> php8ReservedTypeNames = new HashSet<>(Arrays.asList(
             "int", "float", "bool", "string", "array", "object", "callable", "iterable", "void", "mixed",
             "never", "true", "false", "null", "self", "parent", "static"));
@@ -94,10 +99,33 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
         result.setImplement(implement);
     }
 
+    private void processEnumBacking(ClassStmtToken result,ListIterator<Token> iterator) {
+        if(!result.isEnum())return;
+        Token token=nextToken(iterator);
+        if(token.getWord().equals(":")) {
+            Token type=nextToken(iterator);String name=type.getWord().toLowerCase(Locale.ROOT);
+            if(!name.equals("int") && !name.equals("string"))analyzer.getEnvironment().error(type.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,"Enum backing type must be int or string, %s given",name);
+            result.setEnumBackingType(name);
+        } else iterator.previous();
+    }
+    private EnumCaseStmtToken processEnumCase(ClassStmtToken owner,Token token,ListIterator<Token> iterator) {
+        EnumCaseStmtToken result=new EnumCaseStmtToken(token.getMeta());result.setClazz(owner);
+        NameToken name=nextAndExpectedSensitive(iterator,NameToken.class);
+        Token next=nextToken(iterator);ExprStmtToken value=null;
+        if(next instanceof AssignExprToken) {
+            value=analyzer.generator(SimpleExprGenerator.class).getToken(nextToken(iterator),iterator,Separator.SEMICOLON,null);
+            if(value==null)unexpectedToken(next);
+            Token end=iterator.previous();if(!(end instanceof SemicolonToken))unexpectedToken(end,";");
+            iterator.next();
+        } else if(!(next instanceof SemicolonToken))unexpectedToken(next,";");
+        if(owner.getEnumBackingType()==null && value!=null)analyzer.getEnvironment().error(token.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,"Case %s of non-backed enum %s must not have a value",name.getName(),owner.getFulledName());
+        if(owner.getEnumBackingType()!=null && value==null)analyzer.getEnvironment().error(token.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,"Case %s of backed enum %s must have a value",name.getName(),owner.getFulledName());
+        result.add(name,value);return result;
+    }
     protected void processExtends(ClassStmtToken result, ListIterator<Token> iterator){
         Token token = nextToken(iterator);
         if (token instanceof ExtendsStmtToken){
-            if (result.isTrait())
+            if (result.isTrait() || result.isEnum())
                 unexpectedToken(token);
 
             if (result.isInterface()){
@@ -235,11 +263,13 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
     }
 
     protected void processUse(ClassStmtToken result, ListIterator<Token> iterator) {
+        Token useToken = iterator.previous(); iterator.next();
         if (result.isInterface())
-            unexpectedToken(iterator.previous());
+            unexpectedToken(useToken);
 
         Token prev = null;
         List<NameToken> uses = new ArrayList<NameToken>();
+        List<ClassStmtToken.TraitAdaptation> adaptations = new ArrayList<>();
         do {
             Token token = nextToken(iterator);
             if (token instanceof NameToken){
@@ -250,7 +280,7 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
             } else if (token instanceof SemicolonToken) {
                 break;
             } else if (isOpenedBrace(token, BraceExprToken.Kind.BLOCK)){
-                processBlock(result, uses.get(0), iterator);
+                processBlock(result, uses.get(0), iterator, adaptations);
                 break;
             } else
                 unexpectedToken(token);
@@ -259,20 +289,32 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
         } while (true);
 
         result.getUses().addAll(uses);
+        result.addTraitUseGroup(new ClassStmtToken.TraitUseGroup(uses, adaptations, useToken));
     }
 
     protected void processBlock(ClassStmtToken result, NameToken firstTraitName, ListIterator<Token> iterator) {
+        processBlock(result, firstTraitName, iterator, new ArrayList<>());
+    }
+
+    protected void processBlock(ClassStmtToken result, NameToken firstTraitName, ListIterator<Token> iterator,
+                                List<ClassStmtToken.TraitAdaptation> adaptations) {
         if (result.isInterface())
             unexpectedToken(iterator.previous());
 
+        boolean modern = analyzer.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+        if (modern && isClosedBrace(nextTokenAndPrev(iterator), BraceExprToken.Kind.BLOCK)) {
+            iterator.next(); return;
+        }
         while (true) {
             NameToken className = nextAndExpectedSensitive(iterator, NameToken.class);
+            Token traceToken = className;
             NameToken methodName;
+            NameToken declaredTrait = null;
 
             Token token = nextToken(iterator);
             if (token instanceof StaticAccessExprToken) {
                 className = analyzer.getRealName(className);
-
+                declaredTrait = className;
                 Token nextTokenSensitive = nextTokenSensitive(iterator);
 
                 if (nextTokenSensitive instanceof NameToken) {
@@ -287,48 +329,48 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                 if (className.getClass() != NameToken.class)
                     unexpectedToken(className);
 
+                // Compatibility maps historically chose the first trait. The recipe keeps null.
                 className = firstTraitName;
             }
 
             Token what = nextToken(iterator);
             if (what instanceof AsStmtToken) {
-                Token one = nextTokenSensitive(iterator, PrivateStmtToken.class, ProtectedStmtToken.class, PublicStmtToken.class, FinalStmtToken.class, StaticExprToken.class);
-
+                Token one = nextTokenSensitive(iterator, PrivateStmtToken.class, ProtectedStmtToken.class,
+                        PublicStmtToken.class, FinalStmtToken.class, StaticExprToken.class);
+                Modifier visibility = null;
+                NameToken alias = null;
+                boolean makeFinal = false;
                 if (one instanceof NameToken) {
-                    result.addAlias(
-                            className.getName(),
-                            methodName.getName(), null,
-                            ((NameToken) one).getName()
-                    );
-                } else if (isTokenClass(one, PrivateStmtToken.class, ProtectedStmtToken.class, PublicStmtToken.class)) {
-                    Modifier modifier = Modifier.PRIVATE;
-                    if (one instanceof ProtectedStmtToken)
-                        modifier = Modifier.PROTECTED;
-                    else if (one instanceof PublicStmtToken)
-                        modifier = Modifier.PUBLIC;
+                    alias = (NameToken) one;
+                } else if (isTokenClass(one, PrivateStmtToken.class, ProtectedStmtToken.class, PublicStmtToken.class)
+                        || modern && one instanceof FinalStmtToken) {
+                    if (one instanceof FinalStmtToken) makeFinal = true;
+                    else if (one instanceof ProtectedStmtToken) visibility = Modifier.PROTECTED;
+                    else if (one instanceof PublicStmtToken) visibility = Modifier.PUBLIC;
+                    else visibility = Modifier.PRIVATE;
 
                     token = nextTokenSensitive(iterator);
-                    String name = null;
                     if (token instanceof NameToken) {
-                        NameToken two = (NameToken)token;
-                        if (two.getClass() != NameToken.class)
-                            unexpectedToken(two);
-
-                        name = two.getName();
+                        alias = (NameToken) token;
+                        if (alias.getClass() != NameToken.class)
+                            unexpectedToken(alias);
                     } else if (token instanceof SemicolonToken) {
                         iterator.previous();
-                        // nop
                     } else
                         unexpectedToken(token);
-
-                    result.addAlias(className.getName(), methodName.getName(), modifier, name);
                 } else
                     unexpectedToken(one);
 
+                result.addAlias(className.getName(), methodName.getName(), visibility,
+                        alias == null ? null : alias.getName(), makeFinal);
+                adaptations.add(new ClassStmtToken.TraitAlias(declaredTrait, methodName, alias,
+                        visibility, makeFinal, traceToken));
                 nextAndExpected(iterator, SemicolonToken.class);
             } else if (what instanceof InsteadofStmtToken) {
+                if (modern && declaredTrait == null) unexpectedToken(what);
                 Set<String> names = new HashSet<String>();
                 Set<String> namesLower = new HashSet<String>();
+                List<NameToken> excluded = new ArrayList<>();
                 NameToken cls;
                 while (true) {
                     cls = nextAndExpected(iterator, NameToken.class);
@@ -344,7 +386,7 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                         );
                     }
 
-                    names.add(cls.getName());
+                    names.add(cls.getName()); excluded.add(cls);
                     Token next = nextToken(iterator);
 
                     if (next instanceof CommaToken) continue;
@@ -360,6 +402,9 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                             cls.getName()
                     );
                 }
+                // Legacy permits the first-trait shorthand; preserve that path's resolved origin.
+                adaptations.add(new ClassStmtToken.TraitPrecedence(
+                        declaredTrait == null ? className : declaredTrait, methodName, excluded, traceToken));
             } else
                 unexpectedToken(what);
 
@@ -384,31 +429,40 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                 List<ClassVarStmtToken> properties = new ArrayList<ClassVarStmtToken>();
 
                 List<Token> modifiers = new ArrayList<Token>();
+                List<AttributeStmtToken> attributes = List.of();
                 CommentToken lastComment = null;
 
                 boolean breakByClose = false;
 
                 while (iterator.hasNext()){
                     Token current = iterator.next();
+                    if (current instanceof AttributeStartToken) {
+                        if (!modifiers.isEmpty() || !attributes.isEmpty()) unexpectedToken(current);
+                        attributes=analyzer.generator(AttributeGenerator.class).parse(current,iterator);
+                        current=nextToken(iterator);
+                    }
                     php.runtime.reflection.support.PhpTypeDeclaration propertyType = null;
                     boolean modernProperty = analyzer.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
                     boolean typeStart = current instanceof NameToken || current.getWord().equals("?") || current.getWord().equals("(")
                             || php.runtime.reflection.support.PhpTypeDeclaration.BUILTINS.contains(current.getWord().toLowerCase(Locale.ROOT))
                             || current.getWord().equalsIgnoreCase("self") || current.getWord().equalsIgnoreCase("parent");
-                    if (modernProperty && typeStart) {
+                    if (modernProperty && typeStart && !isReadonly(current)) {
                         if (modifiers.isEmpty()) {
                             analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_PARSE,
                                     "syntax error, unexpected " + ((current instanceof NameToken && !current.getWord().equalsIgnoreCase("callable")) || current.getWord().equalsIgnoreCase("self") ? "identifier" : "token")
                                             + " \"" + current.getWord() + "\", expecting \"function\"");
                         }
-                        if (result.isInterface()) analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
-                                "Interfaces may only include hooked properties");
-                        for (Token modifier : modifiers) if (modifier instanceof AbstractStmtToken)
-                            analyzer.getEnvironment().error(modifier.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
-                                    "Only hooked properties may be declared abstract");
                         List<Token> typeTokens = new ArrayList<>();
                         while (!(current instanceof VariableExprToken)) {
                             if (!(current instanceof CommentToken)) typeTokens.add(current); current = nextToken(iterator);
+                        }
+                        if((result.isInterface() || modifiers.stream().anyMatch(modifier->modifier instanceof AbstractStmtToken))
+                                && !PropertyHookGenerator.hasHooksAhead(iterator)) {
+                            if(result.isInterface()) analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                                    "Interfaces may only include hooked properties");
+                            for(Token modifier : modifiers) if(modifier instanceof AbstractStmtToken)
+                                analyzer.getEnvironment().error(modifier.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                                        "Only hooked properties may be declared abstract");
                         }
                         propertyType = PhpTypeDeclarationParser.parseProperty(analyzer, typeTokens,
                                 result.getFulledName() + "::$" + ((VariableExprToken) current).getName());
@@ -416,13 +470,19 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                     if (current instanceof ExprStmtToken)
                         unexpectedToken(current, "expression");
 
-                    if (current instanceof ConstStmtToken) {
+                    if(current instanceof CaseStmtToken && result.isEnum()) {
+                        if(!modifiers.isEmpty())unexpectedToken(current);
+                        EnumCaseStmtToken one=processEnumCase(result,current,iterator);one.setDocComment(lastComment);
+                        one.setPhpAttributes(attributes);attributes=List.of();
+                        constants.add(one);lastComment=null;
+                    } else if (current instanceof ConstStmtToken) {
                         if (result.isTrait() && analyzer.getPhpLanguageProfile()
                                 != php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                             unexpectedToken(current);
                         }
 
                         ConstStmtToken one = analyzer.generator(ConstGenerator.class).getToken(current, iterator);
+                        one.setPhpAttributes(attributes);attributes=List.of();
                         one.setClazz(result);
                         one.setDocComment(lastComment);
                         one.setModifier(Modifier.PUBLIC);
@@ -446,22 +506,23 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
 
                         constants.add(one);
                         modifiers.clear();
-                    } else if (isTokenClass(current, ClassGenerator.modifiers)){
+                    } else if (isTokenClass(current, ClassGenerator.modifiers) || isReadonly(current)){
+                        current=PhpSetVisibility.parse(analyzer,current,iterator);
                         for(Token modifier : modifiers){
+                            if(current instanceof PropertySetVisibilityStmtToken && modifier instanceof PropertySetVisibilityStmtToken)
+                                analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,"Multiple access type modifiers are not allowed");
                             if (modernProperty && modifier instanceof VarStmtToken)
                                 analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_PARSE,
                                         "syntax error, unexpected token \"" + current.getWord() + "\", expecting variable");
                             if (modernProperty && modifier instanceof StaticExprToken && current instanceof StaticExprToken)
                                 analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
                                         "Multiple static modifiers are not allowed");
-                            if (modifier.getType() == current.getType())
+                            if (modifier.getType() == current.getType() && (!isReadonly(current) || isReadonly(modifier)))
                                 unexpectedToken(current);
                         }
                         modifiers.add(current);
                     } else if (current instanceof VariableExprToken) {
-                        if (result.isInterface()) {
-                            if (modernProperty) analyzer.getEnvironment().error(current.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
-                                    "Interfaces may only include hooked properties");
+                        if (result.isInterface() && !modernProperty) {
                             analyzer.getEnvironment().error(
                                     result.toTraceInfo(analyzer.getContext()),
                                     ErrorType.E_ERROR,
@@ -470,20 +531,29 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                         }
 
                         for(Token modifier : modifiers){
-                            if (modernProperty && modifier instanceof AbstractStmtToken)
-                                analyzer.getEnvironment().error(modifier.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
-                                        "Only hooked properties may be declared abstract");
-                            if (modifier instanceof AbstractStmtToken || modifier instanceof FinalStmtToken && !modernProperty) {
+
+                            if (!modernProperty && (modifier instanceof AbstractStmtToken || modifier instanceof FinalStmtToken)) {
                                 unexpectedToken(modifier);
                             }
                         }
 
-                        List<ClassVarStmtToken> vars = processProperty(
-                                result, (VariableExprToken) current, modifiers, iterator
-                        );
+                        List<ClassVarStmtToken> vars = modernProperty && PropertyHookGenerator.hasHooksAhead(iterator)
+                                ? List.of(analyzer.generator(PropertyHookGenerator.class).getToken(
+                                        (VariableExprToken)current,iterator,result,modifiers,propertyType))
+                                : processProperty(result,(VariableExprToken)current,modifiers,iterator);
 
                         for (ClassVarStmtToken var : vars) {
+                            var.setPhpAttributes(attributes);
+                            if(modernProperty && !var.hasPropertyHooks()) {
+                                if(result.isInterface()) analyzer.getEnvironment().error(var.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                                        "Interfaces may only include hooked properties");
+                                for(Token modifier : modifiers) if(modifier instanceof AbstractStmtToken)
+                                    analyzer.getEnvironment().error(modifier.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                                            "Only hooked properties may be declared abstract");
+                            }
                             var.setDeclaredType(propertyType);
+                            for(Token modifier:modifiers)if(modifier instanceof PropertySetVisibilityStmtToken set)var.setPhpSetModifier(set.getModifier());
+                            var.setPhpReadonly(result.isPhpReadonly() || modifiers.stream().anyMatch(this::isReadonly));
                             for (Token modifier : modifiers) if (modifier instanceof FinalStmtToken) var.setFinal(true);
                         }
                         if (lastComment != null) {
@@ -494,6 +564,7 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                             lastComment = null;
                         }
 
+                        attributes=List.of();
                         properties.addAll(vars);
                         modifiers.clear();
                     } else if (current instanceof FunctionStmtToken) {
@@ -505,12 +576,14 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                         }
 
                         MethodStmtToken method = new MethodStmtToken(function);
+                        method.setPhpAttributes(attributes);attributes=List.of();
                         method.setClazz(result);
                         method.setDocComment(lastComment);
 
                         lastComment = null;
 
                         for (Token modifier : modifiers) {
+                            if (isReadonly(modifier)) analyzer.getEnvironment().error(modifier.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR, "Cannot use the readonly modifier on a method");
                             if (modifier instanceof AbstractStmtToken)
                                 method.setAbstract(true);
                             else if (modifier instanceof StaticExprToken)
@@ -537,12 +610,31 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                         if (method.getModifier() == null)
                             method.setModifier(Modifier.PUBLIC);
 
+                        for (ArgumentStmtToken argument : method.getArguments()) if (argument.getPromotionModifier() != null) {
+                            if (method.isAbstract() || method.isInterfacable())
+                                analyzer.getEnvironment().error(argument.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                                        "Cannot declare promoted property in an abstract constructor");
+                            if (method.isStatic())
+                                analyzer.getEnvironment().error(argument.toTraceInfo(analyzer.getContext()), ErrorType.E_COMPILE_ERROR,
+                                        "Method %s::__construct() cannot be static", result.getFulledName());
+                            var property = new ClassVarStmtToken(argument.getMeta());
+                            property.setClazz(result);property.setVariable(argument.getName());
+                            property.setModifier(argument.getPromotionModifier());property.setDeclaredType(argument.getPromotedType());
+                            property.setPhpSetModifier(argument.getPhpSetModifier());
+                            property.setPhpReadonly(result.isPhpReadonly() || argument.isPhpReadonly());
+                            property.setPhpAttributes(argument.getPhpAttributes());
+                            property.setPromoted(true);
+                            property.setPropertyHooks(argument.getPromotedPropertyHooks());
+                            properties.add(property);
+                        }
                         methods.add(method);
                         modifiers.clear();
                     } else if (current instanceof NamespaceUseStmtToken) {
+                        if (!attributes.isEmpty()) unexpectedToken(current);
                         processUse(result, iterator);
                         lastComment = null;
                     } else if (isClosedBrace(current, BraceExprToken.Kind.BLOCK)) {
+                        if (!attributes.isEmpty()) unexpectedToken(current);
                         breakByClose = true;
                         break;
                     } else if (current instanceof CommentToken){
@@ -562,6 +654,12 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
                 result.setConstants(constants);
 
                 result.setMethods(methods);
+                if (analyzer.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    var names = new java.util.HashSet<String>();
+                    for (ClassVarStmtToken property : properties) if (!names.add(property.getVariable().getName()))
+                        analyzer.getEnvironment().error(property.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,
+                                "Cannot redeclare %s::$%s",result.getFulledName(),property.getVariable().getName());
+                }
                 result.setProperties(properties);
                 analyzer.setClazz(null);
                 return;
@@ -574,6 +672,26 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
     @SuppressWarnings("unchecked")
     protected ClassStmtToken processDefine(Token current, ListIterator<Token> iterator){
         ClassStmtToken result = null;
+        if (analyzer.getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5
+                && (isReadonly(current) || current instanceof FinalStmtToken || current instanceof AbstractStmtToken)) {
+            int start=iterator.nextIndex(),count=0;boolean readonly=false,fin=false,abs=false;Token modifier=current;
+            while (isReadonly(modifier) || modifier instanceof FinalStmtToken || modifier instanceof AbstractStmtToken) {
+                if (isReadonly(modifier)) {if(readonly) unexpectedToken(modifier);readonly=true;}
+                else if(modifier instanceof FinalStmtToken) {if(fin) unexpectedToken(modifier);fin=true;}
+                else {if(abs) unexpectedToken(modifier);abs=true;}
+                count++;modifier=nextToken(iterator);
+            }
+            if (modifier instanceof ClassStmtToken) {
+                if(fin&&abs) unexpectedToken(current);
+                result=(ClassStmtToken)modifier;result.setFinal(fin);result.setAbstract(abs);result.setPhpReadonly(readonly);
+                int end=iterator.nextIndex();for(int i=0;i<count+1&&iterator.hasPrevious();i++)iterator.previous();
+                if(iterator.hasPrevious()){Token comment=iterator.previous();if(comment instanceof CommentToken)result.setDocComment((CommentToken)comment);}
+                while(iterator.nextIndex()<end)iterator.next();return result;
+            }
+            while(iterator.nextIndex()>start)iterator.previous();
+            if(readonly && (modifier instanceof InterfaceStmtToken || modifier instanceof TraitStmtToken || modifier.getWord().equalsIgnoreCase("enum"))) unexpectedToken(modifier);
+            return null;
+        }
 
         if (isTokenClass(current, FinalStmtToken.class, AbstractStmtToken.class)){
             Token next = nextToken(iterator);
@@ -594,7 +712,11 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
             }
         }
 
-        if (current instanceof ClassStmtToken)
+        if(analyzer.getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5 && current.getClass()==NameToken.class
+                && current.getWord().equalsIgnoreCase("enum") && iterator.hasNext()
+                && nextTokenAndPrev(iterator) instanceof NameToken) {
+            result=new ClassStmtToken(current.getMeta());result.setClassType(ClassEntity.Type.ENUM);
+        } else if (current instanceof ClassStmtToken)
             result = (ClassStmtToken)current;
         else if (current instanceof InterfaceStmtToken){
             result = new ClassStmtToken(current.getMeta());
@@ -626,23 +748,70 @@ public class ClassGenerator extends Generator<ClassStmtToken> {
         return result;
     }
 
-    @Override
-    public ClassStmtToken getToken(Token current, ListIterator<Token> iterator) {
-        ClassStmtToken result = processDefine(current, iterator);
-
-        if (result != null) {
-            if (analyzer.getClazz() != null)
-                unexpectedToken(current);
-
-            result.setClassNameProfile(analyzer.getPhpLanguageProfile());
-            analyzer.setClazz(result);
-            result.setNamespace(analyzer.getNamespace());
-
-            processName(result, iterator);
+    public void processAnonymous(ClassStmtToken result, ListIterator<Token> iterator) {
+        ClassStmtToken outerClass = analyzer.getClazz();
+        FunctionStmtToken outerFunction = analyzer.getFunction(true);
+        List<FunctionStmtToken> outerClosures = new ArrayList<>();
+        while (analyzer.peekClosure() != null) outerClosures.add(analyzer.popClosure());
+        analyzer.setFunction(null);
+        analyzer.addScope(true);
+        result.setAnonymous(true);
+        result.setClassNameProfile(analyzer.getPhpLanguageProfile());
+        result.setNamespace(analyzer.getNamespace());
+        analyzer.registerAnonymousClass(result);
+        analyzer.setClazz(result);
+        try {
             processExtends(result, iterator);
             processImplements(result, iterator);
             processBody(result, iterator);
-            analyzer.setClazz(null);
+            analyzer.finishAnonymousClass(result);
+        } finally {
+            analyzer.removeScope();
+            analyzer.setClazz(outerClass);
+            analyzer.setFunction(outerFunction);
+            for (int i=outerClosures.size()-1;i>=0;i--) analyzer.pushClosure(outerClosures.get(i));
+        }
+    }
+
+    @Override
+    public ClassStmtToken getToken(Token current, ListIterator<Token> iterator) {
+        return getToken(current, iterator, false);
+    }
+
+    public ClassStmtToken getToken(Token current, ListIterator<Token> iterator, boolean deferred) {
+        ClassStmtToken result = processDefine(current, iterator);
+
+        if (result != null) {
+            if (analyzer.getClazz() != null) {
+                if (analyzer.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5)
+                    throw new php.runtime.exceptions.CompileException(
+                            "Class declarations may not be nested", current.toTraceInfo(analyzer.getContext()));
+                unexpectedToken(current);
+            }
+
+            result.setClassNameProfile(analyzer.getPhpLanguageProfile());
+            result.setNamespace(analyzer.getNamespace());
+            if (deferred) {
+                if (analyzer.getPhpLanguageProfile() != PhpLanguageProfile.PHP_8_5)
+                    unexpectedToken(current);
+                analyzer.registerDeferredClass(result);
+                try (SyntaxAnalyzer.NamedClassContext ignored = analyzer.enterNamedClass(result)) {
+                    processName(result, iterator);
+                    processEnumBacking(result,iterator);
+                    processExtends(result, iterator);
+                    processImplements(result, iterator);
+                    processBody(result, iterator);
+                    analyzer.finishDeferredClass(result);
+                }
+            } else {
+                analyzer.setClazz(result);
+                processName(result, iterator);
+                processEnumBacking(result,iterator);
+                processExtends(result, iterator);
+                processImplements(result, iterator);
+                processBody(result, iterator);
+                analyzer.setClazz(null);
+            }
         }
 
         return result;

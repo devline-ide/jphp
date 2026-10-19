@@ -21,6 +21,8 @@ public class StandardExtension extends Extension {
         registerFunctions(new LangFunctions());
         registerFunctions(new StringFunctions());
         registerFunctions(new ArrayFunctions());
+        registerFunctions(new Php85Functions());
+        registerFunctions(new Php85ArrayFunctions());
         registerFunctions(new FileFunctions());
     }
 }

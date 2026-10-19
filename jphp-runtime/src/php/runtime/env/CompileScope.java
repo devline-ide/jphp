@@ -64,6 +64,24 @@ public class CompileScope {
     private final Map<String, String> legacyClassKeys = new HashMap<>();
     private final ThreadLocal<Boolean> classLookupModern = new ThreadLocal<>();
     private final Map<String, CompileClass> canonicalCompileClassMap = new HashMap<>();
+    private final Map<String, CompileClass> php85CompileClassMap = new HashMap<>();
+    private final Map<String, ClassEntity> php85ClassMap = new HashMap<>();
+    private final Map<String,java.util.function.Consumer<ClassEntity>> php85ClassInitializers = new HashMap<>();
+    private final Map<String,FunctionEntity> php85FunctionMap=new HashMap<>();
+    public void registerPhp85Function(Extension extension,CompileFunctionSpec function) {
+        synchronized(functionMap) {
+            FunctionEntity previous=php85FunctionMap.get(function.getLowerName());
+            if(previous!=null) {
+                if(previous instanceof CompileFunctionEntity
+                        && ((CompileFunctionEntity)previous).hasSameNativeDeclaration(extension,function)) return;
+                throw new IllegalArgumentException("Duplicate PHP_8_5 function "+function.getName());
+            }
+            php85FunctionMap.put(function.getLowerName(),new CompileFunctionEntity(extension,function));
+        }
+    }
+    public FunctionEntity fetchPhp85Function(String name) {
+        synchronized(functionMap) {return php85FunctionMap.get(name.toLowerCase(java.util.Locale.ROOT));}
+    }
     protected final Map<String, FunctionEntity> functionMap;
     protected final Map<String, ConstantEntity> constantMap;
     protected final Map<Class<? extends Throwable>, Class<? extends JavaException>> exceptionMap;
@@ -123,11 +141,17 @@ public class CompileScope {
             legacyClassKeys.putAll(parent.legacyClassKeys);
             canonicalCompileClassMap.putAll(parent.canonicalCompileClassMap);
             compileClassMap.putAll(parent.compileClassMap);
+            php85CompileClassMap.putAll(parent.php85CompileClassMap);
+            php85ClassMap.putAll(parent.php85ClassMap);
+            php85ClassInitializers.putAll(parent.php85ClassInitializers);
         }
 
-        functionMap.putAll(parent.functionMap);
-        compileFunctionMap.putAll(parent.compileFunctionMap);
-        compileFunctionSpecMap.putAll(parent.compileFunctionSpecMap);
+        synchronized (parent.functionMap) {
+            functionMap.putAll(parent.functionMap);
+            php85FunctionMap.putAll(parent.php85FunctionMap);
+            compileFunctionMap.putAll(parent.compileFunctionMap);
+            compileFunctionSpecMap.putAll(parent.compileFunctionSpecMap);
+        }
 
         constantMap.putAll(parent.constantMap);
         compileConstantMap.putAll(parent.compileConstantMap);
@@ -207,6 +231,7 @@ public class CompileScope {
         registerLazyClass(extension, Closure.class);
         registerLazyClass(extension, Generator.class);
         registerLazyClass(extension, StdClass.class);
+        registerLazyClass(extension, php.runtime.lang.PhpWeakReference.class);
         registerLazyClass(extension, php.runtime.lang.IncompleteClass.class);
         registerLazyClass(extension, BaseThrowable.class);
         registerLazyClass(extension, BaseException.class);
@@ -215,6 +240,7 @@ public class CompileScope {
         registerLazyClass(extension, BaseTypeError.class);
         registerLazyClass(extension, BaseArgumentCountError.class);
         registerLazyClass(extension, BaseValueError.class);
+        registerLazyClass(extension, BaseUnhandledMatchError.class);
         registerLazyClass(extension, BaseArithmeticError.class);
         registerLazyClass(extension, BaseDivisionByZeroError.class);
         registerLazyClass(extension, ErrorException.class);
@@ -329,6 +355,40 @@ public class CompileScope {
         return tickHandler;
     }
 
+    /** Reserved modern builtins never replace a legacy user's same-named declaration. */
+    public void registerPhp85LazyClass(Extension extension, Class<?> clazz) {
+        registerPhp85LazyClass(extension,clazz,null);
+    }
+    public void registerPhp85LazyClass(Extension extension, Class<?> clazz,java.util.function.Consumer<ClassEntity> initializer) {
+        CompileClass compiled=new CompileClass(extension,clazz);
+        synchronized(classMap) {
+            String key=PhpClassNames.canonicalKey(compiled.getName());
+            CompileClass previous=php85CompileClassMap.putIfAbsent(key,compiled);
+            if(previous!=null && previous.getNativeClass()!=clazz)
+                throw new IllegalArgumentException("Duplicate PHP_8_5 builtin "+compiled.getName());
+            if(initializer!=null) php85ClassInitializers.put(key,initializer);
+        }
+    }
+    public ClassEntity fetchPhp85Class(String name) {
+        synchronized(classMap) {
+            String key=PhpClassNames.canonicalKey(name);
+            ClassEntity entity=php85ClassMap.get(key);
+            if(entity!=null) return entity;
+            CompileClass compiled=php85CompileClassMap.get(key);
+            if(compiled==null) return null;
+            Boolean previous=classLookupModern.get();classLookupModern.set(true);
+            try {
+                entity=new ClassEntity(new ClassWrapper(compiled.getExtension(),this,compiled.getNativeClass()));
+                entity.setId(nextClassIndex());
+                var initializer=php85ClassInitializers.get(key);if(initializer!=null) initializer.accept(entity);
+                php85ClassMap.put(key,entity);return entity;
+            } finally {if(previous==null) classLookupModern.remove();else classLookupModern.set(previous);}
+        }
+    }
+    public boolean isPhp85Builtin(ClassEntity entity) {
+        if(entity==null) return false;
+        synchronized(classMap) {return php85ClassMap.get(PhpClassNames.canonicalKey(entity.getName()))==entity;}
+    }
     public void registerLazyClass(Extension extension, Class<?> clazz) {
         CompileClass el = new CompileClass(extension, clazz);
         synchronized (classMap) {
@@ -569,6 +629,7 @@ public class CompileScope {
     }
 
     private ClassEntity fetchUserClassInternal(String name, String nameLower, boolean modern) {
+        if(modern) {ClassEntity builtin=fetchPhp85Class(name);if(builtin!=null) return builtin;}
         ClassEntity entity;
         String canonical = PhpClassNames.canonicalKey(name);
         nameLower = modern ? canonical : name.toLowerCase();
@@ -613,6 +674,7 @@ public class CompileScope {
     }
 
     public FunctionEntity findUserFunction(String name) {
+        if(isModernClassLookup()) {FunctionEntity builtin=fetchPhp85Function(name);if(builtin!=null) return builtin;}
         String originName = name;
         name = name.toLowerCase();
 
@@ -650,11 +712,28 @@ public class CompileScope {
         return constantMap.values();
     }
 
+    private static final CompileConstant PHP85_E_ALL = new CompileConstant("E_ALL", 30719);
+
+    public CompileConstant findCompileConstant(String name, PhpLanguageProfile profile) {
+        CompileConstant constant = findCompileConstant(name);
+        return constant != null && profile == PhpLanguageProfile.PHP_8_5 && "E_ALL".equals(name)
+                ? PHP85_E_ALL : constant;
+    }
+
     public CompileConstant findCompileConstant(String name){
         return compileConstantMap.get(name);
     }
 
+    public CompileFunction findCompileFunction(String name,PhpLanguageProfile profile) {
+        Boolean previous=classLookupModern.get();classLookupModern.set(profile==PhpLanguageProfile.PHP_8_5);
+        try {return findCompileFunction(name);}
+        finally {if(previous==null) classLookupModern.remove();else classLookupModern.set(previous);}
+    }
     public CompileFunction findCompileFunction(String name) {
+        if(isModernClassLookup()) {
+            FunctionEntity builtin=fetchPhp85Function(name);
+            if(builtin instanceof CompileFunctionEntity) return ((CompileFunctionEntity)builtin).getCompileFunction();
+        }
         name = name.toLowerCase();
 
         CompileFunction function = compileFunctionMap.get(name);
@@ -677,8 +756,21 @@ public class CompileScope {
     }
 
     public CompileClass findCompileClass(String name) {
+        if(isModernClassLookup()) {
+            CompileClass builtin=php85CompileClassMap.get(PhpClassNames.canonicalKey(name));
+            if(builtin!=null) return builtin;
+        }
         return isModernClassLookup()
                 ? canonicalCompileClassMap.get(PhpClassNames.canonicalKey(name)) : compileClassMap.get(name.toLowerCase());
+    }
+
+    /** Declaration collision check without fetch handlers, autoload, wrapping or initialization. */
+    public boolean hasClassDeclaration(String name) {
+        String key = PhpClassNames.canonicalKey(name);
+        synchronized (classMap) {
+            return classMap.containsKey(key) || canonicalCompileClassMap.containsKey(key)
+                    || isModernClassLookup() && php85CompileClassMap.containsKey(key);
+        }
     }
 
     public Class<? extends JavaException> findJavaException(Class<? extends Throwable> clazz) {

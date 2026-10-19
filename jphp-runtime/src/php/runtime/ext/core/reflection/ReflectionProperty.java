@@ -20,6 +20,9 @@ import static php.runtime.annotation.Reflection.*;
 public class ReflectionProperty extends Reflection implements Reflector {
     public final static int IS_STATIC = 1;
     public final static int IS_FINAL = 32;
+    public final static int IS_READONLY = 128;
+    public final static int IS_PROTECTED_SET = 2048;
+    public final static int IS_PRIVATE_SET = 4096;
     public final static int IS_PUBLIC = 256;
     public final static int IS_PROTECTED = 512;
     public final static int IS_PRIVATE = 1024;
@@ -35,6 +38,15 @@ public class ReflectionProperty extends Reflection implements Reflector {
         this.entity = entity;
         getProperties().put("name", new StringMemory(entity.getName()));
         getProperties().put("class", new StringMemory(entity.getClazz().getName()));
+    }
+
+    @php.runtime.annotation.Reflection.Signature({
+            @php.runtime.annotation.Reflection.Arg(value="name",type=php.runtime.common.HintType.STRING,
+                    nullable=true,optional=@php.runtime.annotation.Reflection.Optional("null")),
+            @php.runtime.annotation.Reflection.Arg(value="flags",type=php.runtime.common.HintType.INT,
+                    optional=@php.runtime.annotation.Reflection.Optional("0"))})
+    public Memory getAttributes(Environment env,Memory...args) {
+        return ReflectionAttribute.collect(env,entity,args[0],args[1],"ReflectionProperty");
     }
 
     @Signature({@Arg("class"), @Arg("name")})
@@ -144,11 +156,71 @@ public class ReflectionProperty extends Reflection implements Reflector {
                 || env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5);
     }
 
+    @Signature public Memory isAbstract(Environment env, Memory... args) {
+        if(entity.getPhpHooks()!=null) for(var hook:entity.getPhpHooks().declarationOrder())
+            if(hook.method().isAbstractable()) return Memory.TRUE;
+        return Memory.FALSE;
+    }
+    @Signature public Memory isVirtual(Environment env, Memory... args) {
+        return entity.getPhpHooks()!=null && entity.getPhpHooks().isVirtual() ? Memory.TRUE : Memory.FALSE;
+    }
+    @Signature public Memory hasHooks(Environment env, Memory... args) {
+        return entity.getPhpHooks()==null ? Memory.FALSE : Memory.TRUE;
+    }
+    @Signature(value=@Arg(value="type",type=HintType.OBJECT,typeClass="PropertyHookType"),result=@Arg(type=HintType.BOOLEAN))
+    public Memory hasHook(Environment env,Memory...args) {
+        var kind=php.runtime.ext.core.classes.PhpPropertyHookType.kind(env,args[0]);
+        var hooks=entity.getPhpHooks();
+        return hooks!=null && (kind==php.runtime.reflection.support.PhpPropertyHooks.Kind.GET?hooks.get():hooks.set())!=null ? Memory.TRUE : Memory.FALSE;
+    }
+    @Signature(value=@Arg(value="type",type=HintType.OBJECT,typeClass="PropertyHookType"),result=@Arg(type=HintType.OBJECT,typeClass="ReflectionMethod",nullable=true))
+    public Memory getHook(Environment env,Memory...args) {
+        var kind=php.runtime.ext.core.classes.PhpPropertyHookType.kind(env,args[0]);
+        var hooks=entity.getPhpHooks();var hook=hooks==null?null:kind==php.runtime.reflection.support.PhpPropertyHooks.Kind.GET?hooks.get():hooks.set();
+        return hook==null?Memory.NULL:ObjectMemory.valueOf(new ReflectionMethod(env,hook.method()));
+    }
+    @Signature public Memory getHooks(Environment env, Memory... args) {
+        var result=new php.runtime.memory.ArrayMemory();
+        if(entity.getPhpHooks()!=null) for(var hook:entity.getPhpHooks().reflectionOrder())
+            result.putAsKeyString(hook.kind()==php.runtime.reflection.support.PhpPropertyHooks.Kind.GET?"get":"set",
+                    ObjectMemory.valueOf(new ReflectionMethod(env,hook.method())));
+        return result.toConstant();
+    }
+    @Signature(@Arg(value="object",type=HintType.OBJECT))
+    public Memory getRawValue(Environment env, Memory... args) throws Throwable {
+        if(entity.getPhpHooks()==null) return getValue(env,args);
+        var object=args[0].toValue(ObjectMemory.class);
+        if(!object.getReflection().isInstanceOf(entity.getClazz())) exception(env,
+                "Given object is not an instance of the class this property was declared in");
+        if(entity.getPhpHooks().isVirtual()) php.runtime.PhpPropertyHookAccess.error(env,env.trace(),
+                "Must not read from virtual property %s::$%s",entity);
+        return entity.readInitialized(env,env.trace(),object.getProperties().getByScalar(entity.getSpecificName())).toImmutable();
+    }
+    @Signature({@Arg(value="object",type=HintType.OBJECT),@Arg("value")})
+    public Memory setRawValue(Environment env, Memory... args) throws Throwable {
+        var context=php.runtime.PhpPropertyWriteContext.enter(env,env.trace(),false);
+        try {
+            if(entity.getPhpHooks()!=null && entity.getPhpHooks().isVirtual())
+                php.runtime.PhpPropertyHookAccess.error(env,env.trace(),entity.getPhpHooks().set()==null
+                        ? "Property %s::$%s is read-only" : "Must not write to virtual property %s::$%s",entity);
+            // Native reflection writes permit a different object; retain the existing declared typed/raw assignment path.
+            if(entity.getPhpHooks()!=null) {
+                entity.assignValue(env,env.trace(),args[0].toValue(ObjectMemory.class).value,entity.getSpecificName(),args[1]);
+                return Memory.NULL;
+            }
+            return setValueInternal(env,args);
+        } finally {php.runtime.PhpPropertyWriteContext.leave(context);}
+    }
+
     @Signature public Memory hasType(Environment env, Memory... args) {return entity.getDeclaredType() == null ? Memory.FALSE : Memory.TRUE;}
     @Signature public Memory getType(Environment env, Memory... args) {
         return entity.getDeclaredType() == null ? Memory.NULL : ObjectMemory.valueOf(ReflectionType.fromDeclaration(env, entity.getDeclaredType()));
     }
     @Signature public Memory isFinal(Environment env, Memory... args) {return entity.isFinal() ? Memory.TRUE : Memory.FALSE;}
+    @Signature public Memory isReadOnly(Environment env, Memory... args) {return entity.isPhpReadonly()?Memory.TRUE:Memory.FALSE;}
+    @Signature public Memory isPrivateSet(Environment env,Memory...args){return entity.isPrivateSet()?Memory.TRUE:Memory.FALSE;}
+    @Signature public Memory isProtectedSet(Environment env,Memory...args){return entity.isProtectedSet()?Memory.TRUE:Memory.FALSE;}
+    @Signature public Memory isPromoted(Environment env, Memory... args) {return entity.isPromoted() ? Memory.TRUE : Memory.FALSE;}
     @Signature public Memory hasDefaultValue(Environment env, Memory... args) {return entity.hasDefaultValue() ? Memory.TRUE : Memory.FALSE;}
     @Signature public Memory getDefaultValue(Environment env, Memory... args) {
         return entity.hasDefaultValue() ? entity.getDefaultValue(env).toImmutable() : Memory.NULL;
@@ -164,7 +236,12 @@ public class ReflectionProperty extends Reflection implements Reflector {
         var object = args[0].toValue(ObjectMemory.class);
         if (!object.getReflection().isInstanceOf(entity.getClazz())) exception(env,
                 "Given object is not an instance of the class this property was declared in");
-        Memory value = object.getProperties().getByScalar(entity.getSpecificName());
+        boolean php85 = modern(env);
+        // Private declarations retain their own address; other declarations follow the receiver's effective override.
+        PropertyEntity property = php85 && !entity.isPrivate() ? object.getReflection().findProperty(entity.getName()) : entity;
+        if (property == null) return Memory.FALSE;
+        if (php85 && property.getPhpHooks() != null && property.getPhpHooks().isVirtual()) return Memory.TRUE;
+        Memory value = object.getProperties().getByScalar(property.getSpecificName());
         return value == null || value.isUndefined() ? Memory.FALSE : Memory.TRUE;
     }
 
@@ -225,7 +302,11 @@ public class ReflectionProperty extends Reflection implements Reflector {
             entity.getClazz().getStaticProperty(env, env.trace(), entity.getName(), true, false, null, null, 0, false).assign(assigned);
         } else {
             if (arg.isObject()){
-                entity.assignValue(env,env.trace(),arg.toValue(ObjectMemory.class).value,entity.getSpecificName(),args[1]);
+                var object=arg.toValue(ObjectMemory.class).value;
+                if(modern(env) && entity.getPhpHooks()!=null
+                        && php.runtime.PhpPropertyHookAccess.write(entity,env,env.trace(),object,args[1],null,null))
+                    return Memory.NULL;
+                entity.assignValue(env,env.trace(),object,entity.getSpecificName(),args[1]);
             } else
                 exception(env, "Argument 1 must be object, given %s", arg.getRealType().toString());
         }

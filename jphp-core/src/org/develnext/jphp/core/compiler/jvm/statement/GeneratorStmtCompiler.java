@@ -23,7 +23,7 @@ public class GeneratorStmtCompiler extends StmtCompiler<GeneratorEntity> {
     public GeneratorEntity compile() {
         GeneratorEntity entity = new GeneratorEntity(getCompiler().getContext());
         entity.setReturnReference(statement.isReturnReference());
-        entity.setInternalName(compiler.getModule().getInternalName() + "_generator" + statement.getId());
+        entity.setInternalName(compiler.getModule().getInternalName() + "_generator" + statement.getGeneratorId());
         entity.setId(statement.getGeneratorId());
         entity.setTrace(statement.toTraceInfo(compiler.getContext()));
 
@@ -33,6 +33,11 @@ public class GeneratorStmtCompiler extends StmtCompiler<GeneratorEntity> {
         classStmtToken.setExtend(ExtendsStmtToken.valueOf(Generator.class.getSimpleName()));
 
         MethodStmtToken methodToken = new MethodStmtToken(statement);
+        if(statement instanceof MethodStmtToken hook && hook.getPropertyHookName()!=null) {
+            methodToken.setPropertyHookName(hook.getPropertyHookName());
+            methodToken.setGeneratorPropertyHookKind(hook.getName().getName().endsWith("::get")?1:2);
+            for(var access:hook.getPropertyHookBackingAccesses())methodToken.notePropertyHookBackingAccess(access);
+        }
         methodToken.setClazz(classStmtToken);
         methodToken.setGenerator(false);
         methodToken.setReturnReference(false);
@@ -45,7 +50,9 @@ public class GeneratorStmtCompiler extends StmtCompiler<GeneratorEntity> {
         }
         methodToken.setModifier(Modifier.PROTECTED);
         methodToken.setName(NameToken.valueOf("_run"));
-        methodToken.setUses(statement.getArguments());
+        java.util.List<ArgumentStmtToken> uses = new java.util.ArrayList<>(statement.getArguments());
+        if (statement.getUses() != null) uses.addAll(statement.getUses());
+        methodToken.setUses(uses);
         methodToken.setArguments(Collections.<ArgumentStmtToken>emptyList());
         classStmtToken.setMethods(Arrays.asList(methodToken));
 

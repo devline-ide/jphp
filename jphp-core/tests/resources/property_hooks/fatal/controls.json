@@ -1,0 +1,72 @@
+[
+  {
+    "id": "strict/backed_ref_get_set_invalid",
+    "resource": "resources/property_hooks/fatal/strict/backed_ref_get_set_invalid",
+    "message": "Get hook of backed property H::x with set hook may not return by reference"
+  },
+  {
+    "id": "strict/duplicate_get_invalid",
+    "resource": "resources/property_hooks/fatal/strict/duplicate_get_invalid",
+    "message": "Cannot redeclare property hook \"get\""
+  },
+  {
+    "id": "strict/narrow_set_invalid",
+    "resource": "resources/property_hooks/fatal/strict/narrow_set_invalid",
+    "message": "Type of parameter $v of hook H::$x::set must be compatible with property type"
+  },
+  {
+    "id": "strict/override_final_hook_invalid",
+    "resource": "resources/property_hooks/fatal/strict/override_final_hook_invalid",
+    "message": "Cannot override final property hook P::$x::get()"
+  },
+  {
+    "id": "strict/readonly_hook_invalid",
+    "resource": "resources/property_hooks/fatal/strict/readonly_hook_invalid",
+    "message": "Hooked properties cannot be readonly"
+  },
+  {
+    "id": "strict/static_hook_invalid",
+    "resource": "resources/property_hooks/fatal/strict/static_hook_invalid",
+    "message": "Cannot declare hooks for static property"
+  },
+  {
+    "id": "strict/virtual_default_invalid",
+    "resource": "resources/property_hooks/fatal/strict/virtual_default_invalid",
+    "message": "Cannot specify default value for virtual hooked property H::$x"
+  },
+  {
+    "id": "weak/backed_ref_get_set_invalid",
+    "resource": "resources/property_hooks/fatal/weak/backed_ref_get_set_invalid",
+    "message": "Get hook of backed property H::x with set hook may not return by reference"
+  },
+  {
+    "id": "weak/duplicate_get_invalid",
+    "resource": "resources/property_hooks/fatal/weak/duplicate_get_invalid",
+    "message": "Cannot redeclare property hook \"get\""
+  },
+  {
+    "id": "weak/narrow_set_invalid",
+    "resource": "resources/property_hooks/fatal/weak/narrow_set_invalid",
+    "message": "Type of parameter $v of hook H::$x::set must be compatible with property type"
+  },
+  {
+    "id": "weak/override_final_hook_invalid",
+    "resource": "resources/property_hooks/fatal/weak/override_final_hook_invalid",
+    "message": "Cannot override final property hook P::$x::get()"
+  },
+  {
+    "id": "weak/readonly_hook_invalid",
+    "resource": "resources/property_hooks/fatal/weak/readonly_hook_invalid",
+    "message": "Hooked properties cannot be readonly"
+  },
+  {
+    "id": "weak/static_hook_invalid",
+    "resource": "resources/property_hooks/fatal/weak/static_hook_invalid",
+    "message": "Cannot declare hooks for static property"
+  },
+  {
+    "id": "weak/virtual_default_invalid",
+    "resource": "resources/property_hooks/fatal/weak/virtual_default_invalid",
+    "message": "Cannot specify default value for virtual hooked property H::$x"
+  }
+]

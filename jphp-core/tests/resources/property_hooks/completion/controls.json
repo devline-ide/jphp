@@ -1,0 +1,322 @@
+[
+  {
+    "id": "weak/top/ordinary_parent_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/ordinary_parent_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (A::f)",
+    "sourceSha256": "fbf14068e67b70817cbd625f9e0d658a2e49106d7014f50385216ef111cecf8f",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "b7e3a7711fba8b618c452dc42c882f7d317fbe1622a55e61863006c5918f7cbd"
+  },
+  {
+    "id": "strict/top/ordinary_parent_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/ordinary_parent_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (A::f)",
+    "sourceSha256": "a7dfed71cb7a8c5320bf0a65d926312dee80878d8f3b44bde43e9bff9baac4c3",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "8bf7f85f9e51aad6734beab8a4b2900db18282db454bd05109b1bcaee9a3b4bd"
+  },
+  {
+    "id": "weak/deferred/ordinary_parent_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/weak/deferred/ordinary_parent_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (A::f)",
+    "sourceSha256": "95478a41aa085528cefc475956d2716e88c3a2773ab2f68a4f78702a8cd5ddf2",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "cc96ef26d2208cdbc8f6e2f9da68758f328b8b8dc353c7ca4e0d0b84f0b57a50"
+  },
+  {
+    "id": "strict/deferred/ordinary_parent_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/strict/deferred/ordinary_parent_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (A::f)",
+    "sourceSha256": "66558c2aec842a6dd83df8678ae7c5cad1dc3be06ccc6eb68369e5a6c8c04d2a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f4c944837596e278111f6795942ddf595685ddeeb75ad4cdb4557744177e2604"
+  },
+  {
+    "id": "weak/top/ordinary_interface_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/ordinary_interface_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::f)",
+    "sourceSha256": "62bd1da4692a89d3de3dbf3091836128bcc180684600e46f0a77804a124aac52",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "b78bc89fd1b22b1ad28b63a855339499b3f893f71753ce71a67bc834157ad84e"
+  },
+  {
+    "id": "strict/top/ordinary_interface_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/ordinary_interface_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::f)",
+    "sourceSha256": "9a6913de9a2e77cf9be627b9cea6858439b0e601f72841b646b57ba9a40c3a65",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "9f79adfeb7bed822c3c09d4e63b02a4976d1884f1237c6e59fabc9f1b68c76ff"
+  },
+  {
+    "id": "weak/deferred/ordinary_interface_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/weak/deferred/ordinary_interface_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::f)",
+    "sourceSha256": "d489d8e93fb603406ac9879042edcd8310ad45e70620e733d52e677ef46262e8",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "785faf1a28401e8240f71f137259131152dc15d3680c76307902e07dc9cc52fc"
+  },
+  {
+    "id": "strict/deferred/ordinary_interface_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/strict/deferred/ordinary_interface_missing",
+    "nativeExit": 255,
+    "message": "Class C contains 1 abstract method and must therefore be declared abstract or implement the remaining method (I::f)",
+    "sourceSha256": "8eb8f94c9c871d9c3f3b5ce76b38ccf501e4d81c706cd60f632a4b8fb216369a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "449eba53eac68606d53c80e93c5fd667733ef828fb3af8a24a7f76fc9656fd69"
+  },
+  {
+    "id": "weak/top/ordinary_own_abstract",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/ordinary_own_abstract",
+    "nativeExit": 255,
+    "message": "Class C declares abstract method f() and must therefore be declared abstract",
+    "sourceSha256": "de77b67df027cdf0002655cf83b37a13f89b47833d0ecc0751db97daca2e13c8",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d2c38b32557e12e637091eb63a7e693c1140f08169a002e618b1a87a29e3c9e0"
+  },
+  {
+    "id": "strict/top/ordinary_own_abstract",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/ordinary_own_abstract",
+    "nativeExit": 255,
+    "message": "Class C declares abstract method f() and must therefore be declared abstract",
+    "sourceSha256": "7c0bae768513d9ae7079d2ad5c59ffa86fcff7f35b6808ded6655d9d923f1dfe",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "51d827c07837b75d34d3785fb5e314df89c8eab9545c00cc4402b0f58a12aece"
+  },
+  {
+    "id": "weak/deferred/ordinary_own_abstract",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/deferred/ordinary_own_abstract",
+    "nativeExit": 255,
+    "message": "Class C declares abstract method f() and must therefore be declared abstract",
+    "sourceSha256": "fda5d6ff1b1f7243c5e39230022de9bd2fc3f19f703d656dfa09d74f3226ebcd",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "6a8a7314a5d757de4f62611043c4f02ec30083e66bb7c0e3c1d0b7a61b141eac"
+  },
+  {
+    "id": "strict/deferred/ordinary_own_abstract",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/deferred/ordinary_own_abstract",
+    "nativeExit": 255,
+    "message": "Class C declares abstract method f() and must therefore be declared abstract",
+    "sourceSha256": "739d1b233df4cd937abbe1d3d2dde71c814c7ec839dd3fab6d7393d356f7f061",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7482d8999033252263c308dc2c7a20a6ef11eafef7c2eee807d3be637df825cb"
+  },
+  {
+    "id": "weak/top/inherited_abstract_hooks",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/inherited_abstract_hooks",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (A::$x::get, A::$x::set)",
+    "sourceSha256": "f853fffbaeb328c097e2531f7ea58c62a5830ce40776992e072097b7e2a4546c",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e6a2042657d5aab0c4332675ade338f4db9834191d2be3fa7f09a0bbfa41d96b"
+  },
+  {
+    "id": "strict/top/inherited_abstract_hooks",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/inherited_abstract_hooks",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (A::$x::get, A::$x::set)",
+    "sourceSha256": "1e093a64d1b54e50941d9974afae5501dee97c70b88fef71182b6f30a9026ab5",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "1bb94e07db52b37e9d6775d3ed5b6f8eca2380fa70d607a532a5c5d59ee35c42"
+  },
+  {
+    "id": "weak/deferred/inherited_abstract_hooks",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/weak/deferred/inherited_abstract_hooks",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (A::$x::get, A::$x::set)",
+    "sourceSha256": "7c3386ac165ee91a5b01d8eb31bdcb94fc9a2df1700c386dc645a38931f9d1de",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e13af6f773998b1333e6de13d445de629d7e796e7591f14c9665abeecaf28499"
+  },
+  {
+    "id": "strict/deferred/inherited_abstract_hooks",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/strict/deferred/inherited_abstract_hooks",
+    "nativeExit": 255,
+    "message": "Class C contains 2 abstract methods and must therefore be declared abstract or implement the remaining methods (A::$x::get, A::$x::set)",
+    "sourceSha256": "6b5bb2fdf5f6b23aab8594e18b365c41727b9d9c3c1f463086a07b31da287753",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "3eb03124115828b76df362378bfd927fe32b627d5bc14e768713da4d0b9a7e8e"
+  },
+  {
+    "id": "weak/top/mixed_parent_hook_interface",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/mixed_parent_hook_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, A::$x::get, I::$x::set)",
+    "sourceSha256": "2242f2b14268745752b58dd8a4ab87e8ed380e9a89f28ac016f6cc593bdf3a77",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "71c72456b875ae625563680a5acc388441f1691f4bfc0610a9e057e153e4f5ba"
+  },
+  {
+    "id": "strict/top/mixed_parent_hook_interface",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/mixed_parent_hook_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, A::$x::get, I::$x::set)",
+    "sourceSha256": "566a8d87cabea11a616f2be033acbd745b75397c63b8fc94e2581d9cccc25031",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "dc2fc5d4202b86456d64082c6dac339d22399a753f0f8249567bcc971b266c5d"
+  },
+  {
+    "id": "weak/deferred/mixed_parent_hook_interface",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/weak/deferred/mixed_parent_hook_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, A::$x::get, I::$x::set)",
+    "sourceSha256": "652db896712e0e92b60126c52de7530ac611015e68ef7316d6e6e044c263d0ff",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f4fa40b3cd27a6156463897d9b5b9791275a11847d862489baa4873b6b5b7e51"
+  },
+  {
+    "id": "strict/deferred/mixed_parent_hook_interface",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/strict/deferred/mixed_parent_hook_interface",
+    "nativeExit": 255,
+    "message": "Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, A::$x::get, I::$x::set)",
+    "sourceSha256": "99f10c04d5524606250f85adec3693eda7239773b834cc99e22f38cc4c068e26",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "1606cc9b06364e8ecea0b3851f829cb6e3a0955d1511af1d2afea3da5167ea5e"
+  },
+  {
+    "id": "weak/top/valid_mixed_fulfillment",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/valid_mixed_fulfillment",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "7ad5dba1ab28f302eddb0222fa3f535c4d55bdfce1b1d212653da02f8bd37540",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/valid_mixed_fulfillment",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/valid_mixed_fulfillment",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "fbfa29e34c236816b8051ef939799c2c55a51791bc81e9fd64161e65d36e7951",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/deferred/valid_mixed_fulfillment",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/weak/deferred/valid_mixed_fulfillment",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "b8c5bac9d86a02b5c4a24acd0fad6b5b949433f2d06f4d833efd5e09c6ef81ba",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/deferred/valid_mixed_fulfillment",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/strict/deferred/valid_mixed_fulfillment",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "8c7d5da35074f78196f3049de527db9bbade565079dda841d2df4f29907f6994",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/abstract_mixed_deferral",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/abstract_mixed_deferral",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "d64850d5af78596c49477b6634cb84095933015cb13213b3fcc01725a89e2bbb",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/top/abstract_mixed_deferral",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/abstract_mixed_deferral",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "cd748d514b7adfb2138f9603bae8240f3adc1c0a3511a5eedc744ccbc55f5cfe",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/deferred/abstract_mixed_deferral",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/weak/deferred/abstract_mixed_deferral",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "beb9d9ec057045441fd866ffdb1a64947daf95d55e0b8b6e7de96390c53bed6a",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/deferred/abstract_mixed_deferral",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/strict/deferred/abstract_mixed_deferral",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "64ac219be4e96de344d14ab27eeeb141dd078593a862f916340052b5bfd31a83",
+    "stdoutSha256": "4e07408562bedb8b60ce05c1decfe3ad16b72230967de01f640b7e4729b49fce",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/top/enum_ordinary_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/weak/top/enum_ordinary_missing",
+    "nativeExit": 255,
+    "message": "Enum E must implement 1 abstract method (I::f)",
+    "sourceSha256": "ba0136d9f0bbecfaaf89e4bcb41e7d5329b301d774c940bf58c83d77b1c615c1",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "0c401efee85859f42936318866de207302859c7f6271c3f5b347a8e7cd0624a4"
+  },
+  {
+    "id": "strict/top/enum_ordinary_missing",
+    "phase": "top",
+    "resource": "resources/property_hooks/completion/strict/top/enum_ordinary_missing",
+    "nativeExit": 255,
+    "message": "Enum E must implement 1 abstract method (I::f)",
+    "sourceSha256": "2aab1e274134cd6b03939b459d3908683021a27fdd5bf2728efe42db7bd63d1c",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e2bc1fffccbdc451bc37fa0c04a7446968e5bb6d2ec0820de10a5544164fb6cc"
+  },
+  {
+    "id": "weak/deferred/enum_ordinary_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/weak/deferred/enum_ordinary_missing",
+    "nativeExit": 255,
+    "message": "Enum E must implement 1 abstract method (I::f)",
+    "sourceSha256": "a6ba50a26044e9d5955f06bd312b83ae5434a701439034f1585f293a7f817dd8",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e91bbd7a26ae3b5933d0bb15f14a4c47786f0cfb94a0952e92e8a05592849871"
+  },
+  {
+    "id": "strict/deferred/enum_ordinary_missing",
+    "phase": "deferred",
+    "resource": "resources/property_hooks/completion/strict/deferred/enum_ordinary_missing",
+    "nativeExit": 255,
+    "message": "Enum E must implement 1 abstract method (I::f)",
+    "sourceSha256": "50c3a1f376166805d761b75bb545375180402c2385a43fef19c13288a9444ea3",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "450c5d838fb6c977a5c5115e61ed6167f47e0759c79ff3e0032edda353ad65b5"
+  }
+]

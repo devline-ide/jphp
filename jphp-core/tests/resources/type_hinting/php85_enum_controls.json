@@ -1,0 +1,548 @@
+{
+  "phpSHA256": "d256e5d6bfd86905f336bf39b2f4a68d3fde0faabbce3080330de9600cd8e6c4",
+  "readySHA256": "71c9b1a8486e6f8def900e30e7c190e1f18ff9e8600f4f7bcf43e529bf35a356",
+  "support": "<?php\nfunction emit($label,$value){echo json_encode([$label,$value], JSON_UNESCAPED_UNICODE|JSON_UNESCAPED_SLASHES|JSON_THROW_ON_ERROR),\"\\n\";}\nfunction describe($value){if($value instanceof UnitEnum)return [get_class($value),$value->name,$value instanceof BackedEnum?$value->value:null];if(is_array($value)){$items=[];foreach($value as $key=>$item)$items[$key]=describe($item);return ['array',$items];}return [get_debug_type($value),$value];}\nfunction attempt($label,$f){try{emit($label,['ok',describe($f())]);}catch(Throwable $e){emit($label,['throw',get_class($e),$e->getMessage()]);}}\nset_error_handler(function($severity,$message){emit('diagnostic',[$severity,$message]);return true;});\n",
+  "autoload": "<?php namespace Loaded; enum Mode:string {case One='1';case Two='2';}\n",
+  "cases": [
+    {
+      "id": "unit-identity",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum Direction {case Up;case Down;public const Alias=self::Up;public static function make():static{return self::Down;}}\nenum EmptyEnum {}\n$a=Direction::cases();$b=Direction::cases();$a[0]=Direction::Down;\nemit('identity',[Direction::Up===Direction::Alias,$b[0]===Direction::Up,Direction::make()===Direction::Down,array_keys($b),array_map(fn($x)=>$x->name,$b),EmptyEnum::cases()]);\nemit('types',[Direction::Up instanceof UnitEnum,Direction::Up instanceof BackedEnum,class_exists('direction'),enum_exists('DIRECTION'),interface_exists('Direction'),trait_exists('Direction'),get_class(Direction::Up),Direction::Up::class]);\nemit('compare',[Direction::Up==Direction::Up,Direction::Up==Direction::Down,Direction::Up<Direction::Down,Direction::Up>Direction::Down,Direction::Up<=>Direction::Down]);\n",
+      "negative": false,
+      "stdout": "[\"identity\",[true,true,true,[0,1],[\"Up\",\"Down\"],[]]]\n[\"types\",[true,false,true,true,false,false,\"Direction\",\"Direction\"]]\n[\"compare\",[true,false,false,false,1]]\n",
+      "stderr": "",
+      "inputSHA256": "1c1db0d49b3947dd32ab5d51cfa27dffb2ab1e53cd0bf1b5fb504865ab75d9d0",
+      "stdoutSHA256": "f78a36cbbca47cec37a520dd26a69e8b9fbaad3507b2ca851c1de32609a3b3fe",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "backed-values",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum Number:int {case Minus=-7;case Zero=0;case One=1;case Big=PHP_INT_MAX;}\nenum Text:string {case Numeric='1';case Leading='01';case Utf8='Рус中';case Binary=\"a\\0b\";case Empty='';}\nforeach([Number::Minus,Number::Big,Text::Numeric,Text::Leading,Text::Utf8,Text::Binary,Text::Empty] as $e)emit('backed',describe($e));\nemit('lookups',[Number::from(-7)===Number::Minus,Text::from('01')===Text::Leading,Text::tryFrom('missing')]);\nattempt('missing-int',fn()=>Number::from(2));attempt('missing-string',fn()=>Text::from('missing'));\n",
+      "negative": false,
+      "stdout": "[\"backed\",[\"Number\",\"Minus\",-7]]\n[\"backed\",[\"Number\",\"Big\",9223372036854775807]]\n[\"backed\",[\"Text\",\"Numeric\",\"1\"]]\n[\"backed\",[\"Text\",\"Leading\",\"01\"]]\n[\"backed\",[\"Text\",\"Utf8\",\"Рус中\"]]\n[\"backed\",[\"Text\",\"Binary\",\"a\\u0000b\"]]\n[\"backed\",[\"Text\",\"Empty\",\"\"]]\n[\"lookups\",[true,true,null]]\n[\"missing-int\",[\"throw\",\"ValueError\",\"2 is not a valid backing value for enum Number\"]]\n[\"missing-string\",[\"throw\",\"ValueError\",\"\\\"missing\\\" is not a valid backing value for enum Text\"]]\n",
+      "stderr": "",
+      "inputSHA256": "6d8b1c7ae2b1fb1b54ec4f24187b9dea544489fc6299d2822fec6d77006e7809",
+      "stdoutSHA256": "9dda9a3655ca080c7fa4be4dbca25b034509cbfe819291a9b1a41f50cc699be0",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "coercion-weak",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum I:int {case Zero=0;case One=1;case Two=2;} enum S:string {case Empty='';case One='1';case Two='2';}\nclass StringArg {public function __toString():string {emit('stringable-callback','called');return '1';}}\n$values=[0,1,'1','01','1.0','bad',1.0,1.5,true,false,null,[],new stdClass(),new StringArg()];\nforeach($values as $index=>$value)foreach(['from','tryFrom'] as $method){attempt(\"I:$index:$method\",fn()=>I::$method($value));attempt(\"S:$index:$method\",fn()=>S::$method($value));}\nattempt('named',fn()=>I::from(value:1));attempt('wrong-name',fn()=>I::from(nope:1));attempt('missing-argument',fn()=>I::from());attempt('extra-argument',fn()=>I::from(1,2));\n",
+      "negative": false,
+      "stdout": "[\"I:0:from\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"S:0:from\",[\"throw\",\"ValueError\",\"\\\"0\\\" is not a valid backing value for enum S\"]]\n[\"I:0:tryFrom\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"S:0:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:1:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:1:from\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:1:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:1:tryFrom\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:2:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:2:from\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:2:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:2:tryFrom\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:3:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:3:from\",[\"throw\",\"ValueError\",\"\\\"01\\\" is not a valid backing value for enum S\"]]\n[\"I:3:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:3:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:4:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:4:from\",[\"throw\",\"ValueError\",\"\\\"1.0\\\" is not a valid backing value for enum S\"]]\n[\"I:4:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:4:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:5:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:5:from\",[\"throw\",\"ValueError\",\"\\\"bad\\\" is not a valid backing value for enum S\"]]\n[\"I:5:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:5:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:6:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:6:from\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:6:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:6:tryFrom\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"diagnostic\",[8192,\"Implicit conversion from float 1.5 to int loses precision\"]]\n[\"I:7:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"diagnostic\",[8192,\"Implicit conversion from float 1.5 to int loses precision\"]]\n[\"S:7:from\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"diagnostic\",[8192,\"Implicit conversion from float 1.5 to int loses precision\"]]\n[\"I:7:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"diagnostic\",[8192,\"Implicit conversion from float 1.5 to int loses precision\"]]\n[\"S:7:tryFrom\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:8:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:8:from\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:8:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:8:tryFrom\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:9:from\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"S:9:from\",[\"throw\",\"ValueError\",\"\\\"0\\\" is not a valid backing value for enum S\"]]\n[\"I:9:tryFrom\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"S:9:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"diagnostic\",[8192,\"I::from(): Passing null to parameter #1 ($value) of type string|int is deprecated\"]]\n[\"I:10:from\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"diagnostic\",[8192,\"S::from(): Passing null to parameter #1 ($value) of type string|int is deprecated\"]]\n[\"S:10:from\",[\"throw\",\"ValueError\",\"\\\"0\\\" is not a valid backing value for enum S\"]]\n[\"diagnostic\",[8192,\"I::tryFrom(): Passing null to parameter #1 ($value) of type string|int is deprecated\"]]\n[\"I:10:tryFrom\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"diagnostic\",[8192,\"S::tryFrom(): Passing null to parameter #1 ($value) of type string|int is deprecated\"]]\n[\"S:10:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:11:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, array given\"]]\n[\"S:11:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string|int, array given\"]]\n[\"I:11:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, array given\"]]\n[\"S:11:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string|int, array given\"]]\n[\"I:12:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, stdClass given\"]]\n[\"S:12:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string|int, stdClass given\"]]\n[\"I:12:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, stdClass given\"]]\n[\"S:12:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string|int, stdClass given\"]]\n[\"I:13:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, StringArg given\"]]\n[\"stringable-callback\",\"called\"]\n[\"S:13:from\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:13:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, StringArg given\"]]\n[\"stringable-callback\",\"called\"]\n[\"S:13:tryFrom\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"named\",[\"ok\",[\"I\",\"One\",1]]]\n[\"wrong-name\",[\"throw\",\"Error\",\"Unknown named parameter $nope\"]]\n[\"missing-argument\",[\"throw\",\"ArgumentCountError\",\"I::from() expects exactly 1 argument, 0 given\"]]\n[\"extra-argument\",[\"throw\",\"ArgumentCountError\",\"I::from() expects exactly 1 argument, 2 given\"]]\n",
+      "stderr": "",
+      "inputSHA256": "68f0380f1e3e9410b6af610b413606a005f1c1d543ba6677c5efb53a281cb999",
+      "stdoutSHA256": "f46b9df45c9c35eb690706fa0edc2abd34b649a89e6af64aa0df475858bc5e7a",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "coercion-strict",
+      "code": "<?php\ndeclare(strict_types=1);\nrequire __DIR__.'/_support.php';\nenum I:int {case Zero=0;case One=1;case Two=2;} enum S:string {case Empty='';case One='1';case Two='2';}\nclass StringArg {public function __toString():string {emit('stringable-callback','called');return '1';}}\n$values=[0,1,'1','01','1.0','bad',1.0,1.5,true,false,null,[],new stdClass(),new StringArg()];\nforeach($values as $index=>$value)foreach(['from','tryFrom'] as $method){attempt(\"I:$index:$method\",fn()=>I::$method($value));attempt(\"S:$index:$method\",fn()=>S::$method($value));}\nattempt('named',fn()=>I::from(value:1));attempt('wrong-name',fn()=>I::from(nope:1));attempt('missing-argument',fn()=>I::from());attempt('extra-argument',fn()=>I::from(1,2));\n",
+      "negative": false,
+      "stdout": "[\"I:0:from\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"S:0:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, int given\"]]\n[\"I:0:tryFrom\",[\"ok\",[\"I\",\"Zero\",0]]]\n[\"S:0:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, int given\"]]\n[\"I:1:from\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:1:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, int given\"]]\n[\"I:1:tryFrom\",[\"ok\",[\"I\",\"One\",1]]]\n[\"S:1:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, int given\"]]\n[\"I:2:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:2:from\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:2:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:2:tryFrom\",[\"ok\",[\"S\",\"One\",\"1\"]]]\n[\"I:3:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:3:from\",[\"throw\",\"ValueError\",\"\\\"01\\\" is not a valid backing value for enum S\"]]\n[\"I:3:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:3:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:4:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:4:from\",[\"throw\",\"ValueError\",\"\\\"1.0\\\" is not a valid backing value for enum S\"]]\n[\"I:4:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:4:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:5:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:5:from\",[\"throw\",\"ValueError\",\"\\\"bad\\\" is not a valid backing value for enum S\"]]\n[\"I:5:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, string given\"]]\n[\"S:5:tryFrom\",[\"ok\",[\"null\",null]]]\n[\"I:6:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, float given\"]]\n[\"S:6:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, float given\"]]\n[\"I:6:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, float given\"]]\n[\"S:6:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, float given\"]]\n[\"I:7:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, float given\"]]\n[\"S:7:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, float given\"]]\n[\"I:7:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, float given\"]]\n[\"S:7:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, float given\"]]\n[\"I:8:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, true given\"]]\n[\"S:8:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, true given\"]]\n[\"I:8:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, true given\"]]\n[\"S:8:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, true given\"]]\n[\"I:9:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, false given\"]]\n[\"S:9:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, false given\"]]\n[\"I:9:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, false given\"]]\n[\"S:9:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, false given\"]]\n[\"I:10:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, null given\"]]\n[\"S:10:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, null given\"]]\n[\"I:10:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, null given\"]]\n[\"S:10:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, null given\"]]\n[\"I:11:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, array given\"]]\n[\"S:11:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, array given\"]]\n[\"I:11:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, array given\"]]\n[\"S:11:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, array given\"]]\n[\"I:12:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, stdClass given\"]]\n[\"S:12:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, stdClass given\"]]\n[\"I:12:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, stdClass given\"]]\n[\"S:12:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, stdClass given\"]]\n[\"I:13:from\",[\"throw\",\"TypeError\",\"I::from(): Argument #1 ($value) must be of type int, StringArg given\"]]\n[\"S:13:from\",[\"throw\",\"TypeError\",\"S::from(): Argument #1 ($value) must be of type string, StringArg given\"]]\n[\"I:13:tryFrom\",[\"throw\",\"TypeError\",\"I::tryFrom(): Argument #1 ($value) must be of type int, StringArg given\"]]\n[\"S:13:tryFrom\",[\"throw\",\"TypeError\",\"S::tryFrom(): Argument #1 ($value) must be of type string, StringArg given\"]]\n[\"named\",[\"ok\",[\"I\",\"One\",1]]]\n[\"wrong-name\",[\"throw\",\"Error\",\"Unknown named parameter $nope\"]]\n[\"missing-argument\",[\"throw\",\"ArgumentCountError\",\"I::from() expects exactly 1 argument, 0 given\"]]\n[\"extra-argument\",[\"throw\",\"ArgumentCountError\",\"I::from() expects exactly 1 argument, 2 given\"]]\n",
+      "stderr": "",
+      "inputSHA256": "51b772dd6ff563dfb4b46755c028995b9efb86dbdeb5d10e178efb28a13ff853",
+      "stdoutSHA256": "46ce6b2b337ec0a17aa418f7b80c7482cb945fd8c4c6b18727c1209c39b47ee8",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "dispatch",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum Flag:int {case Off=0;case On=1;}\n$f=[Flag::class,'from'];emit('variable',$f(1)===Flag::On);emit('cuf',call_user_func($f,1)===Flag::On);emit('cufa',call_user_func_array($f,['value'=>1])===Flag::On);\n$m=new ReflectionMethod(Flag::class,'from');emit('reflection',$m->invoke(null,1)===Flag::On);emit('method-meta',[$m->isStatic(),$m->isPublic(),(string)$m->getReturnType(),(string)$m->getParameters()[0]->getType(),$m->getParameters()[0]->getName()]);\n",
+      "negative": false,
+      "stdout": "[\"variable\",true]\n[\"cuf\",true]\n[\"cufa\",true]\n[\"reflection\",true]\n[\"method-meta\",[true,true,\"static\",\"string|int\",\"value\"]]\n",
+      "stderr": "",
+      "inputSHA256": "4880c05604024c7e68cf1e115098fa5b84ad6d3ba3417e0d9b346b7480f0b28f",
+      "stdoutSHA256": "7eacf27e067a81b489efab50976599eacefae7ee458d9ac56ce8e2a6c21f4f9e",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "dispatch-strict",
+      "code": "<?php\ndeclare(strict_types=1);\nrequire __DIR__.'/_support.php';\nenum Flag:int {case Off=0;case On=1;}\n$f=[Flag::class,'from'];emit('variable',$f(1)===Flag::On);emit('cuf',call_user_func($f,1)===Flag::On);emit('cufa',call_user_func_array($f,['value'=>1])===Flag::On);\n$m=new ReflectionMethod(Flag::class,'from');emit('reflection',$m->invoke(null,1)===Flag::On);emit('method-meta',[$m->isStatic(),$m->isPublic(),(string)$m->getReturnType(),(string)$m->getParameters()[0]->getType(),$m->getParameters()[0]->getName()]);\nforeach([1,'1',true,1.5] as $index=>$value){attempt('variable:'.$index,fn()=>$f($value));attempt('cuf:'.$index,fn()=>call_user_func($f,$value));attempt('cufa:'.$index,fn()=>call_user_func_array($f,[$value]));attempt('reflection:'.$index,fn()=>$m->invoke(null,$value));}\n",
+      "negative": false,
+      "stdout": "[\"variable\",true]\n[\"cuf\",true]\n[\"cufa\",true]\n[\"reflection\",true]\n[\"method-meta\",[true,true,\"static\",\"string|int\",\"value\"]]\n[\"variable:0\",[\"ok\",[\"Flag\",\"On\",1]]]\n[\"cuf:0\",[\"ok\",[\"Flag\",\"On\",1]]]\n[\"cufa:0\",[\"ok\",[\"Flag\",\"On\",1]]]\n[\"reflection:0\",[\"ok\",[\"Flag\",\"On\",1]]]\n[\"variable:1\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"cuf:1\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"cufa:1\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, string given\"]]\n[\"reflection:1\",[\"ok\",[\"Flag\",\"On\",1]]]\n[\"variable:2\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, true given\"]]\n[\"cuf:2\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, true given\"]]\n[\"cufa:2\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, true given\"]]\n[\"reflection:2\",[\"ok\",[\"Flag\",\"On\",1]]]\n[\"variable:3\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, float given\"]]\n[\"cuf:3\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, float given\"]]\n[\"cufa:3\",[\"throw\",\"TypeError\",\"Flag::from(): Argument #1 ($value) must be of type int, float given\"]]\n[\"diagnostic\",[8192,\"Implicit conversion from float 1.5 to int loses precision\"]]\n[\"reflection:3\",[\"ok\",[\"Flag\",\"On\",1]]]\n",
+      "stderr": "",
+      "inputSHA256": "59dcdb4ac725ede52e7da8b701306f01762d42a0ea97d79429b6159b60ca4ac6",
+      "stdoutSHA256": "0d47b976a1d657d9763647b413f070b4fe17c9ef588f9423585c01622ec8ff04",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "alias-weak-lifetime",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum Original {case A;}class_alias(Original::class,'AliasEnum');$e=AliasEnum::A;$weak=WeakReference::create($e);unset($e);emit('alias',[enum_exists('AliasEnum'),class_exists('AliasEnum'),AliasEnum::A===Original::A,$weak->get()===Original::A,(new ReflectionEnum('AliasEnum'))->getName()]);\n",
+      "negative": false,
+      "stdout": "[\"alias\",[true,true,true,true,\"Original\"]]\n",
+      "stderr": "",
+      "inputSHA256": "848b74d333f0b65175c5d0070da7259a7dbbc6fc73d6823c208163e23e83941e",
+      "stdoutSHA256": "6be598366974db1ed9e41cb3d002fdce5669c14bd8df540cdf4f25c2894dc56b",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "unicode-names-wire",
+      "code": "<?php\nnamespace CasesUnicode;function out($key,$value){echo json_encode([$key,$value],JSON_UNESCAPED_UNICODE|JSON_THROW_ON_ERROR),\"\\n\";}enum Рус {case Да;}out('unicode-wire',serialize(Рус::Да));out('unicode-identity',unserialize(serialize(Рус::Да))===Рус::Да);\n",
+      "negative": false,
+      "stdout": "[\"unicode-wire\",\"E:24:\\\"CasesUnicode\\\\Рус:Да\\\";\"]\n[\"unicode-identity\",true]\n",
+      "stderr": "",
+      "inputSHA256": "d9f6bf7a2d3ac0ee0a93d742acdf74c50fe93dfc3973db6c8a2bbc93871f711f",
+      "stdoutSHA256": "8723a4b850d069ad47b96415c27b35abfc80eba13870990a66d3158278838300",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "methods-traits-types",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\ninterface Named {public function label():string;}\ntrait Labels {public const VERSION=3;public function label():string{return $this->name;}private function privateLabel():string{return 'p';}}\nenum Letter implements Named {use Labels;case A;case B;public function __invoke():string{return $this->label();}public function __call($name,$args){return $name;}public static function __callStatic($name,$args){return $name;}public static function from($value):self{return self::B;}}\nfunction named(Named&UnitEnum $x):Letter{return $x;}function typed(Letter|string|null $x):Letter|string|null{return $x;}\nemit('methods',[Letter::A->label(),(Letter::A)(),Letter::A->unknown(),Letter::unknown(),Letter::VERSION,Letter::from(0)===Letter::B,named(Letter::A)===Letter::A,typed(Letter::A)===Letter::A]);\nattempt('scalar-is-not-case',fn()=>named('A'));\n",
+      "negative": false,
+      "stdout": "[\"methods\",[\"A\",\"A\",\"unknown\",\"unknown\",3,true,true,true]]\n[\"scalar-is-not-case\",[\"throw\",\"TypeError\",\"named(): Argument #1 ($x) must be of type Named&UnitEnum, string given, called in G:\\\\DevLine-QA\\\\jphp-enums-20261013\\\\revision2\\\\native\\\\methods-traits-types.php on line 8\"]]\n",
+      "stderr": "",
+      "inputSHA256": "56a1bede011e8576b047b9f68bcf56d4c01a26793c2a9d7d7d6c4fbc37598dbd",
+      "stdoutSHA256": "7ed190fd51ed3d5dc3da1acff3d167d218fcc3c2234f7a47cfbf50a3f23119e9",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "defaults-constants",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nconst BACK=20;\nenum Code:int {case A=BACK+1;case B=22;public const Alias=self::A;public const Foreign=Other::X;}\nenum Other {case X;}\nconst ROOT_CASE=Code::A;\nclass Holder {public Code $value=Code::A;public const CASE_VALUE=Code::B;public const NAME=Code::A->name;public const BACKING=Code::A->value;}\nfunction defaultCase(Code $value=Code::A):Code{static $saved=Code::B;emit('static',$saved===Code::B);return $value;}\nemit('defaults',[ROOT_CASE===Code::A,(new Holder())->value===Code::A,Holder::CASE_VALUE===Code::B,defaultCase()===Code::A,Holder::NAME,Holder::BACKING,Code::Foreign===Other::X]);\n",
+      "negative": false,
+      "stdout": "[\"static\",true]\n[\"defaults\",[true,true,true,true,\"A\",21,true]]\n",
+      "stderr": "",
+      "inputSHA256": "34be48044fff36d96c9099a18fbd4e21e5c59dda3f427581e81655fc6747d30a",
+      "stdoutSHA256": "2fa59cfbdc54c8e4dd27038fc395a98312f5dae0e5dc656384360038c97a7625",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "duplicate-initialization",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum Duplicate:int {case A=1;case B=1;}\nemit('declared',true);attempt('cases',fn()=>Duplicate::cases());attempt('direct',fn()=>Duplicate::A);attempt('from',fn()=>Duplicate::from(1));attempt('retry',fn()=>Duplicate::from(1));\nenum Good:int {case A=1;}emit('unrelated',Good::from(1)===Good::A);\n",
+      "negative": false,
+      "stdout": "[\"declared\",true]\n[\"cases\",[\"ok\",[\"array\",[[\"Duplicate\",\"A\",1],[\"Duplicate\",\"B\",1]]]]]\n[\"direct\",[\"throw\",\"Error\",\"Duplicate value in enum Duplicate for cases A and B\"]]\n[\"from\",[\"throw\",\"Error\",\"Duplicate value in enum Duplicate for cases A and B\"]]\n[\"retry\",[\"throw\",\"Error\",\"Duplicate value in enum Duplicate for cases A and B\"]]\n[\"unrelated\",true]\n",
+      "stderr": "",
+      "inputSHA256": "e58cd247db1b7f9d0073814ecea940ba2bd4dc301c5fa7bb447a4936c14fec9b",
+      "stdoutSHA256": "19d6a3d13192d1554060740c4a29d519cc0d69f494e7b5f11a5c5b7ddb3a9feb",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "wrong-backing-initialization",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum Wrong:int {case A='1';}\nemit('declared',true);attempt('direct',fn()=>Wrong::A);attempt('cases',fn()=>Wrong::cases());attempt('from',fn()=>Wrong::from(1));\n",
+      "negative": false,
+      "stdout": "[\"declared\",true]\n[\"direct\",[\"throw\",\"TypeError\",\"Enum case type string does not match enum backing type int\"]]\n[\"cases\",[\"ok\",[\"array\",[[\"Wrong\",\"A\",\"1\"]]]]]\n[\"from\",[\"throw\",\"TypeError\",\"Enum case type string does not match enum backing type int\"]]\n",
+      "stderr": "",
+      "inputSHA256": "21639bbe6a0e1c7b723d666adbe8bd2d4c6dcd20c62e28434426ca0a0a2a9d67",
+      "stdoutSHA256": "335c98c82fc686e361b0e92170cdb01899f42c09c0112036e85c1a505cf48b46",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "properties-factories",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum E:int {case A=1;}\n$e=E::A;emit('fields',[get_object_vars($e),(array)$e,isset($e->name),isset($e->value),isset($e->missing)]);\nattempt('write-name',function()use($e){$e->name='other';return $e;});attempt('write-value',function()use($e){$e->value=2;return $e;});attempt('reference-name',function()use($e){$x=&$e->name;return $x;});attempt('unset',function()use($e){unset($e->name);return $e;});attempt('dynamic',function()use($e){$e->extra=3;return $e;});\nattempt('new',fn()=>new E());attempt('clone',fn()=>clone $e);$r=new ReflectionClass(E::class);attempt('reflection-new',fn()=>$r->newInstance());attempt('reflection-without',fn()=>$r->newInstanceWithoutConstructor());\n$p=$r->getProperty('value');attempt('reflection-write',function()use($p,$e){$p->setValue($e,2);return $e;});emit('preserved',$e===E::A && $e->name==='A' && $e->value===1);\n",
+      "negative": false,
+      "stdout": "[\"fields\",[{\"name\":\"A\",\"value\":1},{\"name\":\"A\",\"value\":1},true,true,false]]\n[\"write-name\",[\"throw\",\"Error\",\"Cannot modify readonly property E::$name\"]]\n[\"write-value\",[\"throw\",\"Error\",\"Cannot modify readonly property E::$value\"]]\n[\"reference-name\",[\"throw\",\"Error\",\"Cannot indirectly modify readonly property E::$name\"]]\n[\"unset\",[\"throw\",\"Error\",\"Cannot unset readonly property E::$name\"]]\n[\"dynamic\",[\"throw\",\"Error\",\"Cannot create dynamic property E::$extra\"]]\n[\"new\",[\"throw\",\"Error\",\"Cannot instantiate enum E\"]]\n[\"clone\",[\"throw\",\"Error\",\"Trying to clone an uncloneable object of class E\"]]\n[\"reflection-new\",[\"throw\",\"Error\",\"Cannot instantiate enum E\"]]\n[\"reflection-without\",[\"throw\",\"Error\",\"Cannot instantiate enum E\"]]\n[\"reflection-write\",[\"throw\",\"Error\",\"Cannot modify readonly property E::$value\"]]\n[\"preserved\",true]\n",
+      "stderr": "",
+      "inputSHA256": "6b352028f59fc3b55c9f6bba63b0df60b1c24a151cf87f261f6c175399d991b6",
+      "stdoutSHA256": "4d816a333d479b0f819c46c11c3df28ce1a35a6c713a50f1d0b5d8b1d1aa46ec",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "reflection",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum U {case X;case Y;public const Alias=self::X;}enum B:string {case X='x';}\nforeach([U::class,U::X,B::class,B::X] as $input){$r=new ReflectionEnum($input);emit('enum',[$r->getName(),$r->isEnum(),$r->isBacked(),$r->getBackingType()?(string)$r->getBackingType():null,$r->isFinal(),$r->isReadOnly(),$r->isInstantiable(),$r->isCloneable(),$r->hasCase('X'),$r->hasCase('Alias')]);foreach($r->getCases() as $c)emit('case',[get_class($c),$c->getName(),$c->isEnumCase(),$c->getEnum()->getName(),$c->getValue()===$r->getCase($c->getName())->getValue(),$c instanceof ReflectionEnumBackedCase?$c->getBackingValue():null]);}\n$c=new ReflectionClassConstant(U::class,'Alias');emit('alias-meta',[$c->isEnumCase(),$c->getValue()===U::X]);\nattempt('ordinary-class',fn()=>new ReflectionEnum(stdClass::class));attempt('ordinary-constant',fn()=>new ReflectionEnumUnitCase(U::class,'Alias'));attempt('unit-as-backed',fn()=>new ReflectionEnumBackedCase(U::class,'X'));attempt('missing-case',fn()=>(new ReflectionEnum(U::class))->getCase('x'));\n",
+      "negative": false,
+      "stdout": "[\"enum\",[\"U\",true,false,null,true,false,false,false,true,false]]\n[\"case\",[\"ReflectionEnumUnitCase\",\"X\",true,\"U\",true,null]]\n[\"case\",[\"ReflectionEnumUnitCase\",\"Y\",true,\"U\",true,null]]\n[\"enum\",[\"U\",true,false,null,true,false,false,false,true,false]]\n[\"case\",[\"ReflectionEnumUnitCase\",\"X\",true,\"U\",true,null]]\n[\"case\",[\"ReflectionEnumUnitCase\",\"Y\",true,\"U\",true,null]]\n[\"enum\",[\"B\",true,true,\"string\",true,false,false,false,true,false]]\n[\"case\",[\"ReflectionEnumBackedCase\",\"X\",true,\"B\",true,\"x\"]]\n[\"enum\",[\"B\",true,true,\"string\",true,false,false,false,true,false]]\n[\"case\",[\"ReflectionEnumBackedCase\",\"X\",true,\"B\",true,\"x\"]]\n[\"alias-meta\",[false,true]]\n[\"ordinary-class\",[\"throw\",\"ReflectionException\",\"Class \\\"stdClass\\\" is not an enum\"]]\n[\"ordinary-constant\",[\"throw\",\"ReflectionException\",\"Constant U::Alias is not a case\"]]\n[\"unit-as-backed\",[\"throw\",\"ReflectionException\",\"Enum case U::X is not a backed case\"]]\n[\"missing-case\",[\"throw\",\"ReflectionException\",\"Case U::x does not exist\"]]\n",
+      "stderr": "",
+      "inputSHA256": "ed7bbf9bb39ead6cc03fc501b9d598edc3e0092c370f1c559999c0b2da147171",
+      "stdoutSHA256": "ba7901bf70fcc4d265edd4f5987b051423b76951fb22aeffc310d421a2fef8f9",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "serialization",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum U {case A;}enum B:string {case A='a';}\nforeach([U::A,B::A] as $case){$wire=serialize($case);emit('wire',$wire);emit('identity',unserialize($wire)===$case);emit('allowed',unserialize($wire,['allowed_classes'=>false])===$case);$a=[$case,$case];$a[]=&$a[0];$copy=unserialize(serialize($a));emit('array-wire',serialize($a));emit('array-identity',[$copy[0]===$case,$copy[1]===$case,$copy[2]===$case]);}\nforeach(['E:3:\"U:B\";','E:9:\"Missing:A\";','E:3:\"U:A\"','E:2:\"U:A\";','O:1:\"U\":0:{}','C:1:\"U\":0:{}'] as $wire)attempt('invalid:'.$wire,fn()=>unserialize($wire));\n",
+      "negative": false,
+      "stdout": "[\"wire\",\"E:3:\\\"U:A\\\";\"]\n[\"identity\",true]\n[\"allowed\",true]\n[\"array-wire\",\"a:3:{i:0;E:3:\\\"U:A\\\";i:1;r:2;i:2;R:2;}\"]\n[\"array-identity\",[true,true,true]]\n[\"wire\",\"E:3:\\\"B:A\\\";\"]\n[\"identity\",true]\n[\"allowed\",true]\n[\"array-wire\",\"a:3:{i:0;E:3:\\\"B:A\\\";i:1;r:2;i:2;R:2;}\"]\n[\"array-identity\",[true,true,true]]\n[\"diagnostic\",[2,\"unserialize(): Undefined constant U::B\"]]\n[\"diagnostic\",[2,\"unserialize(): Error at offset 10 of 10 bytes\"]]\n[\"invalid:E:3:\\\"U:B\\\";\",[\"ok\",[\"bool\",false]]]\n[\"diagnostic\",[2,\"unserialize(): Class 'Missing' not found\"]]\n[\"diagnostic\",[2,\"unserialize(): Error at offset 0 of 16 bytes\"]]\n[\"invalid:E:9:\\\"Missing:A\\\";\",[\"ok\",[\"bool\",false]]]\n[\"diagnostic\",[2,\"unserialize(): Error at offset 9 of 9 bytes\"]]\n[\"invalid:E:3:\\\"U:A\\\"\",[\"ok\",[\"bool\",false]]]\n[\"diagnostic\",[2,\"unserialize(): Error at offset 7 of 10 bytes\"]]\n[\"invalid:E:2:\\\"U:A\\\";\",[\"ok\",[\"bool\",false]]]\n[\"invalid:O:1:\\\"U\\\":0:{}\",[\"throw\",\"Error\",\"Cannot instantiate enum U\"]]\n[\"diagnostic\",[2,\"Class U has no unserializer\"]]\n[\"invalid:C:1:\\\"U\\\":0:{}\",[\"throw\",\"Error\",\"Cannot instantiate enum U\"]]\n",
+      "stderr": "",
+      "inputSHA256": "a147e2e1b481ab3a265137aaacc93892783025040fbda4acc943349cf3151aa8",
+      "stdoutSHA256": "5be67c1f49a1486fed2910dd8f1c2d8eb8184a55d7b0811e6125629ac79554f3",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "json-formatting",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum U {case A;}enum I:int {case A=1;}enum S:string {case A='a';}enum Custom implements JsonSerializable {case A;public function jsonSerialize():mixed{return ['custom'=>$this->name];}}\nforeach([U::A,I::A,S::A,Custom::A] as $e){echo 'DUMP:';var_dump($e);echo 'PRINT:';print_r($e);echo 'EXPORT:';var_export($e);echo \"\\n\";attempt('json',fn()=>json_encode($e,JSON_THROW_ON_ERROR));emit('partial',json_encode([$e],JSON_PARTIAL_OUTPUT_ON_ERROR));}\nattempt('string',fn()=>(string)S::A);attempt('array-key',function(){return [I::A=>1];});\n",
+      "negative": false,
+      "stdout": "DUMP:enum(U::A)\nPRINT:U Enum\n(\n    [name] => A\n)\nEXPORT:\\U::A\n[\"json\",[\"throw\",\"JsonException\",\"Non-backed enums have no default serialization\"]]\n[\"partial\",\"[0]\"]\nDUMP:enum(I::A)\nPRINT:I Enum:int\n(\n    [name] => A\n    [value] => 1\n)\nEXPORT:\\I::A\n[\"json\",[\"ok\",[\"string\",\"1\"]]]\n[\"partial\",\"[1]\"]\nDUMP:enum(S::A)\nPRINT:S Enum:string\n(\n    [name] => A\n    [value] => a\n)\nEXPORT:\\S::A\n[\"json\",[\"ok\",[\"string\",\"\\\"a\\\"\"]]]\n[\"partial\",\"[\\\"a\\\"]\"]\nDUMP:enum(Custom::A)\nPRINT:Custom Enum\n(\n    [name] => A\n)\nEXPORT:\\Custom::A\n[\"json\",[\"ok\",[\"string\",\"{\\\"custom\\\":\\\"A\\\"}\"]]]\n[\"partial\",\"[{\\\"custom\\\":\\\"A\\\"}]\"]\n[\"string\",[\"throw\",\"Error\",\"Object of class S could not be converted to string\"]]\n[\"array-key\",[\"throw\",\"TypeError\",\"Cannot access offset of type I on array\"]]\n",
+      "stderr": "",
+      "inputSHA256": "e0a0ca503968c4261d233051fc20e7159e5daf2ac21f788631c61879061b1824",
+      "stdoutSHA256": "eb41e9389039f25d1ceb59dd0487427ddb25a18a220f60dab2e5a108be8c660b",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "autoload-include",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\n$calls=[];spl_autoload_register(function($name)use(&$calls){$calls[]=$name;if(strcasecmp($name,'Loaded\\\\Mode')===0)require __DIR__.'/loaded-enum.php';});\nemit('before',[enum_exists('Loaded\\\\Mode',false),class_exists('Loaded\\\\Mode',false),$calls]);emit('load',enum_exists('loaded\\\\mode'));$case=Loaded\\Mode::One;require_once __DIR__.'/loaded-enum.php';\nemit('after',[$calls,constant('Loaded\\\\Mode::One')===$case,unserialize(serialize($case))===$case,class_exists('Loaded\\\\Mode'),enum_exists('Loaded\\\\Mode'),Loaded\\Mode::from('1')===$case]);\n",
+      "negative": false,
+      "stdout": "[\"before\",[false,false,[]]]\n[\"load\",true]\n[\"after\",[[\"loaded\\\\mode\"],true,true,true,true,true]]\n",
+      "stderr": "",
+      "inputSHA256": "14ab8ff799a27fb47f3941830c674d3d5ee15ceee8a37b34aa8679ec099f3ee1",
+      "stdoutSHA256": "781392803b8c0d4f18e8d4884b26871fd23462560eb59c02d45a5547233a671b",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "attributes",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\n#[Attribute(Attribute::TARGET_CLASS|Attribute::TARGET_CLASS_CONSTANT|Attribute::IS_REPEATABLE)] class Tag {public function __construct(public string $label,public mixed $case=null){}}\n#[Tag('enum')] enum E {#[Tag('first')] #[Tag(label:'second')] case A;#[Tag('constant')] public const Alias=self::A;}\n#[Tag('uses-case',E::A)] class Host {}\nforeach([(new ReflectionEnum(E::class)),(new ReflectionEnumUnitCase(E::class,'A')),(new ReflectionClassConstant(E::class,'Alias')),(new ReflectionClass(Host::class))] as $r)foreach($r->getAttributes() as $a){$x=$a->newInstance();emit('attribute',[$a->getName(),$a->getTarget(),$a->isRepeated(),$x->label,$x->case===E::A]);}\n",
+      "negative": false,
+      "stdout": "[\"attribute\",[\"Tag\",1,false,\"enum\",false]]\n[\"attribute\",[\"Tag\",16,true,\"first\",false]]\n[\"attribute\",[\"Tag\",16,true,\"second\",false]]\n[\"attribute\",[\"Tag\",16,false,\"constant\",false]]\n[\"attribute\",[\"Tag\",1,false,\"uses-case\",true]]\n",
+      "stderr": "",
+      "inputSHA256": "c41b90fdb45f3f1c6f96d134900fc684a9da50edc2f8ab0ed5af0489d947251e",
+      "stdoutSHA256": "0deaf65a14ff871022d325496e5e5c25f1515b855723a685ba1f7c6ceba0879d",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "keyword-identifiers",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nclass enum {public function enum():string{return 'method';}}function enum():string{return 'function';}const enum='constant';\nemit('contextual',[(new enum())->enum(),enum(),constant('enum')]);\n",
+      "negative": false,
+      "stdout": "[\"contextual\",[\"method\",\"function\",\"constant\"]]\n",
+      "stderr": "",
+      "inputSHA256": "1ce37b3fd7d7a3ecf73852f55205b3d5f072be73fe7cc945e9f3c470383dd103",
+      "stdoutSHA256": "79f50b035d585c3b4a19e361fdc5a08ba3855415eeee05b5d0cca9238c2239ee",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "enum-comments",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum /* between keyword and name */ E {case A;}emit('comment',E::A->name);\n",
+      "negative": false,
+      "stdout": "[\"comment\",\"A\"]\n",
+      "stderr": "",
+      "inputSHA256": "9858809ca8b5669d7fd1d53432b7699a8cc679315006f94513cb61cd28345dc3",
+      "stdoutSHA256": "aae274ff6c724cb2b59d403cead192d9c2d7bb55e5e3781a9c22cae94cd0330f",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "cycles-constant-init",
+      "code": "<?php\nrequire __DIR__.'/_support.php';\nenum A:int {case X=B::Y->value;}enum B:int {case Y=A::X->value;}\nemit('declared',true);attempt('cycle',fn()=>A::X);\n",
+      "negative": false,
+      "stdout": "[\"declared\",true]\n[\"cycle\",[\"throw\",\"Error\",\"Cannot declare self-referencing constant B::Y\"]]\n",
+      "stderr": "",
+      "inputSHA256": "bfc69a3903a62257180c9e9ddbe35a0a68c30d65e03746dc0b424d25de7230d5",
+      "stdoutSHA256": "752582f959899008fbb0c33c0b373b6fb2322f1dc2cfdef96bd91919452e98a3",
+      "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "id": "reject-backing-float",
+      "code": "<?php\nenum E:float {case A=1;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum backing type must be int or string, float given in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-backing-float.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "f2e4c2b48f8a68c2154095a063c2a138ce9584b9df8f84d6a4c59c1dfc8e6ff8",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "54280f422cf59626f36d9da984142a12ee73967c35ec700578e6849191a9f49b"
+    },
+    {
+      "id": "reject-backing-union",
+      "code": "<?php\nenum E:int|string {case A=1;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum backing type must be int or string, string|int given in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-backing-union.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "962c29a8b8e0d7209802a10c69214399be1e5636877d647ae033204428a14a1c",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "d2c0dfe85d17fa8c2a92691318b05db1b009c603aa2eb44eeee71813fbd354ae"
+    },
+    {
+      "id": "reject-backed-missing-value",
+      "code": "<?php\nenum E:int {case A;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Case A of backed enum E must have a value in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-backed-missing-value.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "50d40bc03d6ce8b9b6c8fdaab8bb0c561d56e7905826a5d4d339616091bacad1",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "2a1eca82c5d3f9d701dc75c2b16010b69032ccf8e2fdd095813316b95532ce29"
+    },
+    {
+      "id": "reject-unit-has-value",
+      "code": "<?php\nenum E {case A=1;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Case A of non-backed enum E must not have a value in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-unit-has-value.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "82df4310f4fe9fb2416c3e6bcc7beba34ff05793514a35f9c66868c92eef1dd2",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "c323539f10c9260cc3f0e722d54ba3236537988cb90d32fa57ddb0539b373aa4"
+    },
+    {
+      "id": "reject-duplicate-case-name",
+      "code": "<?php\nenum E {case A;case A;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Cannot redefine class constant E::A in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-duplicate-case-name.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "beab454ec851ea5391d5e9ce9f7e4cb478034b7ee57346796edc4ef3e0254dd9",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "2cf70f1c456bfcfda511a36b615e58696e7132cd10f3057b44fb8cfd296c8ad6"
+    },
+    {
+      "id": "reject-duplicate-constant-case",
+      "code": "<?php\nenum E {case A;public const A=2;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Cannot redefine class constant E::A in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-duplicate-constant-case.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "426a81c9b7ebafceece8ad1dd9664da5ac5163c62b1e838e551e4ce6c74afac0",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "1545be26968bac9a0749f302b99bde9889c448f9cf465489101a311e90c814d8"
+    },
+    {
+      "id": "reject-property",
+      "code": "<?php\nenum E {case A;public int $x=1;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include properties in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-property.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "332fd576f1ed3b8e5af585d46bf1e8d0b206345aac2ced7da32a5a2d062da1cb",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "720100b64f2d82a183c50501624abfd0885951e668c7d9186622a38ded142d8c"
+    },
+    {
+      "id": "reject-static-property",
+      "code": "<?php\nenum E {case A;public static int $x=1;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include properties in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-static-property.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "eb57a287b106663f1d676dcf7f951fd900c92d1f92623e004a5cff20dec7c425",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "64079086d27833b4fe47db833bde876bee18971b858bb088a02283104c906933"
+    },
+    {
+      "id": "reject-trait-property",
+      "code": "<?php\ntrait P {public $x;}enum E {use P;case A;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include properties in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-trait-property.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "b920b1547fb26d930c2873ee5bcc27b705d189fba6c4b32ff62ed51018776423",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "6705a0958b1e87dff316b53676e7faceeec4113b6b438e2d3ed5b9148c2b02b7"
+    },
+    {
+      "id": "reject-extend-enum",
+      "code": "<?php\nenum E {case A;}class C extends E {}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Class C cannot extend enum E in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-extend-enum.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "89155a50f3d262a433a8f1be226f17b872ddbcb0597b8d79bd13052b20aa3273",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "61f7bafa1647746c6cd4976528c5972bb22bdef6344cfc4c6a5b62472e894fc7"
+    },
+    {
+      "id": "reject-enum-extends",
+      "code": "<?php\nclass C {}enum E extends C {case A;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Parse error: syntax error, unexpected token \"extends\", expecting \"{\" in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-enum-extends.php on line 2\n",
+      "inputSHA256": "35e12f3c6432c1da991ae5d68510551d9dd03ea903d719c5f4fac61a6124b85c",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "c97125cb644f56d1b99e173a0b74caa77f260c98c0d0957ce00354a8dc5949d0"
+    },
+    {
+      "id": "reject-override-cases",
+      "code": "<?php\nenum E {case A;public static function cases():array{return [];}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Cannot redeclare E::cases() in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-override-cases.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "a41a6ba24c6f9bcca794fcf5373772309c00c4e139bdd8a2f36cca2787c1a843",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "8a51ea09495c1347eea305a4a6aa0af1fe4240498f56ebdb140b4bd8c79730ab"
+    },
+    {
+      "id": "reject-override-from",
+      "code": "<?php\nenum E:int {case A=1;public static function from(int|string $value):static{return self::A;}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Cannot redeclare E::from() in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-override-from.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "a96819f08a86dfb56d270fc6eb01aa967a55958a02b577a49d1c9cf7392d6607",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "bf949cd9c573276332477d61696fc1b4d65519eecb2484ca91837ac24329fc01"
+    },
+    {
+      "id": "reject-override-tryfrom",
+      "code": "<?php\nenum E:string {case A=\"a\";public static function tryFrom(int|string $value):?static{return self::A;}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Cannot redeclare E::tryfrom() in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-override-tryfrom.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "6e075e662a75690f565afbf5ed4802bd49e0a3ee667ce32c85793c6131fbbc19",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "48a287b07047bab3cfcdfcb5d3ef45bd364d753150ccd5e9ea1b89b9da382d4f"
+    },
+    {
+      "id": "reject-ordinary-unitenum",
+      "code": "<?php\nclass C implements UnitEnum {public static function cases():array{return [];}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Non-enum class C cannot implement interface UnitEnum in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-ordinary-unitenum.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "1172e6e729888f806ce2184657b9108c3db1bee6cb1bb59072b433fd70aeded5",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "11159cf11fb8ed93867654441f66ae69753533333937f3c29e8cbb75d6bb59cd"
+    },
+    {
+      "id": "reject-unit-backedenum",
+      "code": "<?php\nenum E implements BackedEnum {case A;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Non-backed enum E cannot implement interface BackedEnum in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-unit-backedenum.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "856d15deef7aacd48864b2b37deb17c1039e544518a8e5881beaf40386b37068",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "5602bee728437c038d841ad251a9e0bd88c02f7d3b4374465c636478b2caede3"
+    },
+    {
+      "id": "reject-serializable",
+      "code": "<?php\nenum E implements Serializable {case A;public function serialize():string{return \"\";}public function unserialize(string $data):void{}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Deprecated: E implements the Serializable interface, which is deprecated. Implement __serialize() and __unserialize() instead (or in addition, if support for old PHP versions is necessary) in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-serializable.php on line 2\nFatal error: Enum E cannot implement the Serializable interface in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-serializable.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "dbc0e4668d805111503301ff3ffd113c2e5b9fe5f379dcaef08a535884b6356f",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "6c7e604e8c6c8fc647913e097316e39d0b8cb910968b8409f81f56da554c19f0"
+    },
+    {
+      "id": "reject-readonly-enum",
+      "code": "<?php\nreadonly enum E {case A;}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Parse error: syntax error, unexpected token \"enum\", expecting \"abstract\" or \"final\" or \"readonly\" or \"class\" in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-readonly-enum.php on line 2\n",
+      "inputSHA256": "5daa05b509d8b7ab010427eb942bd46fee79848642f8a5123da0a0b3176b9fa9",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "21ace1e60e08af0e2b67204db68c72344e38ea63d721afb081aacbae17a2f25e"
+    },
+    {
+      "id": "reject-legacy-reserved-name",
+      "code": "<?php\nclass UnitEnum {}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Cannot redeclare interface UnitEnum in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-legacy-reserved-name.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "355bb69a591689ab74878d03b15aa0161cc3d4347215f6b97076b36f888a7017",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "cfc2864dca9ed4501e1548f98203a4f0cf337fa82163db8f46cc672cb0762fcc"
+    },
+    {
+      "id": "reject-magic-construct",
+      "code": "<?php\nenum E {case A;public function __construct(){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __construct in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-construct.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "3f10a4760065984b71f8dad7a93b58ab53b4918627191253ead51c7838157555",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "7ea04f33a5bf8fe5076db0941ee1dcceef67e142e61b2e585a34c81a650495f9"
+    },
+    {
+      "id": "reject-magic-destruct",
+      "code": "<?php\nenum E {case A;public function __destruct(){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __destruct in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-destruct.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "b9dd8b3fec65ee76725bf165d43c7733b6e79ca4e48c133726674c0f5fbf181b",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "75ea46659c658d7670307ee510584c71196a58d08448dc4b527ffe410d983afc"
+    },
+    {
+      "id": "reject-magic-clone",
+      "code": "<?php\nenum E {case A;public function __clone(){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __clone in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-clone.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "9caefaaefde19a71e66525b23cecb18d8d86f2f9e9a015c1bfb2d5b0b9730fa7",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "5611e66192334c9169d880d02d048ba1dcd406775a676b5069c42575b4c45493"
+    },
+    {
+      "id": "reject-magic-get",
+      "code": "<?php\nenum E {case A;public function __get($name){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __get in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-get.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "bd3b4ccc217cc3249ef82b41b7d46a2233a7f9a379c5213aa70f6cbebd58abb5",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "60fa587d97edacb705496dbd02f75fbd83b26cc7bc6ec63368cedb9f031ee9fb"
+    },
+    {
+      "id": "reject-magic-set",
+      "code": "<?php\nenum E {case A;public function __set($name,$value){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __set in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-set.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "a45bd74a9519deb51c266453827e4bad83c843a165cb315396052578964ec862",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "1482f87a5c153fab4c63f4acb9f7c9f17620fb5c6053b12b56c0c373cfc08858"
+    },
+    {
+      "id": "reject-magic-isset",
+      "code": "<?php\nenum E {case A;public function __isset($name):bool{return false;}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __isset in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-isset.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "a854c23c9ce6adcafc2045327d4c2d15ead5a3135b3ecaf0d3231b6c8976b795",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "1c65350f5a1f4bbbf595fe2beb2961e73fdd457c974acff77d21b5d92a92a9cd"
+    },
+    {
+      "id": "reject-magic-unset",
+      "code": "<?php\nenum E {case A;public function __unset($name){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __unset in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-unset.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "d3f6d7ad14a5505883c7b9375b10932bfa19f8d58ca95d7597325b4e913b357b",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "f5df9b093101fd52099f1d4e07e7ef8faa2555fade42eca922144f57e81d54ab"
+    },
+    {
+      "id": "reject-magic-toString",
+      "code": "<?php\nenum E {case A;public function __toString():string{return \"\";}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __toString in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-toString.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "5d8565f2827bbde6b9fe04c0d6beb52ebeaa8703d65180d8fff38f6372aed201",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "df3079634ed92d1a56f5bb6891d985c35a59ed4f034e4d92ae1d79282b90c434"
+    },
+    {
+      "id": "reject-magic-serialize",
+      "code": "<?php\nenum E {case A;public function __serialize():array{return [];}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __serialize in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-serialize.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "4cfd98d6f1e722d65d266d380c613d3338569bcea43d839b3bc2f7c339f22420",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "9ece43be930fca5573c7f38db15c644db3da4160915bce3a78f35475ab7cd03b"
+    },
+    {
+      "id": "reject-magic-unserialize",
+      "code": "<?php\nenum E {case A;public function __unserialize(array $data):void{}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __unserialize in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-unserialize.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "047785483552b3d28464e096e0d76312d86687d0bab3d92711324fcc39c951af",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "bc4b2bf792d4d3b1405c3fca55a7edb31a059df5579cf6a4450a357f2f72360a"
+    },
+    {
+      "id": "reject-magic-sleep",
+      "code": "<?php\nenum E {case A;public function __sleep(){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __sleep in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-sleep.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "27afb55cdeed7a5834241dc94a4bb63bfeaabcedaaecbbf2a6a860b02979e89a",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "d22e96b5f6df3b776af1f2e68d3466ca0ad44dfcec733441a860ab0eae646fb0"
+    },
+    {
+      "id": "reject-magic-wakeup",
+      "code": "<?php\nenum E {case A;public function __wakeup(){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __wakeup in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-wakeup.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "58e2c979899542e9baf56e2a2b8a7106c871b05e9fe02987fec10461030b0fef",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "d7487ab1f2bbbaf4164507d7a43d12b005339d0f9fc437c8b7034481b2633b98"
+    },
+    {
+      "id": "reject-magic-debugInfo",
+      "code": "<?php\nenum E {case A;public function __debugInfo(){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __debugInfo in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-debugInfo.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "753cc9d8cefd3c5cb0c82c6b155b3ab901715e0aed5b761dbfedabc760d7a9ad",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "244765ad8f03a183608b9231d4bad9bc3c9e19c19de34621fd7f9c983ae07d24"
+    },
+    {
+      "id": "reject-magic-set_state",
+      "code": "<?php\nenum E {case A;public static function __set_state(array $data){}}\n",
+      "negative": true,
+      "stdout": "",
+      "stderr": "Fatal error: Enum E cannot include magic method __set_state in G:\\DevLine-QA\\jphp-enums-20261013\\revision2\\native\\reject-magic-set_state.php on line 2\nStack trace:\n#0 {main}\n",
+      "inputSHA256": "b5d7caa84be578d82659aab5241e5e0beffb1e450f1f8ba694db84a213088ec3",
+      "stdoutSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "stderrSHA256": "1008fac071b8332a827ab395864206a9536798aa47964fc6625ccbb8b0941da1"
+    }
+  ]
+}

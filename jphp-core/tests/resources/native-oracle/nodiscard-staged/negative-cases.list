@@ -1,0 +1,12 @@
+negative-clone
+negative-delayed-constructor
+negative-destructor
+negative-method-void
+negative-never
+negative-repeat
+negative-set
+negative-target
+negative-unserialize
+negative-unset
+negative-void-parameter
+negative-void-return

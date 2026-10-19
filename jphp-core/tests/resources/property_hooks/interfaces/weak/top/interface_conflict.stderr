@@ -1,0 +1,3 @@
+Fatal error: Declaration of J::$x::get(): string must be compatible with I::$x::get(): int in G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\weak\top\interface_conflict.php on line 1
+Stack trace:
+#0 {main}

@@ -11,6 +11,7 @@ import php.runtime.exceptions.support.ErrorType;
 import php.runtime.lang.spl.iterator.Iterator;
 import php.runtime.lang.support.IManualDestructable;
 import php.runtime.memory.KeyValueMemory;
+import php.runtime.memory.LongMemory;
 import php.runtime.memory.ReferenceMemory;
 import php.runtime.reflection.ClassEntity;
 import php.runtime.reflection.helper.GeneratorEntity;
@@ -31,6 +32,7 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
 
     protected boolean isInit = false;
     protected int counter = 0;
+    private long nextKey;
 
     protected boolean valid = true;
     protected final YieldAdapterIterator<Bucket> iterator;
@@ -43,6 +45,8 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
 
     protected Throwable lastThrowable = null;
     protected RuntimeException newThrow = null;
+    private Memory sentValue;
+    private boolean completed;
 
     protected boolean busy;
     protected ClosedType closed;
@@ -70,6 +74,8 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
                     env.__replaceCallStack(Generator.this.callStack);
 
                     Generator.this._run(env);
+                    if (genReturn == null) genReturn = Memory.NULL;
+                    completed = true;
                 } catch (Throwable e) {
                     lastThrowable = e;
                     Generator.this.setCurrent(Memory.NULL);
@@ -77,6 +83,20 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
             }
         };
         iterator = gen.iterator();
+    }
+
+    /** Explicit generated hook body receiver; no additional retained field or ambient scope is installed. */
+    public final IObject __getHookReceiver() {
+        Memory value=self==null?null:self.toValue();
+        if(!busy || !(value instanceof php.runtime.memory.ObjectMemory object))
+            throw new IllegalArgumentException("Generator hook has no live retained receiver");
+        return object.value;
+    }
+
+    /** Matches the existing concrete scheduler body which directly invokes this runner's _run. */
+    public final boolean __isHookDispatcher(StackWalker.StackFrame caller) {
+        return caller.getDeclaringClass()==gen.getClass() && caller.getMethodName().equals("run")
+                && caller.getMethodType().equals(java.lang.invoke.MethodType.methodType(void.class,YieldAdapterIterator.class));
     }
 
     abstract protected Memory _run(Environment env, Memory... args);
@@ -105,7 +125,7 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
             busy = false;
             checkThrow();
         }
-        return null;
+        return Memory.NULL;
     }
 
     protected void checkNewThrow() {
@@ -163,6 +183,7 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
     @Override
     @Signature
     public Memory next(Environment env, Memory... args) {
+        if (!isInit) rewind(env);
         _next(env);
         return Memory.NULL;
     }
@@ -173,14 +194,12 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
            rewind(env);
         }
 
-        Bucket current = iterator.getCurrentValue();
-        if (current == null) {
-            iterator.setCurrentValue(new Bucket(args[0]));
-        } else {
-            current.pushValue(args[0]);
+        sentValue = args[0];
+        try {
+            return _next(env);
+        } finally {
+            sentValue = null;
         }
-
-        return _next(env);
     }
 
     @Name("throw")
@@ -219,6 +238,7 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
     @Signature
     @Override
     public Memory valid(Environment env, Memory... args) {
+        if (!isInit) rewind(env);
         return valid ? Memory.TRUE : Memory.FALSE;
     }
 
@@ -275,7 +295,8 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
 
     @Signature
     public Memory getReturn(Environment env, Memory... args) {
-        return genReturn == null ? Memory.NULL : genReturn;
+        if (!completed) env.exception("Cannot get return value of a generator that hasn't returned");
+        return genReturn;
     }
 
     public CallStackItem getCallStackItem() {
@@ -300,6 +321,8 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
 
         Bucket current = iterator.getCurrentValue();
         if (value instanceof KeyValueMemory) {
+            Memory key = ((KeyValueMemory) value).key.toValue();
+            if (key.type == Memory.Type.INT && key.toLong() >= nextKey) nextKey = key.toLong() + 1;
             if (current != null) {
                 current.setKey(((KeyValueMemory) value).key);
                 current.setValue(returnRef ? new ReferenceMemory(value) : value.toValue());
@@ -311,10 +334,12 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
                 value = new ReferenceMemory(value);
             }
 
+            Memory key = LongMemory.valueOf(nextKey++);
             if (current != null) {
-                current.pushValue(value);
+                current.setKey(key);
+                current.setValue(value);
             } else {
-                current = new Bucket(Memory.CONST_INT_0, value);
+                current = new Bucket(key, value);
             }
         }
 
@@ -346,31 +371,33 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
 
         if (subGenerator != null) {
             if (!subGenerator.isInit) {
-                if (subGenerator.counter < 1) {
-                    subGenerator.rewind(env);
-                } else {
-                    subGenerator._next(env);
-                }
+                subGenerator.rewind(env);
             }
 
             while (subGenerator.valid){
                 checkNewThrow();
 
-                current = setCurrent(subGenerator.__current());
-                subGenerator._next(env);
-
+                current = new Bucket(subGenerator.key(env), subGenerator.__current());
                 gen.yield(current);
 
-                checkNewThrow();
+                if (newThrow != null && !(newThrow instanceof FinallyException)) {
+                    subGenerator.newThrow = newThrow;
+                    newThrow = null;
+                    subGenerator._next(env);
+                } else {
+                    checkNewThrow();
+                    subGenerator.send(env, takeSentValue());
+                }
             }
         } else {
             while (iterator.next()) {
                 checkNewThrow();
 
-                current = setCurrent(iterator.getValue());
+                current = new Bucket(iterator.getMemoryKey(), iterator.getValue());
                 gen.yield(current);
 
                 checkNewThrow();
+                takeSentValue();
             }
         }
 
@@ -382,7 +409,7 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
             }
         }
 
-        return current != null ? current.getValue() : Memory.NULL;
+        return Memory.NULL;
     }
 
     protected Memory yield(Environment env, TraceInfo trace, Memory value) {
@@ -396,11 +423,19 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
         gen.yield(current);
 
         checkNewThrow();
-        return current.getValue();
+        return takeSentValue();
+    }
+
+    private Memory takeSentValue() {
+        Memory value = sentValue;
+        sentValue = null;
+        return value == null ? Memory.NULL : value;
     }
 
     protected Memory yield(Memory key, Memory value) {
-        return gen.yield(new Bucket(key, value)).getValue();
+        gen.yield(new Bucket(key, value));
+        checkNewThrow();
+        return takeSentValue();
     }
 
     protected Memory setReturn(Environment env, TraceInfo trace, Memory result) {
@@ -441,9 +476,5 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
             this.value = value;
         }
 
-        public void pushValue(Memory value) {
-            key = key.inc();
-            this.value = value;
-        }
     }
 }

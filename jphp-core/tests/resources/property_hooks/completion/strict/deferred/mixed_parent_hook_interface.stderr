@@ -1,0 +1,4 @@
+Fatal error: Class C contains 3 abstract methods and must therefore be declared abstract or implement the remaining methods (A::f, A::$x::get, I::$x::set) in G:\DevLine-QA\jphp-property-hooks-20261013\aggregate-agent-r1\test-resources\resources\property_hooks\completion\strict\deferred\mixed_parent_hook_interface.php on line 1
+Stack trace:
+#0 G:\DevLine-QA\jphp-property-hooks-20261013\aggregate-agent-r1\test-resources\resources\property_hooks\completion\strict\deferred\mixed_parent_hook_interface.php(1): enter()
+#1 {main}

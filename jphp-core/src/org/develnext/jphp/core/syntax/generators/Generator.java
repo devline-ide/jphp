@@ -146,7 +146,8 @@ abstract public class Generator<T extends Token> {
             return token;
         }
 
-        if (token.isNamedToken() || token instanceof org.develnext.jphp.core.tokenizer.token.stmt.LambdaStmtToken
+        if (token.isNamedToken() || (token instanceof org.develnext.jphp.core.tokenizer.token.stmt.LambdaStmtToken
+                || token instanceof org.develnext.jphp.core.tokenizer.token.expr.value.MatchExprToken)
                 && analyzer.getPhpLanguageProfile()
                     == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
             return new NameToken(token.getMeta());

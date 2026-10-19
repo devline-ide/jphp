@@ -4,6 +4,8 @@ import php.runtime.Memory;
 import php.runtime.env.TraceInfo;
 import php.runtime.lang.ForeachIterator;
 import php.runtime.memory.ArrayMemory;
+import php.runtime.memory.PhpByteStringMemory;
+import java.nio.charset.StandardCharsets;
 import php.runtime.memory.helper.ClassConstantMemory;
 import php.runtime.memory.helper.ConstantMemory;
 
@@ -13,9 +15,21 @@ import java.io.OutputStream;
 
 public class DumpOutputStream extends DataOutputStream {
 
+    public static final int RAW_STRING_STAMP = 0x42535452; // BSTR
+    public static final int RAW_STRING_VERSION = 1;
+    public static final int MAX_RAW_STRING_BYTES = 16 * 1024 * 1024;
+    private final boolean rawStrings;
+
     public DumpOutputStream(OutputStream out) {
-        super(out);
+        this(out, out instanceof DumpOutputStream && ((DumpOutputStream) out).rawStrings);
     }
+
+    public DumpOutputStream(OutputStream out, boolean rawStrings) {
+        super(out);
+        this.rawStrings = rawStrings;
+    }
+
+    public boolean isRawStringEnabled() { return rawStrings; }
 
     public void writeName(String value) throws IOException {
         if (value == null)
@@ -50,6 +64,18 @@ public class DumpOutputStream extends DataOutputStream {
             writeInt(-3);
             writeUTF(((ClassConstantMemory) memory).getClassName());
             writeUTF(((ClassConstantMemory) memory).getName());
+            return;
+        }
+
+        if (memory instanceof PhpByteStringMemory) {
+            if (!rawStrings) throw new DumpException("Raw PHP strings require compiler ABI 17");
+            PhpByteStringMemory value = (PhpByteStringMemory) memory;
+            if (value.byteLength() > MAX_RAW_STRING_BYTES)
+                throw new DumpException("Raw PHP string exceeds maximum size");
+            writeInt(-4);
+            writeInt(RAW_STRING_STAMP);
+            writeInt(RAW_STRING_VERSION);
+            writeRawData(value.getBinaryBytes(StandardCharsets.UTF_8), MAX_RAW_STRING_BYTES);
             return;
         }
 

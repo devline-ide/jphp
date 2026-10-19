@@ -45,7 +45,7 @@ abstract public class FunctionsContainer {
 
     protected static boolean expectingImplement(Environment env, TraceInfo trace,
                                                 int index, Memory memory, Class<?> clazz) {
-        if (!memory.isObject() || !memory.toValue(ObjectMemory.class).getClass().isAssignableFrom(clazz)) {
+        if (!memory.isObject() || !clazz.isInstance(memory.toValue(ObjectMemory.class).value)) {
             String given = memory.getRealType().toString();
             if (memory.isObject())
                 given = memory.toValue(ObjectMemory.class).getReflection().getName();
@@ -86,12 +86,16 @@ abstract public class FunctionsContainer {
         }
     }
 
+    protected boolean exportsFunction(Method method) {
+        return !method.isAnnotationPresent(Reflection.Ignore.class);
+    }
+
     public Collection<CompileFunctionSpec> getFunctionSpecs() {
         Map<String, CompileFunctionSpec> result = new HashMap<>();
 
         for (Method method : getClass().getDeclaredMethods()) {
             int mod = method.getModifiers();
-            if (Modifier.isStatic(mod) && Modifier.isPublic(mod)) {
+            if (Modifier.isStatic(mod) && Modifier.isPublic(mod) && exportsFunction(method)) {
                 String name = method.getName();
                 Name altName = method.getAnnotation(Name.class);
 
@@ -126,7 +130,7 @@ abstract public class FunctionsContainer {
 
         for (Method method : getClass().getDeclaredMethods()) {
             int mod = method.getModifiers();
-            if (Modifier.isStatic(mod) && Modifier.isPublic(mod)) {
+            if (Modifier.isStatic(mod) && Modifier.isPublic(mod) && exportsFunction(method)) {
                 String name = method.getName();
                 Name altName = method.getAnnotation(Name.class);
                 if (altName != null)

@@ -41,6 +41,8 @@ public class JsonExtension extends Extension {
     public void onRegister(CompileScope scope) {
         registerConstants(new JsonConstants());
         registerFunctions(new JsonFunctions());
+        for(var function:new Php85JsonFunctions().getFunctionSpecs())scope.registerPhp85Function(this,function);
+        scope.registerPhp85LazyClass(this,Php85JsonException.class);
     }
 
     public static GsonBuilder createGsonBuilder(MemorySerializer memorySerializer) {

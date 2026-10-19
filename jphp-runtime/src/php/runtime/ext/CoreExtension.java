@@ -118,6 +118,23 @@ public class CoreExtension extends Extension implements ProgramShutdownHandler {
                 ReflectionObject.class, ReflectionClassConstant.class
         );
 
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpAttributeMarker.class);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpOverrideAttribute.class,php.runtime.ext.core.classes.PhpOverrideAttribute::configure);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpAllowDynamicPropertiesAttribute.class,php.runtime.ext.core.classes.PhpAllowDynamicPropertiesAttribute::configure);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpDelayedTargetValidationAttribute.class,php.runtime.ext.core.classes.PhpDelayedTargetValidationAttribute::configure);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpSensitiveParameterValue.class,php.runtime.ext.core.classes.PhpSensitiveParameterValue::configure);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpSensitiveParameterAttribute.class,php.runtime.ext.core.classes.PhpSensitiveParameterAttribute::configure);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpNoDiscardAttribute.class,php.runtime.ext.core.classes.PhpNoDiscardAttribute::configure);
+        scope.registerPhp85LazyClass(this,ReflectionAttribute.class, php.runtime.ext.core.reflection.PhpNativeReflectionProperties::configure);
+        scope.registerPhp85LazyClass(this,ReflectionConstant.class, php.runtime.ext.core.reflection.PhpNativeReflectionProperties::configure);
+        for(var function:new Php85EnumFunctions().getFunctionSpecs())scope.registerPhp85Function(this,function);
+        for(var function:new Php85LangFunctions().getFunctionSpecs())scope.registerPhp85Function(this,function);
+        scope.registerPhp85LazyClass(this,php.runtime.lang.UnitEnum.class,php.runtime.PhpEnums::configureBuiltin);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpPropertyHookType.class,php.runtime.ext.core.classes.PhpPropertyHookType::configure);
+        scope.registerPhp85LazyClass(this,php.runtime.lang.BackedEnum.class,php.runtime.PhpEnums::configureBuiltin);
+        scope.registerPhp85LazyClass(this,ReflectionEnum.class);
+        scope.registerPhp85LazyClass(this,ReflectionEnumUnitCase.class);
+        scope.registerPhp85LazyClass(this,ReflectionEnumBackedCase.class);
         registerClass(scope, WrapJavaExceptions.NotImplementedException.class);
 
         // stream

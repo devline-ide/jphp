@@ -1,0 +1,8 @@
+outside-uninit:ok:null
+own-uninit:ok:"done"
+offset-unset;object-offset:ok:[]
+nested-object-offset:Error:Cannot indirectly modify private(set) property U::$nested from global scope
+scalar-n:Error:Cannot indirectly modify private(set) property U::$n from global scope
+scalar-b:Error:Cannot indirectly modify private(set) property U::$b from global scope
+scalar-i:Error:Cannot indirectly modify private(set) property U::$i from global scope
+scalar-s:Error:Cannot indirectly modify private(set) property U::$s from global scope

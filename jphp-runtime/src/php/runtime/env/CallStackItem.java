@@ -83,6 +83,12 @@ public class CallStackItem {
         return toArray(true, false);
     }
 
+    public ArrayMemory toArray(Environment env,boolean provideObject,boolean ignoreArgs) {
+        if(ignoreArgs || args==null)return toArray(provideObject,ignoreArgs);
+        var presentation=new CallStackItem(this);
+        presentation.args=php.runtime.reflection.support.PhpSensitiveParameterTrace.redact(env,this,args.clone());
+        return presentation.toArray(provideObject,false);
+    }
     public ArrayMemory toArray(boolean provideObject, boolean ignoreArgs){
         ArrayMemory el = new ArrayMemory();
 

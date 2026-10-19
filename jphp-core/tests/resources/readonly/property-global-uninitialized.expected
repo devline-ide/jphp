@@ -1,0 +1,1 @@
+a:2:{i:0;s:5:"Error";i:1;s:70:"Cannot modify protected(set) readonly property R::$x from global scope";}

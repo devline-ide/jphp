@@ -1,0 +1,9 @@
+get
+dim:ok:null
+get
+append:ok:null
+get
+unsetdim:ok:null
+unsetproperty:Error:Cannot unset hooked property H::$a
+state:get
+{"1":8}

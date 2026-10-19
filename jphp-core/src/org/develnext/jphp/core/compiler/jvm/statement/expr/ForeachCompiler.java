@@ -40,7 +40,7 @@ public class ForeachCompiler extends BaseStatementCompiler<ForeachStmtToken> {
 
         expr.writePushEnv();
         expr.writePushTraceInfo(token);
-        expr.writeExpression(token.getIterator(), true, false, true);
+        expr.writeForeachIteratorExpression(token.getIterator(),token.isValueReference());
         expr.writePopBoxing();
         expr.writePushConstBoolean(token.isValueReference());
         expr.writePushConstBoolean(token.isKeyReference());

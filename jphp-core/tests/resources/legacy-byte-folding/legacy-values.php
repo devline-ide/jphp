@@ -1,0 +1,1 @@
+<?php $f='ord';$c='chr';echo ord(chr(65535)),'|',$f($c(65535)),'|',ord('é'),'|',ord(''),'|',ord(hex2bin('ff'));

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "weak/reflection",
+    "case": "reflection",
+    "resource": "resources/property_hooks/hooktype/weak/reflection"
+  },
+  {
+    "id": "strict/reflection",
+    "case": "reflection",
+    "resource": "resources/property_hooks/hooktype/strict/reflection"
+  },
+  {
+    "id": "weak/final_property_hook_metadata",
+    "case": "final_property_hook_metadata",
+    "resource": "resources/property_hooks/hooktype/weak/final_property_hook_metadata"
+  },
+  {
+    "id": "strict/final_property_hook_metadata",
+    "case": "final_property_hook_metadata",
+    "resource": "resources/property_hooks/hooktype/strict/final_property_hook_metadata"
+  }
+]

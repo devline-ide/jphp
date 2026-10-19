@@ -1,0 +1,4 @@
+Dget;TypeError|Cannot assign string to property Host::$p of type int
+Dset:9;TypeError|Cannot assign string to property Host::$p of type int
+stored:{"p":2,"q":8}
+scope:Host

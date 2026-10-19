@@ -2,8 +2,11 @@ package org.develnext.jphp.scripting;
 
 import org.develnext.jphp.scripting.util.ReaderInputStream;
 import php.runtime.Information;
+import php.runtime.Memory;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
+import php.runtime.env.TraceInfo;
+import php.runtime.lang.exception.BaseBaseException;
 import php.runtime.launcher.Launcher;
 import php.runtime.memory.ArrayMemory;
 import php.runtime.memory.support.MemoryUtils;
@@ -13,7 +16,7 @@ import javax.script.*;
 import java.io.*;
 import java.util.*;
 
-public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable {
+public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable, AutoCloseable {
 
     private static final String __ENGINE_VERSION__   = Information.CORE_VERSION;
     private static final String __NAME__             = Information.NAME;
@@ -23,6 +26,8 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
 
     private ScriptEngineFactory factory = null;
     private Environment environment;
+    private boolean closed;
+    private final ScriptContextScope.HostRoots contextRoots = new ScriptContextScope.HostRoots();
 
     public JPHPScriptEngine() {
         super();
@@ -30,14 +35,18 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
         Launcher launcher = new Launcher();
         try {
             launcher.run(false);
+        } catch (Error e) {
+            cleanupFailedInitialization(launcher, e);
+            throw e;
         } catch (Throwable e) {
-            //pass
+            cleanupFailedInitialization(launcher, e);
+            throw new IllegalStateException("Unable to initialize the JPHP script engine", e);
         }
-        environment = new Environment(launcher.getCompileScope(), System.out);
+        environment = launcher.getEnvironment();
         environment.getDefaultBuffer().setImplicitFlush(true);
 
         JPHPContext ctx = new JPHPContext();
-        ctx.setBindings(createBindings(), ScriptContext.ENGINE_SCOPE);
+        ctx.setBindings(new JPHPBindings(environment.getGlobals()), ScriptContext.ENGINE_SCOPE);
         setContext(ctx);
 
         put(LANGUAGE_VERSION, __LANGUAGE_VERSION__);
@@ -45,6 +54,22 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
         put(ENGINE, __NAME__);
         put(ENGINE_VERSION, __ENGINE_VERSION__);
         put(NAME, __SHORT_NAME__);
+    }
+
+    private static void cleanupFailedInitialization(Launcher launcher, Throwable primary) {
+        Environment failed = launcher.getEnvironment();
+        if (failed == null) return;
+        try {
+            failed.doFinalForEmbedding();
+        } catch (Throwable cleanup) {
+            if (cleanup != primary) primary.addSuppressed(cleanup);
+        } finally {
+            try {
+                failed.releaseThreadSupport();
+            } catch (Throwable cleanup) {
+                if (cleanup != primary) primary.addSuppressed(cleanup);
+            }
+        }
     }
 
     @Override
@@ -63,22 +88,75 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
     }
 
     @Override
-    public CompiledScript compile(Reader reader) throws ScriptException {
-        try {
-            InputStream is = new ReaderInputStream(reader);
+    public synchronized CompiledScript compile(Reader reader) throws ScriptException {
+        requireOpen();
+        ReaderInputStream input = null;
+        try (ReaderInputStream is = input = new ReaderInputStream(reader, Context.DEFAULT_CHARSET.name())) {
             Context context = new Context(is);
             ModuleEntity module = environment.importModule(context);
             return new JPHPCompiledScript(module, environment);
         } catch (IOException e) {
             throw new ScriptException(e);
         } catch (Throwable e) {
+            Throwable readFailure = input == null ? null : input.getReadFailure();
+            if (readFailure != null) {
+                ScriptException failure = new ScriptException(readFailure.toString());
+                failure.initCause(readFailure);
+                throw failure;
+            }
             throw new ScriptException(new Exception(e));
         }
     }
 
+    private void requireOpen() throws ScriptException {
+        if (closed) throw new ScriptException("JPHP script engine is closed");
+    }
+
+    private ScriptException scriptFailure(Throwable failure, Environment env) {
+        if (failure instanceof ScriptException) return (ScriptException) failure;
+        ScriptException result;
+        if (failure instanceof BaseBaseException) {
+            BaseBaseException php = (BaseBaseException) failure;
+            TraceInfo trace = php.getTrace();
+            result = new ScriptException(php.getMessage(env).toString(), trace.getFileName(),
+                    trace.getStartLine() < 0 ? -1 : trace.getStartLine() + 1,
+                    trace.getStartPosition() < 0 ? -1 : trace.getStartPosition() + 1);
+        } else {
+            result = new ScriptException(failure.toString());
+        }
+        result.initCause(failure);
+        return result;
+    }
+
+    @Override
+    public synchronized void close() throws ScriptException {
+        if (closed) return;
+        closed = true;
+        Throwable primary = null;
+        try {
+            contextRoots.close(environment);
+        } catch (Throwable failure) {
+            primary = failure;
+        }
+        try {
+            environment.doFinalForEmbedding();
+        } catch (Throwable failure) {
+            if (primary == null) primary = failure;
+            else if (primary != failure) primary.addSuppressed(failure);
+        } finally {
+            try {
+                environment.releaseThreadSupport();
+            } catch (Throwable cleanup) {
+                if (primary == null) primary = cleanup;
+                else if (primary != cleanup) primary.addSuppressed(cleanup);
+            }
+        }
+        if (primary != null) throw scriptFailure(primary, environment);
+    }
+
     @Override
     public Bindings createBindings() {
-        return new JPHPBindings(environment.getGlobals());
+        return new JPHPBindings(new ArrayMemory());
     }
 
     @Override
@@ -93,7 +171,7 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
         factory = f;
     }
 
-    public class JPHPBindings implements Bindings {
+    public class JPHPBindings extends AbstractMap<String, Object> implements Bindings {
 
         private ArrayMemory globals;
 
@@ -103,7 +181,17 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
 
         @Override
         public Object put(String name, Object value) {
-            return globals.putAsKeyString(name, MemoryUtils.valueOf(value));
+            String key = checkedKey(name);
+            Object previous = get(key);
+            globals.putAsKeyString(key, MemoryUtils.valueOf(value));
+            return previous;
+        }
+
+        private String checkedKey(Object key) {
+            Objects.requireNonNull(key, "Bindings key");
+            String name = (String) key;
+            if (name.isEmpty()) throw new IllegalArgumentException("Bindings key is empty");
+            return name;
         }
 
         @Override
@@ -119,26 +207,45 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
         }
 
         @Override
-        public Set<String> keySet() {
-            Set<String> set = new HashSet<String>(size());
-            for (Object k : globals.keySet()) {
-                set.add(k.toString());
-            }
-            return set;
-        }
-
-        @Override
-        public Collection<Object> values() {
-            return new ArrayList<Object>(Arrays.asList(globals.values()));
-        }
-
-        @Override
         public Set<Entry<String, Object>> entrySet() {
-            Set<Entry<String, Object>> set = new HashSet<Entry<String, Object>>(size());
-            for (Object k : globals.keySet()) {
-                set.add(new AbstractMap.SimpleEntry<String, Object>(k.toString(), get(k)));
-            }
-            return set;
+            return new AbstractSet<Entry<String, Object>>() {
+                @Override public int size() { return JPHPBindings.this.size(); }
+                @Override public void clear() { JPHPBindings.this.clear(); }
+                @Override public Iterator<Entry<String, Object>> iterator() {
+                    Iterator<Object> keys = new ArrayList<Object>(globals.keySet()).iterator();
+                    return new Iterator<Entry<String, Object>>() {
+                        private String current;
+                        private boolean removable;
+                        @Override public boolean hasNext() { return keys.hasNext(); }
+                        @Override public Entry<String, Object> next() {
+                            final String key = keys.next().toString();
+                            current = key;
+                            removable = true;
+                            return new Entry<String, Object>() {
+                                @Override public String getKey() { return key; }
+                                @Override public Object getValue() { return JPHPBindings.this.get(key); }
+                                @Override public Object setValue(Object value) {
+                                    return JPHPBindings.this.put(key, value);
+                                }
+                                @Override public boolean equals(Object other) {
+                                    if (!(other instanceof Entry)) return false;
+                                    Entry<?, ?> entry = (Entry<?, ?>) other;
+                                    return Objects.equals(key, entry.getKey())
+                                            && Objects.equals(getValue(), entry.getValue());
+                                }
+                                @Override public int hashCode() {
+                                    return key.hashCode() ^ Objects.hashCode(getValue());
+                                }
+                            };
+                        }
+                        @Override public void remove() {
+                            if (!removable) throw new IllegalStateException();
+                            JPHPBindings.this.remove(current);
+                            removable = false;
+                        }
+                    };
+                }
+            };
         }
 
         @Override
@@ -153,22 +260,21 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
 
         @Override
         public boolean containsKey(Object key) {
-            return globals.containsKey(key);
-        }
-
-        @Override
-        public boolean containsValue(Object value) {
-            return false;
+            return globals.containsKey(checkedKey(key));
         }
 
         @Override
         public Object get(Object key) {
-            return globals.getByScalar(key);
+            Memory value = globals.getByScalar(checkedKey(key));
+            return value == null ? null : value.toValue();
         }
 
         @Override
         public Object remove(Object key) {
-            return globals.removeByScalar(key);
+            String name = checkedKey(key);
+            Object previous = get(name);
+            globals.removeByScalar(name);
+            return previous;
         }
     }
 
@@ -183,24 +289,26 @@ public class JPHPScriptEngine extends AbstractScriptEngine implements Compilable
 
         @Override
         public Object eval(ScriptContext context) throws ScriptException {
-            try {
-                try {
-                    return module.include(environment);
-                } catch (Exception e) {
-                    environment.catchUncaught(e);
-                } catch (Throwable throwable) {
-                    throw new RuntimeException(throwable);
-                } finally {
-                    try {
-                        environment.doFinal();
-                    } catch (Throwable throwable) {
-                        throw new RuntimeException(throwable);
+            Objects.requireNonNull(context, "ScriptContext");
+            synchronized (JPHPScriptEngine.this) {
+                requireOpen();
+                try (Environment.ThreadBinding binding = environment.bindCurrentThread()) {
+                    if (php.runtime.PhpOwnershipExecution.current(environment) != null)
+                        throw new IllegalArgumentException("ScriptContext needs its complete explicit-session native-globals host protocol");
+                    Bindings supplied = context.getBindings(ScriptContext.ENGINE_SCOPE);
+                    boolean canonical = supplied instanceof JPHPBindings
+                            && ((JPHPBindings) supplied).globals == environment.getRuntimeGlobalsTable();
+                    try (ScriptContextScope scope = ScriptContextScope.open(environment, context, canonical, contextRoots, module)) {
+                        try {
+                            return scope.include(module);
+                        } catch (Throwable failure) {
+                            throw scope.unwrapWriter(failure);
+                        }
                     }
+                } catch (Throwable failure) {
+                    throw scriptFailure(failure, environment);
                 }
-            } catch (Throwable e) {
-                throw new ScriptException(new Exception(e));
             }
-            return null;
         }
 
         @Override

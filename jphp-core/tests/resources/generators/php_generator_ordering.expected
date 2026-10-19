@@ -1,0 +1,9 @@
+function-before:11:12:done:108
+class-instance:1021:1022:done:208
+class-static:31:32:done:308
+trait:2041:2042:done:408
+trait-alias:2041:2042:done:408
+deferred:3051:3052:done:508
+closure:4061:4062:done:608
+function-after:71:72:done:708
+reference:999

@@ -1,5 +1,6 @@
 package org.develnext.jphp.core.syntax.generators;
 
+import org.develnext.jphp.core.tokenizer.TokenMeta;
 import org.develnext.jphp.core.tokenizer.token.ColonToken;
 import org.develnext.jphp.core.tokenizer.token.CommentToken;
 import org.develnext.jphp.core.tokenizer.token.expr.operator.ArgumentUnpackExprToken;
@@ -7,6 +8,7 @@ import org.develnext.jphp.core.tokenizer.token.expr.operator.ValueIfElseToken;
 import org.develnext.jphp.core.tokenizer.token.expr.value.*;
 import php.runtime.common.HintType;
 import php.runtime.common.PhpLanguageProfile;
+import php.runtime.exceptions.support.ErrorType;
 import org.develnext.jphp.core.syntax.SyntaxAnalyzer;
 import org.develnext.jphp.core.syntax.generators.manually.BodyGenerator;
 import org.develnext.jphp.core.syntax.generators.manually.SimpleExprGenerator;
@@ -82,6 +84,36 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
         if (next instanceof CommaToken || isClosedBrace(next, BraceExprToken.Kind.SIMPLE))
             return null;
 
+        List<AttributeStmtToken> attributes=List.of();
+        if (next instanceof AttributeStartToken) {
+            attributes=analyzer.generator(AttributeGenerator.class).parse(next,iterator);
+            next=nextToken(iterator);
+        }
+        boolean phpReadonly=false;
+        php.runtime.common.Modifier promotion=null,setModifier=null;
+        while(isPhp8() && (PhpSetVisibility.visibility(next) || next instanceof NameToken && next.getWord().equalsIgnoreCase("readonly"))) {
+            if(next.getWord().equalsIgnoreCase("readonly")) {
+                if(phpReadonly)unexpectedToken(next);phpReadonly=true;
+            } else {
+                Token modifier=PhpSetVisibility.parse(analyzer,next,iterator);
+                if(modifier instanceof PropertySetVisibilityStmtToken set) {
+                    if(setModifier!=null)analyzer.getEnvironment().error(next.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,"Multiple access type modifiers are not allowed");
+                    setModifier=set.getModifier();
+                } else {
+                    if(promotion!=null)analyzer.getEnvironment().error(next.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,"Multiple access type modifiers are not allowed");
+                    promotion=next instanceof PrivateStmtToken?php.runtime.common.Modifier.PRIVATE:next instanceof ProtectedStmtToken?php.runtime.common.Modifier.PROTECTED:php.runtime.common.Modifier.PUBLIC;
+                }
+            }
+            next=nextToken(iterator);
+        }
+        if(promotion!=null || setModifier!=null || phpReadonly) {
+            if(promotion==null)promotion=php.runtime.common.Modifier.PUBLIC;
+            var function=analyzer.getFunction();
+            if(analyzer.getClazz()==null || analyzer.peekClosure()!=null || function==null || function.getName()==null
+                    || !function.getName().getName().equalsIgnoreCase("__construct"))
+                analyzer.getEnvironment().error(next.toTraceInfo(analyzer.getContext()),ErrorType.E_COMPILE_ERROR,"Cannot declare promoted property outside a constructor");
+        }
+        php.runtime.reflection.support.PhpTypeDeclaration promotedType = null;
         NameToken hintTypeClass = null;
         HintType hintType = null;
         boolean optional = false;
@@ -97,6 +129,8 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                 prefix.add(next); next = nextToken(iterator);
             }
             declaredType = PhpTypeDeclarationParser.parseFunction(analyzer, prefix, false);
+            if (promotion != null) promotedType = PhpTypeDeclarationParser.parseProperty(analyzer, prefix,
+                    analyzer.getClazz().getFulledName() + "::$" + next.getWord().replace("$", ""));
             optional = declaredType.allowsNull();
             String named = declaredType.getNamedType();
             if (named != null && !Set.of("null", "true", "false").contains(named)) {
@@ -119,7 +153,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                 unexpectedToken(next);
             }
 
-            if (analyzer.getClazz() != null && !analyzer.getClazz().isTrait() && !(isPhp8() && analyzer.peekClosure() != null)) {
+            if (analyzer.getClazz() != null && !analyzer.getClazz().isTrait() && !analyzer.getClazz().isAnonymous() && !(isPhp8() && analyzer.peekClosure() != null)) {
                 next = analyzer.getClazz().getName();
                 hintTypeClass = analyzer.getRealName((NameToken) next);
             } else {
@@ -174,6 +208,22 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
             unexpectedToken(next);
 
         next = nextToken(iterator);
+        java.util.List<PropertyHookStmtToken> promotedHooks=java.util.List.of();
+        if(isPhp8() && promotion!=null && isOpenedBrace(next,BraceExprToken.Kind.BLOCK)) {
+            iterator.previous();
+            Token visibility=promotion==php.runtime.common.Modifier.PRIVATE
+                    ?new PrivateStmtToken(TokenMeta.of("private",variable))
+                    :promotion==php.runtime.common.Modifier.PROTECTED
+                    ?new ProtectedStmtToken(TokenMeta.of("protected",variable))
+                    :new PublicStmtToken(TokenMeta.of("public",variable));
+            java.util.List<Token> modifiers=new java.util.ArrayList<>();modifiers.add(visibility);
+            if(setModifier!=null)modifiers.add(new PropertySetVisibilityStmtToken(variable.getMeta(),setModifier));
+            if(phpReadonly) modifiers.add(new NameToken(TokenMeta.of("readonly",variable)));
+            ClassVarStmtToken promotedProperty=analyzer.generator(PropertyHookGenerator.class).getToken(
+                    variable,iterator,analyzer.getClazz(),modifiers,promotedType);
+            promotedHooks=promotedProperty.getPropertyHooks();
+            next=nextToken(iterator);
+        }
         if (next instanceof AssignExprToken) {
             if (isVariadic) {
                 unexpectedToken(next);
@@ -196,6 +246,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
         }
 
         ArgumentStmtToken argument = new ArgumentStmtToken(variable.getMeta());
+        argument.setPhpAttributes(attributes);
         argument.setName(variable);
         argument.setDeclaredType(declaredType);
         argument.setHintType(hintType);
@@ -204,6 +255,17 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
         argument.setVariadic(isVariadic);
         argument.setValue(value);
         argument.setOptional(optional);
+        argument.setPhpReadonly(phpReadonly);
+        argument.setPromotionModifier(promotion);
+        argument.setPhpSetModifier(setModifier);
+        argument.setPromotedType(promotedType);
+        argument.setPromotedPropertyHooks(promotedHooks);
+        if (promotion != null) {
+            if (isVariadic) analyzer.getEnvironment().error(argument.toTraceInfo(analyzer.getContext()),
+                    php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR, "Cannot declare variadic promoted property");
+            analyzer.getFunction().variable(argument.getName()).setUsed(true);
+            analyzer.getFunction().setThisExists(true);
+        }
 
         if (argument.isReference() && argument.getValue() != null)
             analyzer.getFunction().variable(argument.getName()).setUsed(true);
@@ -222,6 +284,12 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
             arguments.add(argument);
         }
 
+        if (isPhp8()) {
+            var names = new java.util.HashSet<String>();
+            for (ArgumentStmtToken argument : arguments) if (!names.add(argument.getName().getName()))
+                analyzer.getEnvironment().error(argument.toTraceInfo(analyzer.getContext()), php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,
+                        "Redefinition of parameter $%s",argument.getName().getName());
+        }
         result.setArguments(arguments);
 
         Token token = nextTokenAndPrev(iterator);
@@ -261,7 +329,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                     if (isPhp8() && analyzer.peekClosure() == null) unexpectedToken(next, "self requires class scope");
                     result.setReturnHintType(HintType.SELF);
                 } else {
-                    if (analyzer.getClazz().isTrait() || (isPhp8() && analyzer.peekClosure() != null)) {
+                    if (analyzer.getClazz().isTrait() || analyzer.getClazz().isAnonymous() || (isPhp8() && analyzer.peekClosure() != null)) {
                         result.setReturnHintType(HintType.SELF);
                     } else {
                         result.setReturnHintTypeClass(new FulledNameToken(next.getMeta(), new ArrayList<Token>() {{
@@ -357,6 +425,89 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
         }
     }
 
+    /** Parse a hook in an independent method scope while retaining its actual declaring class. */
+    public PropertyHookStmtToken parsePropertyHook(MethodStmtToken method, PropertyHookStmtToken.Kind kind,
+            Token first, ListIterator<Token> iterator,
+            php.runtime.reflection.support.PhpTypeDeclaration propertyType,
+            List<PropertyHookStmtToken.BackingAccess> backingAccesses) {
+        FunctionStmtToken oldFunction=analyzer.getFunction(true);
+        List<FunctionStmtToken> outerClosures=new ArrayList<>();
+        while(analyzer.peekClosure()!=null) outerClosures.add(analyzer.popClosure());
+        analyzer.addScope(true);analyzer.setFunction(method);
+        method.setNamespace(analyzer.getNamespace());method.setStatic(false);
+        String hookName=method.getName().getName();
+        method.setPropertyHookName(hookName.substring(1,hookName.indexOf("::")));
+        try {
+            Token bodyStart=first;
+            if (isOpenedBrace(first,BraceExprToken.Kind.SIMPLE)) {
+                if(kind!=PropertyHookStmtToken.Kind.SET) unexpectedToken(first);
+                processArguments(method,iterator);
+                if(method.getDeclaredReturnType()!=null || method.getReturnHintType()!=null
+                        || method.getReturnHintTypeClass()!=null)
+                    unexpectedToken(first,"Property hooks cannot declare a return type");
+                bodyStart=nextToken(iterator);
+            } else {
+                List<ArgumentStmtToken> arguments=new ArrayList<>();
+                if(kind==PropertyHookStmtToken.Kind.SET) {
+                    ArgumentStmtToken value=new ArgumentStmtToken(method.getMeta());
+                    value.setName(VariableExprToken.valueOf("value"));value.setDeclaredType(propertyType);
+                    arguments.add(value);
+                }
+                method.setArguments(arguments);
+            }
+            if(kind==PropertyHookStmtToken.Kind.SET && method.getArguments().size()!=1)
+                unexpectedToken(first,"A set hook must accept exactly one value parameter");
+            for(ArgumentStmtToken argument : method.getArguments()) {
+                if(argument.isReference() || argument.isVariadic() || argument.getValue()!=null
+                        || argument.getPromotionModifier()!=null)
+                    unexpectedToken(argument,"Invalid property hook parameter");
+                analyzer.getScope().addVariable(argument.getName());
+                method.variable(argument.getName()).setUsed(true);
+                if(argument.getDeclaredType()==null && argument.getHintType()==null
+                        && argument.getHintTypeClass()==null && kind==PropertyHookStmtToken.Kind.SET)
+                    argument.setDeclaredType(propertyType);
+            }
+            if(kind==PropertyHookStmtToken.Kind.GET) method.setDeclaredReturnType(propertyType);
+            else method.setReturnHintType(HintType.VOID);
+            PropertyHookStmtToken.BodyKind bodyKind;
+            ExprStmtToken arrow=null;
+            if(isOpenedBrace(bodyStart,BraceExprToken.Kind.BLOCK)) {
+                bodyKind=PropertyHookStmtToken.BodyKind.BLOCK;
+                method.setBody(analyzer.generator(BodyGenerator.class).getToken(bodyStart,iterator));
+            } else if(bodyStart.getWord().equals("=>")) {
+                bodyKind=PropertyHookStmtToken.BodyKind.EXPRESSION;
+                arrow=analyzer.generator(SimpleExprGenerator.class).getToken(nextToken(iterator),iterator,
+                        org.develnext.jphp.core.common.Separator.SEMICOLON,null);
+                // GET returns the expression. SET keeps its expression for dedicated backing-write lowering.
+                if(kind==PropertyHookStmtToken.Kind.GET) {
+                    ReturnStmtToken result=new ReturnStmtToken(arrow.getMeta());result.setValue(arrow);
+                    method.setBody(BodyStmtToken.of(new ExprStmtToken(analyzer.getEnvironment(),analyzer.getContext(),result)));
+                  } else {
+                      // Expression SET means an actual write to this property's backing slot.
+                      VariableExprToken receiver=VariableExprToken.valueOf("this");
+                      org.develnext.jphp.core.tokenizer.token.expr.operator.DynamicAccessExprToken access=
+                              new org.develnext.jphp.core.tokenizer.token.expr.operator.DynamicAccessExprToken(TokenMeta.of("->",method));
+                      NameToken member=new NameToken(TokenMeta.of(method.getPropertyHookName(),method));access.setField(member);
+                      method.notePropertyHookBackingAccess(new PropertyHookStmtToken.BackingAccess(receiver,access,member));
+                      analyzer.getScope().addVariable(receiver);method.variable(receiver).setUsed(true);
+                      List<Token> assignment=new ArrayList<>();assignment.add(receiver);assignment.add(access);
+                      assignment.add(new AssignExprToken(TokenMeta.of("=",method)));assignment.addAll(arrow.getTokens());
+                      method.setBody(BodyStmtToken.of(new ExprStmtToken(analyzer.getEnvironment(),analyzer.getContext(),assignment)));
+                  }
+            } else if(bodyStart instanceof SemicolonToken) {
+                bodyKind=PropertyHookStmtToken.BodyKind.ABSTRACT;
+                method.setAbstract(true);method.setInterfacable(true);method.setBody(null);
+            } else {unexpectedToken(bodyStart);return null;}
+            method.setTypeInfo(analyzer.getScope().getTypeInfo());
+            method.setLabels(analyzer.getScope().getLabels());
+            method.setLocal(analyzer.getScope().getVariables());
+            return new PropertyHookStmtToken(method.getMeta(),kind,method,bodyKind,arrow,method.getPropertyHookBackingAccesses());
+        } finally {
+            analyzer.removeScope();analyzer.setFunction(oldFunction);
+            for(int i=outerClosures.size()-1;i>=0;i--) analyzer.pushClosure(outerClosures.get(i));
+        }
+    }
+
     protected void processBody(FunctionStmtToken result, ListIterator<Token> iterator){
         Token next = nextToken(iterator);
         if (isOpenedBrace(next, BraceExprToken.Kind.BLOCK)){
@@ -432,7 +583,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                 result.setDocComment(commentToken);
 
                 ClassStmtToken oldClass = analyzer.getClazz();
-                boolean nestedGlobal = isPhp8() && oldFunction != null;
+                boolean nestedGlobal = oldFunction != null;
                 List<FunctionStmtToken> outerClosures = new ArrayList<>();
                 if (nestedGlobal) {
                     while (analyzer.peekClosure() != null) outerClosures.add(analyzer.popClosure());
@@ -444,7 +595,7 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                 } finally {
                     if (nestedGlobal) analyzer.setClazz(oldClass);
                     for (int i = outerClosures.size() - 1; i >= 0; i--) analyzer.pushClosure(outerClosures.get(i));
-                    if (isPhp8()) analyzer.setFunction(oldAbsoluteFunction);
+                    analyzer.setFunction(oldAbsoluteFunction);
                 }
 
                 result.setTypeInfo(analyzer.getScope().getTypeInfo());
@@ -456,7 +607,6 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
                 result.getMeta().setEndPosition(previous.getMeta().getStartPosition());
                 iterator.next();
 
-                if (!isPhp8()) analyzer.setFunction(oldFunction);
                 return result;
             } else if (next instanceof BraceExprToken){
                 // xClosure

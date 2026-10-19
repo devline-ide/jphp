@@ -1,0 +1,1 @@
+<?php function through($s,$n){return [ord($s),chr($n)];}$r=through(hex2bin('ff'),255);echo $r[0],'|',bin2hex($r[1]);

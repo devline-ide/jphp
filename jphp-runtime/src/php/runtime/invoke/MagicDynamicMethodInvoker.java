@@ -22,7 +22,7 @@ class MagicDynamicMethodInvoker extends DynamicMethodInvoker {
         env.pushCall(trace, object, args, methodName.toString(), method.getClazz().getName(), object.getReflection().getName());
         env.pushCall(
                 trace, object,
-                new Memory[]{methodName, new ArrayMemory(true, args)},
+                new Memory[]{methodName, PhpNamedArgumentTarget.magicArguments(env, args, this)},
                 method.getName(), method.getClazz().getName(), object.getReflection().getName()
         );
     }
@@ -35,6 +35,6 @@ class MagicDynamicMethodInvoker extends DynamicMethodInvoker {
 
     @Override
     protected Memory invoke(Memory... args) throws Throwable {
-        return super.invoke(methodName, new ArrayMemory(false, args));
+        return super.invoke(methodName, PhpNamedArgumentTarget.magicArguments(env, args, this));
     }
 }

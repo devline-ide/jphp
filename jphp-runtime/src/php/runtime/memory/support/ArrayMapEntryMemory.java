@@ -45,6 +45,7 @@ public class ArrayMapEntryMemory extends ReferenceMemory implements Map.Entry<Ob
     }
 
     public void setKey(Object key) {
+        prepareUnownedKeyStore();
         this.key = key;
     }
 

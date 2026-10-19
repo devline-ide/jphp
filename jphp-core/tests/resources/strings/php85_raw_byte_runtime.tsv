@@ -1,0 +1,40 @@
+scalar		false	0	0	false
+scalar	30	false	0	0	true
+scalar	3030	true	0	0	true
+scalar	0030	true	0	0	false
+scalar	30ff	true	0	0	false
+scalar	ff	true	0	0	false
+scalar	efbfbd	true	0	0	false
+scalar	c3a9	true	0	0	false
+scalar	31322e35ff	true	12	12.5	false
+scalar	002d31	true	0	0	false
+scalar	20312e3965ff	true	1	1.9	false
+scalar	31453030	true	1	1	true
+scalar	3145393939	true	0	INF	true
+compare	ff	efbfbd	false	false	1
+compare	ff	fe	false	false	1
+compare	80	7f	false	false	1
+compare	c3a9	c3a9	true	true	0
+compare	3031	31	true	false	0
+compare	31	3120	true	false	0
+compare	313200	3132	false	false	1
+compare	00		false	false	1
+compare	eda080	efbfbd	false	false	-1
+number-compare	ff	false	-1	false	-1
+number-compare	efbfbd	false	-1	false	-1
+number-compare	0030	false	1	false	1
+number-compare	30	true	0	false	1
+number-compare	3030	true	0	false	1
+number-compare	31322e35ff	false	-1	false	-1
+number-compare	31322e35	false	-1	true	0
+offset	0	c3
+offset	1	a9
+offset	2	ff
+offset	3	f0
+offset	6	82
+offset	-1	82
+offset	-2	99
+offset	-7	c3
+offset	-8	
+offset	7	
+offset	4294967296	

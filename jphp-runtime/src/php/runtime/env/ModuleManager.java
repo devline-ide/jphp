@@ -25,6 +25,8 @@ public class ModuleManager {
     private final Set<String> includedPaths = new LinkedHashSet<>();
     private Function<String, Collection<String>> implicitClassImportsResolver;
     private boolean implicitClassImportsResolverFrozen;
+    private Function<String, PhpLanguageProfile> sourceLanguageProfileResolver;
+    private boolean sourceLanguageProfileResolverFrozen;
 
     public ModuleManager(Environment env) {
         this.env = env;
@@ -36,6 +38,8 @@ public class ModuleManager {
         this.includedPaths.addAll(parent.includedPaths);
         this.implicitClassImportsResolver = parent.implicitClassImportsResolver;
         this.implicitClassImportsResolverFrozen = parent.implicitClassImportsResolverFrozen;
+        this.sourceLanguageProfileResolver = parent.sourceLanguageProfileResolver;
+        this.sourceLanguageProfileResolverFrozen = parent.sourceLanguageProfileResolverFrozen;
     }
 
     /**
@@ -48,6 +52,28 @@ public class ModuleManager {
             throw new IllegalStateException("Implicit class import resolver is frozen after the first fetch");
         }
         implicitClassImportsResolver = resolver;
+    }
+
+    /**
+     * Environment-local source language policy, configured before the first fetch.
+     * Called once per source fetch with its normalized resolved path, including cache hits.
+     * A non-null selection overrides the supplied/caller profile; null retains it.
+     * Compiled modules never call the resolver and retain their stored language profile.
+     */
+    public void setSourceLanguageProfileResolver(Function<String, PhpLanguageProfile> resolver) {
+        if (sourceLanguageProfileResolverFrozen && sourceLanguageProfileResolver != resolver) {
+            throw new IllegalStateException("Source language profile resolver is frozen after the first fetch");
+        }
+        sourceLanguageProfileResolver = resolver;
+    }
+
+    private PhpLanguageProfile resolveSourceLanguageProfile(String path, boolean compiled, PhpLanguageProfile profile) {
+        sourceLanguageProfileResolverFrozen = true;
+        if (!compiled && sourceLanguageProfileResolver != null) {
+            PhpLanguageProfile selected = sourceLanguageProfileResolver.apply(ModuleCacheKey.normalize(path));
+            if (selected != null) return selected;
+        }
+        return profile;
     }
 
     private Context resolveImplicitClassImports(String path, boolean compiled) {
@@ -72,6 +98,7 @@ public class ModuleManager {
     public ModuleEntity fetchModule(String path, boolean compiled, PhpLanguageProfile profile) throws Throwable {
         String resourcePath = resolveResourceBytecode(path);
         if (!resourcePath.equals(path)) return fetchModule(resourcePath, compiled || path.endsWith(".php") && resourcePath.endsWith(".phb"), profile);
+        profile = resolveSourceLanguageProfile(path, compiled, profile);
         Context imports = resolveImplicitClassImports(path, compiled);
         ModuleCacheKey key = new ModuleCacheKey(path, compiled, profile, imports.getImplicitClassImportsFingerprint());
         ModuleEntity moduleEntity = cachedModules.get(key);
@@ -107,6 +134,7 @@ public class ModuleManager {
             compiled = compiled || path.endsWith(".php") && resourcePath.endsWith(".phb");
             path = resourcePath;
         }
+        profile = resolveSourceLanguageProfile(path, compiled, profile);
         Context imports = resolveImplicitClassImports(path, compiled);
         return fetchTemporaryModule(path, compiled, profile, imports.getImplicitClassImports());
     }
@@ -125,7 +153,7 @@ public class ModuleManager {
                 return null;
             } else {
                 ModuleEntity module;
-                Context context = fetchContext(stream);
+                Context context = fetchContext(stream,profile);
                 if (!compiled) {
                     context.setPhpLanguageProfile(profile);
                     context.setImplicitClassImports(imports.values());
@@ -144,6 +172,13 @@ public class ModuleManager {
         } finally {
             env.invokeMethod(stream, "close");
         }
+    }
+
+    private Context fetchContext(Stream stream,PhpLanguageProfile profile) throws Throwable {
+        if(stream instanceof FileStream && profile==PhpLanguageProfile.PHP_8_5)
+            return new Context(new BufferedInputStream(Stream.getInputStream(env,stream)),
+                    new File(stream.getPath()).getCanonicalPath(),env.getDefaultCharset());
+        return fetchContext(stream);
     }
 
     public Context fetchContext(Stream stream) throws Throwable {

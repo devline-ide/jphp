@@ -71,7 +71,7 @@ public final class MemoryStreamAdapterFactory implements TypeAdapterFactory {
                 if (!active.add(pointer)) { writer.nullValue(); return; }
                 try {
                     ArrayMemory array = value.toValue(ArrayMemory.class);
-                    boolean list = !serializer.forceObject && array.isList();
+                    boolean list = serializer.isJsonList(array);
                     if (list) writer.beginArray(); else writer.beginObject();
                     ForeachIterator iterator = array.foreachIterator(false, false);
                     while (iterator.next()) {
@@ -103,9 +103,12 @@ public final class MemoryStreamAdapterFactory implements TypeAdapterFactory {
                         try {
                             writeMemory(writer, ((JsonSerializable) object).jsonSerialize(env), active, useHandlers);
                         } finally { env.popCall(); }
+                    } else if(object instanceof php.runtime.lang.BaseEnum actual) {
+                        writeMemory(writer,serializer.enumValue(actual),active,useHandlers);
                     } else {
                         writer.beginObject();
-                        ForeachIterator iterator = object.getProperties().foreachIterator(false, false);
+                        Environment host=serializer.getEnv();if(host==null)host=Environment.current();
+                        ForeachIterator iterator = php.runtime.PhpPropertyHookAccess.consumerProperties(object,host,host==null?php.runtime.env.TraceInfo.UNKNOWN:host.trace(),null,1);
                         while (iterator.next()) {
                             String key = iterator.getKey().toString();
                             Memory property = iterator.getValue();

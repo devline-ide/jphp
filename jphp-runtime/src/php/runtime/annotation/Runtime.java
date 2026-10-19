@@ -19,6 +19,33 @@ public @interface Runtime {
         boolean ignoreRefs() default false;
     }
 
+    /** PHP known-native frameless entry arities; distinct from Java fast-method dispatch. */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target({METHOD})
+    public @interface Frameless {
+        int[] value();
+    }
+
+    /** Native BODY implements ordered string conversion over its actual parsed array snapshot. */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target({METHOD})
+    public @interface StringJoin {}
+
+    /** Unary STRING argument conversion with a checked Stringable receiver SEND; INT scalar result. */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target({METHOD})
+    public @interface ScalarStringCallback {
+        int argument();
+    }
+
+    /** Exact PHP frameless target for direct positional calls; dynamic calls keep their published entry. */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target({METHOD})
+    public @interface DirectCall {
+        String value();
+        boolean liveArrayVariables() default false;
+    }
+
     @Retention(RetentionPolicy.RUNTIME)
     @Target({METHOD})
     public @interface FastMethod {

@@ -39,17 +39,35 @@ public class CompileMethodEntity extends MethodEntity {
         function.name = name + "()";
     }
 
+    public static int getPhpArgumentCount(Method method) {
+        int count = 0;
+        for (int i = 0; i < method.getParameterTypes().length; i++) {
+            Class<?> type = method.getParameterTypes()[i];
+            if (type == Environment.class || type == TraceInfo.class) continue;
+            if (Arrays.stream(method.getParameterAnnotations()[i]).anyMatch(annotation ->
+                    annotation.annotationType() == php.runtime.annotation.Runtime.GetLocals.class)) continue;
+            count++;
+        }
+        return count;
+    }
+
     public boolean addMethod(Method method, boolean skipConflicts) {
         return addMethod(method, skipConflicts, null);
     }
 
     public boolean addMethod(Method method, boolean skipConflicts, CallbackW<MemoryOperation, Class<?>, Type> unknownTypeFetcher) {
-        if (skipConflicts && function.find(method.getParameterTypes().length) != null) {
+        return addMethod(method, skipConflicts, unknownTypeFetcher, false);
+    }
+
+    protected boolean addMethod(Method method, boolean skipConflicts,
+                                CallbackW<MemoryOperation, Class<?>, Type> unknownTypeFetcher, boolean wrappedReceiver) {
+        if (skipConflicts && function.hasExactMethod(method)) {
             return false;
         }
 
         method.setAccessible(true);
         CompileMethod.Method compileMethod = function.addMethod(method);
+        compileMethod.wrappedReceiver = wrappedReceiver;
         compileMethod.setUnknownTypeFetcher(unknownTypeFetcher);
 
         int mods = method.getModifiers();
@@ -103,7 +121,7 @@ public class CompileMethodEntity extends MethodEntity {
             parameters = Arrays.copyOf(parameters, i);
         }
 
-        if (this.parameters == null || this.parameters.length < parameters.length) {
+        if (this.parameters == null || this.parameters.length <= parameters.length) {
             this.parameters = parameters;
         }
 
@@ -129,6 +147,10 @@ public class CompileMethodEntity extends MethodEntity {
     @Override
     public Memory invokeDynamic(IObject _this, Environment env, TraceInfo trace, Memory... arguments) throws Throwable {
         return invokeDynamic((Object)_this, env, trace, arguments);
+    }
+
+    protected Object resolveReceiver(CompileMethod.Method method, Object receiver) {
+        return receiver;
     }
 
     public Memory invokeDynamic(Object _this, Environment env, TraceInfo trace, Memory... arguments) throws Throwable {
@@ -161,6 +183,7 @@ public class CompileMethodEntity extends MethodEntity {
                 }
             }
 
+            _this = resolveReceiver(method, _this);
             Class<?>[] types = method.parameterTypes;
             Object[] passed = new Object[ types.length ];
 
@@ -281,6 +304,30 @@ public class CompileMethodEntity extends MethodEntity {
             return (Method) super.find(paramCount);
         }
 
+        protected boolean hasExactMethod(java.lang.reflect.Method method) {
+            int count = getPhpArgumentCount(method);
+            return count < methods.length && methods[count] != null || method.isVarArgs() && methodVarArgs != null;
+        }
+
+        /** Fixed explicit slots can shadow a wrapped variadic without losing its other arities. */
+        protected Method shadowWrappedSlot(java.lang.reflect.Method method) {
+            int count = getPhpArgumentCount(method);
+            if (count >= methods.length) return null;
+            Method previous = (Method) methods[count];
+            if (previous == null || !previous.wrappedReceiver || !previous.isVarArg()) return null;
+            if (method.isVarArgs()) {
+                if (previous != methodVarArgs) return null;
+                methodVarArgs = null;
+            }
+            methods[count] = null;
+            return previous;
+        }
+
+        protected void restoreWrappedSlot(Method previous, boolean variadic) {
+            methods[previous.argsCount] = previous;
+            if (variadic) methodVarArgs = previous;
+        }
+
         @Override
         protected CompileFunction.Method createMethod(java.lang.reflect.Method method, int count, boolean asImmutable) {
             return new Method(method, count, asImmutable);
@@ -292,6 +339,7 @@ public class CompileMethodEntity extends MethodEntity {
             protected CallbackW<MemoryOperation, Class<?>, Type> unknownTypeFetcher;
 
             protected ParameterEntity[] parameters;
+            protected boolean wrappedReceiver;
 
             public Method(java.lang.reflect.Method method, int argsCount, boolean _asImmutable) {
                 super(method, argsCount, _asImmutable);

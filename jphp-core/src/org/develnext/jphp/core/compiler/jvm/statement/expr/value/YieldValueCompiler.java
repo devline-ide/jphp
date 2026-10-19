@@ -16,6 +16,10 @@ public class YieldValueCompiler extends BaseExprCompiler<YieldExprToken> {
 
     @Override
     public void write(YieldExprToken token, boolean returnValue) {
+        if(token.isDelegating() && expr.getMethod().getGeneratorEntity().isReturnReference()
+                && compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            compiler.getEnvironment().error(token.toTraceInfo(compiler.getContext()),php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,
+                    "Cannot use \"yield from\" inside a by-reference generator");
         if (token.isOnlyNext() && token.getValue() != null) {
             return;
         }

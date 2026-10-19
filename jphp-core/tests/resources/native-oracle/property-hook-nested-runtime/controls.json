@@ -1,0 +1,162 @@
+[
+  {
+    "id": "ordinary-host-leaf0-middle0-host0",
+    "leafStrict": false,
+    "middleStrict": false,
+    "hostStrict": false,
+    "deferredHost": false,
+    "sourceDigest": "ab073bacb6fd964bcaa0f8e757537db92a6bbd353056f9196a6da71b375ad7b4",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf0-middle0-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "df8b8f65f54c28302703a4512d5ba330a26c51303f06e82b9e4e4fad3de11c91"
+  },
+  {
+    "id": "deferred-host-leaf0-middle0-host0",
+    "leafStrict": false,
+    "middleStrict": false,
+    "hostStrict": false,
+    "deferredHost": true,
+    "sourceDigest": "7f88c179f89892fc51d574f10922341de339a6a414ca3905eb6f7406fb8cb763",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf0-middle0-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "6bf742757fa10c227084702619aecbaeda5aca51ab765cf44ce2bb178590c3e6"
+  },
+  {
+    "id": "ordinary-host-leaf0-middle0-host1",
+    "leafStrict": false,
+    "middleStrict": false,
+    "hostStrict": true,
+    "deferredHost": false,
+    "sourceDigest": "a206464ec09429e80940e2213e5f2fd81094bd10470b85dbadb702d5d26bac5e",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf0-middle0-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "22970bfb848f55aa301573b30c2bf9d56da2ce53122a13e80d4da99d3504cc2f"
+  },
+  {
+    "id": "deferred-host-leaf0-middle0-host1",
+    "leafStrict": false,
+    "middleStrict": false,
+    "hostStrict": true,
+    "deferredHost": true,
+    "sourceDigest": "d5b80cb77b51cdfa924e56e81627a6abf320a53db6aa9a43ad5c7ae7e9c6bfc1",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf0-middle0-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "3969bf8fc488f2a112e8e3279293cec60b50d85a8f7534f1b45a2a1da6094cb4"
+  },
+  {
+    "id": "ordinary-host-leaf0-middle1-host0",
+    "leafStrict": false,
+    "middleStrict": true,
+    "hostStrict": false,
+    "deferredHost": false,
+    "sourceDigest": "45509916bf891b1a8b6cb8679c02ea8834da20be830d094328fbdd84af79457b",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf0-middle1-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "2e234670ab499af7ca08c5b90d8e8e90038374bdafd7ae686d0947fd34ac1d77"
+  },
+  {
+    "id": "deferred-host-leaf0-middle1-host0",
+    "leafStrict": false,
+    "middleStrict": true,
+    "hostStrict": false,
+    "deferredHost": true,
+    "sourceDigest": "9b71661567d682b61de50142e25067b2cb5b3ed93667d3125cc5d0e3c64912b0",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf0-middle1-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "ef56e2603acba4ad9299532542400318a64e3ef99c62dedb0f2ba1231af49d94"
+  },
+  {
+    "id": "ordinary-host-leaf0-middle1-host1",
+    "leafStrict": false,
+    "middleStrict": true,
+    "hostStrict": true,
+    "deferredHost": false,
+    "sourceDigest": "84c7469670f9123b96c81d373ba786df10ecad690479db4f45babe95bb3b4d92",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf0-middle1-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "b4c050eb8abe699587525ac17f3ab1b1080d058b022b300f5bd16f002932b4df"
+  },
+  {
+    "id": "deferred-host-leaf0-middle1-host1",
+    "leafStrict": false,
+    "middleStrict": true,
+    "hostStrict": true,
+    "deferredHost": true,
+    "sourceDigest": "c6c482d882f5a599561d79f7ead1647973371f2f818428fa1316192eb4ec41c7",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf0-middle1-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "88617f8c759d040fee7e09c8a8c87dbdea214ec2f38f15d980acfeda5138b0ae"
+  },
+  {
+    "id": "ordinary-host-leaf1-middle0-host0",
+    "leafStrict": true,
+    "middleStrict": false,
+    "hostStrict": false,
+    "deferredHost": false,
+    "sourceDigest": "753fe6166b38ba1475880210aa64ac0242b4e2d92835ffa07a1feda92a14e69e",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf1-middle0-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "0f3e5a2fd106bc9867949dbd536b507c7eae46a8a28eb4698c6a18f4d281f4c1"
+  },
+  {
+    "id": "deferred-host-leaf1-middle0-host0",
+    "leafStrict": true,
+    "middleStrict": false,
+    "hostStrict": false,
+    "deferredHost": true,
+    "sourceDigest": "1206a6b828893f07f0b84ff2ffffdef8919ef4fb0b6d71d3bce8013d9006d42e",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf1-middle0-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "6fb5e71966bec3960fa273b69c76cc368226035a66863316ee58e267468d5de2"
+  },
+  {
+    "id": "ordinary-host-leaf1-middle0-host1",
+    "leafStrict": true,
+    "middleStrict": false,
+    "hostStrict": true,
+    "deferredHost": false,
+    "sourceDigest": "38aa65a9bae2f0932feaa8d2907c5a1bd0b3421933708a987840f04a4b10bed9",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf1-middle0-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "6e2f6ee125e7ea45dcd4fb7cc740855a1d1985af4ecccc48009c01a22567a152"
+  },
+  {
+    "id": "deferred-host-leaf1-middle0-host1",
+    "leafStrict": true,
+    "middleStrict": false,
+    "hostStrict": true,
+    "deferredHost": true,
+    "sourceDigest": "0dfe60e212e241695c0535e4a5b78bd9cb182aad0abe81a839a0aa196a370a7d",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf1-middle0-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "0f4f796bd443eaa819f3b6b110ace6c8198ed4e04a7b8afda6c06ebd8a0d698f"
+  },
+  {
+    "id": "ordinary-host-leaf1-middle1-host0",
+    "leafStrict": true,
+    "middleStrict": true,
+    "hostStrict": false,
+    "deferredHost": false,
+    "sourceDigest": "4d9ea17e9b5750b4284ff88a744debb49110b152d30bdbd442f0290c7f0d90a2",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf1-middle1-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "872eff05b3c64cdc2b29abeb0379cdc25e317f183b005fc9652ff4589ead3cda"
+  },
+  {
+    "id": "deferred-host-leaf1-middle1-host0",
+    "leafStrict": true,
+    "middleStrict": true,
+    "hostStrict": false,
+    "deferredHost": true,
+    "sourceDigest": "e67a545fe71760472769bf5902b76667dea1bd09b504bb65f316c546e1ba504f",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf1-middle1-host0\\COMMAND.json",
+    "nativeReceiptSHA256": "fe0a52e023be69435dc09efa15b2a4f5ec36b35a94e3a84bcd6bc925f6502c4e"
+  },
+  {
+    "id": "ordinary-host-leaf1-middle1-host1",
+    "leafStrict": true,
+    "middleStrict": true,
+    "hostStrict": true,
+    "deferredHost": false,
+    "sourceDigest": "c6f70a1cebb263ab8171ac5f9708177180e44181f3311719b66a7f160349379b",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\ordinary-host-leaf1-middle1-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "efa1f6267c4531825968862e92b4516a460a347633e610667d42d51b5753d751"
+  },
+  {
+    "id": "deferred-host-leaf1-middle1-host1",
+    "leafStrict": true,
+    "middleStrict": true,
+    "hostStrict": true,
+    "deferredHost": true,
+    "sourceDigest": "e0d24fc79a182a164480c94384a9a2d98548fd2ee291ac2dc500627aab513ac0",
+    "nativeReceipt": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\nested-trait-runtime-r1-controls\\native-receipts\\deferred-host-leaf1-middle1-host1\\COMMAND.json",
+    "nativeReceiptSHA256": "199cec397ff191a8f167b1330a9b33b612fba5a96ce397dbfbe3dcf5cd9add7e"
+  }
+]

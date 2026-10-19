@@ -92,7 +92,7 @@ public class GameEntity2D implements EventTarget {
 
         ChangeListener<Number> activeTrigger = (observable, oldValue, newValue) -> this.body.setActive(true);
         node.layoutYProperty().addListener(activeTrigger);
-        node.layoutYProperty().addListener(activeTrigger);
+        node.layoutXProperty().addListener(activeTrigger);
 
         node.disabledProperty().addListener((observable, oldValue, newValue) -> {
             GameEntity2D.this.body.setActive(!newValue);
@@ -380,11 +380,11 @@ public class GameEntity2D implements EventTarget {
                         velocity.y += gravity.y * dt;
                     }
 
-                    if (velocity.x > 0.00001 || velocity.x < -00000.1) {
+                    if (Math.abs(velocity.x) > 0.00001) {
                         x.set(x.get() + GameScene2D.toPixels(velocity.x * dt));
                     }
 
-                    if (velocity.y > 0.00001 || velocity.y < -00000.1) {
+                    if (Math.abs(velocity.y) > 0.00001) {
                         y.set(y.get() + GameScene2D.toPixels(velocity.y * dt));
                     }
 

@@ -1,0 +1,212 @@
+[
+  {
+    "id": "weak/backed_full",
+    "resource": "resources/property_hooks/consumers/weak/backed_full",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\backed_full.php"
+  },
+  {
+    "id": "weak/arrow_set_implicit_value",
+    "resource": "resources/property_hooks/consumers/weak/arrow_set_implicit_value",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\arrow_set_implicit_value.php"
+  },
+  {
+    "id": "weak/virtual_get_missing_set",
+    "resource": "resources/property_hooks/consumers/weak/virtual_get_missing_set",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\virtual_get_missing_set.php"
+  },
+  {
+    "id": "weak/virtual_set_missing_get",
+    "resource": "resources/property_hooks/consumers/weak/virtual_set_missing_get",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\virtual_set_missing_get.php"
+  },
+  {
+    "id": "weak/backed_get_only",
+    "resource": "resources/property_hooks/consumers/weak/backed_get_only",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\backed_get_only.php"
+  },
+  {
+    "id": "weak/backed_set_only",
+    "resource": "resources/property_hooks/consumers/weak/backed_set_only",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\backed_set_only.php"
+  },
+  {
+    "id": "weak/private_method_scope",
+    "resource": "resources/property_hooks/consumers/weak/private_method_scope",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\private_method_scope.php"
+  },
+  {
+    "id": "weak/nested_other_hook",
+    "resource": "resources/property_hooks/consumers/weak/nested_other_hook",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\nested_other_hook.php"
+  },
+  {
+    "id": "weak/type_set_wider",
+    "resource": "resources/property_hooks/consumers/weak/type_set_wider",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\type_set_wider.php"
+  },
+  {
+    "id": "weak/weak_strict_parameter",
+    "resource": "resources/property_hooks/consumers/weak/weak_strict_parameter",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\weak_strict_parameter.php"
+  },
+  {
+    "id": "weak/typed_return_failure",
+    "resource": "resources/property_hooks/consumers/weak/typed_return_failure",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\typed_return_failure.php"
+  },
+  {
+    "id": "weak/uninitialized_backing",
+    "resource": "resources/property_hooks/consumers/weak/uninitialized_backing",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\uninitialized_backing.php"
+  },
+  {
+    "id": "weak/isset_empty_coalesce",
+    "resource": "resources/property_hooks/consumers/weak/isset_empty_coalesce",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\isset_empty_coalesce.php"
+  },
+  {
+    "id": "weak/unset_backed",
+    "resource": "resources/property_hooks/consumers/weak/unset_backed",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\unset_backed.php"
+  },
+  {
+    "id": "weak/reference_get_backed",
+    "resource": "resources/property_hooks/consumers/weak/reference_get_backed",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\reference_get_backed.php"
+  },
+  {
+    "id": "weak/reference_get_virtual_set",
+    "resource": "resources/property_hooks/consumers/weak/reference_get_virtual_set",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\reference_get_virtual_set.php"
+  },
+  {
+    "id": "weak/byvalue_get_ref_rejection",
+    "resource": "resources/property_hooks/consumers/weak/byvalue_get_ref_rejection",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\byvalue_get_ref_rejection.php"
+  },
+  {
+    "id": "weak/array_indirect_backed_rejection",
+    "resource": "resources/property_hooks/consumers/weak/array_indirect_backed_rejection",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\array_indirect_backed_rejection.php"
+  },
+  {
+    "id": "weak/array_indirect_virtual_copy",
+    "resource": "resources/property_hooks/consumers/weak/array_indirect_virtual_copy",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\array_indirect_virtual_copy.php"
+  },
+  {
+    "id": "weak/compound_increment_events",
+    "resource": "resources/property_hooks/consumers/weak/compound_increment_events",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\compound_increment_events.php"
+  },
+  {
+    "id": "weak/exceptions_leave_backing",
+    "resource": "resources/property_hooks/consumers/weak/exceptions_leave_backing",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\weak\\exceptions_leave_backing.php"
+  },
+  {
+    "id": "strict/backed_full",
+    "resource": "resources/property_hooks/consumers/strict/backed_full",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\backed_full.php"
+  },
+  {
+    "id": "strict/arrow_set_implicit_value",
+    "resource": "resources/property_hooks/consumers/strict/arrow_set_implicit_value",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\arrow_set_implicit_value.php"
+  },
+  {
+    "id": "strict/virtual_get_missing_set",
+    "resource": "resources/property_hooks/consumers/strict/virtual_get_missing_set",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\virtual_get_missing_set.php"
+  },
+  {
+    "id": "strict/virtual_set_missing_get",
+    "resource": "resources/property_hooks/consumers/strict/virtual_set_missing_get",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\virtual_set_missing_get.php"
+  },
+  {
+    "id": "strict/backed_get_only",
+    "resource": "resources/property_hooks/consumers/strict/backed_get_only",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\backed_get_only.php"
+  },
+  {
+    "id": "strict/backed_set_only",
+    "resource": "resources/property_hooks/consumers/strict/backed_set_only",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\backed_set_only.php"
+  },
+  {
+    "id": "strict/private_method_scope",
+    "resource": "resources/property_hooks/consumers/strict/private_method_scope",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\private_method_scope.php"
+  },
+  {
+    "id": "strict/nested_other_hook",
+    "resource": "resources/property_hooks/consumers/strict/nested_other_hook",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\nested_other_hook.php"
+  },
+  {
+    "id": "strict/type_set_wider",
+    "resource": "resources/property_hooks/consumers/strict/type_set_wider",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\type_set_wider.php"
+  },
+  {
+    "id": "strict/weak_strict_parameter",
+    "resource": "resources/property_hooks/consumers/strict/weak_strict_parameter",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\weak_strict_parameter.php"
+  },
+  {
+    "id": "strict/typed_return_failure",
+    "resource": "resources/property_hooks/consumers/strict/typed_return_failure",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\typed_return_failure.php"
+  },
+  {
+    "id": "strict/uninitialized_backing",
+    "resource": "resources/property_hooks/consumers/strict/uninitialized_backing",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\uninitialized_backing.php"
+  },
+  {
+    "id": "strict/isset_empty_coalesce",
+    "resource": "resources/property_hooks/consumers/strict/isset_empty_coalesce",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\isset_empty_coalesce.php"
+  },
+  {
+    "id": "strict/unset_backed",
+    "resource": "resources/property_hooks/consumers/strict/unset_backed",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\unset_backed.php"
+  },
+  {
+    "id": "strict/reference_get_backed",
+    "resource": "resources/property_hooks/consumers/strict/reference_get_backed",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\reference_get_backed.php"
+  },
+  {
+    "id": "strict/reference_get_virtual_set",
+    "resource": "resources/property_hooks/consumers/strict/reference_get_virtual_set",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\reference_get_virtual_set.php"
+  },
+  {
+    "id": "strict/byvalue_get_ref_rejection",
+    "resource": "resources/property_hooks/consumers/strict/byvalue_get_ref_rejection",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\byvalue_get_ref_rejection.php"
+  },
+  {
+    "id": "strict/array_indirect_backed_rejection",
+    "resource": "resources/property_hooks/consumers/strict/array_indirect_backed_rejection",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\array_indirect_backed_rejection.php"
+  },
+  {
+    "id": "strict/array_indirect_virtual_copy",
+    "resource": "resources/property_hooks/consumers/strict/array_indirect_virtual_copy",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\array_indirect_virtual_copy.php"
+  },
+  {
+    "id": "strict/compound_increment_events",
+    "resource": "resources/property_hooks/consumers/strict/compound_increment_events",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\compound_increment_events.php"
+  },
+  {
+    "id": "strict/exceptions_leave_backing",
+    "resource": "resources/property_hooks/consumers/strict/exceptions_leave_backing",
+    "nativeContextName": "G:\\DevLine-QA\\jphp-property-hooks-20261013\\native-corpus1\\php\\strict\\exceptions_leave_backing.php"
+  }
+]

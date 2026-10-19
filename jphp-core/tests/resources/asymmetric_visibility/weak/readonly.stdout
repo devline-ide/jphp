@@ -1,0 +1,7 @@
+child_private:Error:Cannot modify private(set) property A::$y from scope B
+global_publicset:ok:null
+repeat:Error:Cannot modify readonly property A::$z
+state:2:6:4
+x:2177:0:1
+y:4257:1:0
+z:129:0:0

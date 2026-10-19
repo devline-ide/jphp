@@ -9,6 +9,7 @@ import php.runtime.lang.IObject;
 import php.runtime.lang.spl.Serializable;
 import php.runtime.memory.*;
 import php.runtime.reflection.ClassEntity;
+import php.runtime.reflection.MethodEntity;
 
 public class Deserializer {
     protected final Environment env;
@@ -229,13 +230,17 @@ public class Deserializer {
 
                             i = this.pos;
                             ClassEntity classEntity = env.fetchClass(memory.toString(), true);
+                            if (classEntity != null && classEntity.isAnonymous()) env.exception(php.runtime.lang.BaseException.class,
+                                    "Unserialization of '%s' is not allowed", classEntity.getName());
                             if (classEntity == null){
                                 env.error(trace, ErrorType.E_ERROR, Messages.ERR_CLASS_NOT_FOUND, memory.toString());
                                 return Memory.NULL;
                             }
 
                             try {
-                                IObject iObject = classEntity.newObjectWithoutConstruct(env);
+                                IObject iObject = isSerializable && classEntity.isInstanceOf(Serializable.class)
+                                        ? classEntity.newObject(env, trace, false, false)
+                                        : classEntity.newObjectWithoutConstruct(env);
                                 if (iObject == null) {
                                     env.exception(
                                             trace,
@@ -260,7 +265,9 @@ public class Deserializer {
                                         i++;
                                         if (i >= length || input.charAt(i) != '}') return error(i, length);
 
-                                        env.pushCall(trace, iObject, "unserialize", new StringMemory(what));
+                                        MethodEntity callback = classEntity.findMethod("unserialize");
+                                        env.pushCall(trace, iObject, new Memory[]{new StringMemory(what)}, "unserialize",
+                                                callback == null ? classEntity.getName() : callback.getClazzName(), classEntity.getName());
                                         try {
                                             ((Serializable) iObject).unserialize(env, new StringMemory(what));
                                         } finally {

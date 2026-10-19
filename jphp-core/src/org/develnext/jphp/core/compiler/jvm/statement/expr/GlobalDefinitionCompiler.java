@@ -21,6 +21,7 @@ public class GlobalDefinitionCompiler extends BaseStatementCompiler<GlobalStmtTo
             if (variable instanceof VariableExprToken) {
                 LocalVariable local = method.getLocalVariable(((VariableExprToken) variable).getName());
                 assert local != null;
+                if (expr.writeNamedGlobalImport(local)) continue;
 
                 expr.writePushEnv();
                 expr.writePushConstString(local.name);

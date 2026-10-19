@@ -41,6 +41,11 @@ public final class PhpOwnershipValues {
             validate();
             if (raw instanceof ObjectMemory) {
                 var object=((ObjectMemory)raw).value;
+                if(object.getClass()==php.runtime.lang.exception.BaseTypeError.class) {
+                    var nativeCertificate=((php.runtime.lang.exception.BaseTypeError)object).getOwnershipThrowable();
+                    if(nativeCertificate==null)throw new IllegalArgumentException("Native TypeError lacks its complete allocation origin");
+                    nativeCertificate.validateBinding(domain,node,object);return this;
+                }
                 if (!(object instanceof php.runtime.lang.support.IPhpOwnershipObject))
                     throw new IllegalArgumentException("Object has no complete ownership allocation protocol");
                 var certificate=((php.runtime.lang.support.IPhpOwnershipObject)object).getOwnershipObject();
@@ -119,6 +124,7 @@ public final class PhpOwnershipValues {
                     && representation != php.runtime.memory.DoubleMemory.class
                     && representation != php.runtime.memory.StringMemory.class
                     && representation != php.runtime.memory.BinaryMemory.class
+                    && representation != php.runtime.memory.PhpByteStringMemory.class
                     && representation != php.runtime.memory.StringBuilderMemory.class)
                 throw new IllegalArgumentException("Scalar VALUE has an uncertified representation");
             switch (raw.type) {

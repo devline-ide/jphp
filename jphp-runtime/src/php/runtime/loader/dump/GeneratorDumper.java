@@ -22,6 +22,8 @@ public class GeneratorDumper extends Dumper<GeneratorEntity> {
         classDumper = new ClassDumper(context, null, env, debugInformation);
     }
 
+    public void setDeferLinking(boolean value) {classDumper.setDeferLinking(value);}
+    public void linkDecodedDeclarations() throws IOException {classDumper.linkDecodedDeclarations();}
     @Override
     public int getType() {
         return Types.GENERATOR;

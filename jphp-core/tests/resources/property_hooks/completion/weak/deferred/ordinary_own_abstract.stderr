@@ -1,0 +1,3 @@
+Fatal error: Class C declares abstract method f() and must therefore be declared abstract in G:\DevLine-QA\jphp-property-hooks-20261013\aggregate-agent-r1\test-resources\resources\property_hooks\completion\weak\deferred\ordinary_own_abstract.php on line 1
+Stack trace:
+#0 {main}

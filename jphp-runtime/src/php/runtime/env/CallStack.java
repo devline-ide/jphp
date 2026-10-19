@@ -105,6 +105,7 @@ public class CallStack {
                 break;
 
             result[i] = new CallStackItem(el);
+            result[i].args = php.runtime.reflection.support.PhpSensitiveParameterTrace.redact(env,el,el.args == null ? null : el.args.clone());
             i++;
         }
 

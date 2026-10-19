@@ -1,0 +1,4 @@
+escaped:7
+type:TypeError:Cannot assign array to reference held by property H::$x of type int
+array:[1,9]
+rebound:10:old:7

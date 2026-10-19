@@ -23,6 +23,7 @@ import php.runtime.lang.ForeachIterator;
 import php.runtime.lang.IObject;
 import php.runtime.lang.support.MagicSignatureClass;
 import php.runtime.memory.ArrayMemory;
+import php.runtime.memory.ObjectMemory;
 import php.runtime.memory.ReferenceMemory;
 import php.runtime.memory.StringMemory;
 import php.runtime.memory.support.ArrayMapEntryMemory;
@@ -44,10 +45,27 @@ public class ClassEntity extends Entity implements Cloneable {
 
     // types
     public enum Type {
-        CLASS, INTERFACE, TRAIT, CLOSURE, FUNCTION, GENERATOR
+        CLASS, INTERFACE, TRAIT, CLOSURE, FUNCTION, GENERATOR, ENUM
     }
 
     private long id;
+    private String enumBackingType;
+    public boolean isEnum() {return type==Type.ENUM;}
+    public String getEnumBackingType() {return enumBackingType;}
+    public void setEnumBackingType(String value) {
+        if(value!=null && !value.equals("int") && !value.equals("string"))throw new IllegalArgumentException("Invalid enum backing type");
+        enumBackingType=value;
+    }
+    public IObject createEnumCase(Environment env) throws Throwable {
+        php.runtime.PhpEnums.construction(env,this);
+        if(!isEnum() || nativeConstructor==null || !php.runtime.lang.BaseEnum.class.isAssignableFrom(nativeClazz))
+            throw new IllegalArgumentException("Invalid enum case factory");
+        try{return (IObject)nativeConstructor.newInstance(env,this);}
+        catch(InvocationTargetException failure){env.__throwException(failure);return null;}
+    }
+    private void rejectEnumAllocation(Environment env,TraceInfo trace) {
+        if(isEnum())env.exception(trace,php.runtime.lang.exception.BaseError.class,"Cannot instantiate enum %s",getName());
+    }
 
     protected int methodCounts = 0;
     protected boolean isInternal;
@@ -84,8 +102,87 @@ public class ClassEntity extends Entity implements Cloneable {
     protected final Map<String, ClassEntity> traits;
     private final List<TraitConstantCheck> traitConstantChecks = new ArrayList<>();
     private boolean deferredInitialization;
+    private boolean anonymous;
+    private int declarationId = -1;
+    private boolean declarationTemplate;
+
+    public int getDeclarationId() { return declarationId; }
+    public boolean isDeferredDeclaration() { return declarationId >= 0; }
+    public boolean isDeclarationTemplate() { return declarationTemplate; }
+
+    public void setDeclarationId(int value) {
+        if (value < -1 || declarationId >= 0 && declarationId != value)
+            throw new IllegalArgumentException("Class declaration ordinal is immutable");
+        if (declarationId == -1 && value >= 0) {
+            declarationId = value;
+            declarationTemplate = true;
+        }
+    }
+
+    /** Only the cold declaration resolver can turn a cloned template into a definition. */
+    void markDeclarationBound() {
+        if (!declarationTemplate || declarationId < 0)
+            throw new IllegalStateException("Expected a cold declaration template clone");
+        declarationTemplate = false;
+    }
+    private PhpClassRelations declarationRelations = PhpClassRelations.EMPTY;
+    private PhpTraitCompositionPlan classComposition;
+    public PhpClassRelations getDeclarationRelations() { return declarationRelations; }
+    public void setDeclarationRelations(PhpClassRelations value) {
+        Objects.requireNonNull(value, "relations");
+        if (nativeClazz != null || classComposition != null
+                || declarationRelations != PhpClassRelations.EMPTY && declarationRelations != value)
+            throw new IllegalStateException("Class declaration relations are immutable");
+        declarationRelations = value;
+    }
+    public PhpTraitCompositionPlan getClassComposition() { return classComposition; }
+    void setClassComposition(PhpTraitCompositionPlan value) {
+        if (nativeClazz != null || classComposition != null || value.owner() != this)
+            throw new IllegalStateException("Composition belongs to one cold bound class");
+        value.validate(); classComposition = value;
+    }
+    private String deferredParentName;
+    public String getDeferredParentName() {return deferredParentName;}
+    public void setDeferredParentName(String value) {deferredParentName=value;}
+    public boolean isUnresolvedDeclaration() {return deferredParentName!=null && parent==null;}
+    public void attachDeferredParent(ClassEntity resolved,Environment env) {
+        attachDeferredParentMetadata(resolved, env);
+        finishDeferredDeclaration(env);
+    }
+    void attachDeferredParentMetadata(ClassEntity resolved,Environment env) {
+        if (!isUnresolvedDeclaration() || resolved==null) throw new IllegalArgumentException("Invalid deferred parent binding");
+        var fields=new ArrayList<PropertyEntity>(properties.values());
+        fields.addAll(staticProperties.values());
+        var declarations=new ArrayList<ConstantEntity>(constants.values());
+        properties.clear();staticProperties.clear();constants.clear();
+        setParent(resolved,false).check(env);
+        for (PropertyEntity field:fields) addProperty(field).check(env);
+        for (ConstantEntity constant:declarations) addConstant(constant).check(env);
+    }
+    void finishDeferredDeclaration(Environment env) {
+        updateParentBody().check(env);
+        for (ClassEntity contract:new ArrayList<>(interfaces.values())) addInterface(contract).check(env);
+        validateConstantInheritance(env);
+        doneDeclare();
+        php.runtime.reflection.support.PhpPropertyTypes.validateClass(this,env);
+        php.runtime.reflection.support.PhpConstantTypes.validateClass(this,module,env);
+        php.runtime.reflection.support.PhpMethodCompatibility.validateClass(this,module,env);
+    }
+    public boolean isAnonymous() { return anonymous; }
+    public void setAnonymous(boolean value) { anonymous=value; }
     public boolean hasDeferredInitialization() { return deferredInitialization; }
     public void setDeferredInitialization(boolean value) { deferredInitialization = value; }
+
+    /** Read the real initialization completion state without evaluating defaults or running callbacks. */
+    public boolean isRuntimeStateInitialized(Environment env) {
+        return !deferredInitialization || Boolean.TRUE.equals(env.getUserValue(
+                "\0class-initialization:" + PhpClassNames.canonicalKey(getName()),Boolean.class));
+    }
+
+    /** Actual allocation constructor metadata; reading it does not initialize or construct. */
+    public Constructor<?> getOwnershipNativeConstructor() { return nativeConstructor; }
+
+    public Method getNativeInitEnvironment() { return nativeInitEnvironment; }
 
     public void initializeRuntimeState(Environment env) {
         if (!deferredInitialization) return;
@@ -95,7 +192,7 @@ public class ClassEntity extends Entity implements Cloneable {
             env.setUserValue(key, Boolean.FALSE);
             try {
                 if (parent != null) parent.initializeRuntimeState(env);
-                for (ConstantEntity constant : getConstants()) constant.getValue(env);
+                if(!isEnum()) for (ConstantEntity constant : getConstants()) constant.getValue(env);
                 initEnvironmentBody(env);
                 if (hasPhp8Signatures()) {
                     for (PropertyEntity property : getProperties())
@@ -185,6 +282,9 @@ public class ClassEntity extends Entity implements Cloneable {
 
     protected boolean isAbstract = false;
     protected boolean isFinal = false;
+    private boolean phpReadonly;
+    public boolean isPhpReadonly() {return phpReadonly;}
+    public void setPhpReadonly(boolean value) {phpReadonly=value;}
     protected Type type = Type.CLASS;
 
     protected boolean isStatic;
@@ -224,6 +324,8 @@ public class ClassEntity extends Entity implements Cloneable {
             throw new CriticalException("Disable of using internal names for traits, trait '" + getName() + "'");
         }   */
 
+        if(nativeClazz!=null && (isDeferredDeclaration() || deferredParentName!=null))
+            return nativeClazz.getName().replace('.', '/');
         return super.getInternalName();
     }
 
@@ -274,6 +376,7 @@ public class ClassEntity extends Entity implements Cloneable {
             case CLOSURE:
             case GENERATOR:
             case CLASS:
+            case ENUM:
                 methodConstruct = methods.get("__construct");
                 if (methodConstruct != null
                         && (methodConstruct.getPrototype() == null || !methodConstruct.getPrototype().isAbstractable()))
@@ -350,7 +453,7 @@ ClassReader classReader;
     }
 
     public boolean isClass() {
-        return type == Type.CLASS;
+        return type == Type.CLASS || type == Type.ENUM;
     }
 
     public boolean isHiddenInCallStack() {
@@ -573,7 +676,7 @@ ClassReader classReader;
                     if (!isAbstract && method.isAbstract && implMethod.isAbstract)
                         result.add(InvalidMethod.error(InvalidMethod.Kind.NON_EXISTS, implMethod));
 
-                    if (!hasPhp8Signatures() && !implMethod.equalsBySignature(method)) {
+                    if (!hasPhp8Signatures() && !legacyNativeSignatureMatches(implMethod, method)) {
                         if (!method.isDynamicSignature() || method.isAbstractable()) {
                             boolean isWarning = true;
                             MethodEntity pr = method;
@@ -703,6 +806,12 @@ ClassReader classReader;
      * @return
      */
     public ImplementsResult addInterface(ClassEntity _interface) {
+        return addInterface(_interface, null);
+    }
+
+    /** Full native declarations are checked with the wrapping scope; ordinary legacy callers retain their contract. */
+    public ImplementsResult addInterface(ClassEntity _interface,
+            java.util.function.BiPredicate<MethodEntity, MethodEntity> nativeSignatureMatches) {
         ImplementsResult result = new ImplementsResult(_interface);
 
         for (ConstantEntity e : _interface.constants.values()) {
@@ -735,12 +844,13 @@ ClassReader classReader;
 
             if (implMethod == null) {
                 addMethod(method, null);
-                if (type == Type.CLASS && !isAbstract)
+                if (isClass() && !isAbstract)
                     result.signature.add(InvalidMethod.error(InvalidMethod.Kind.NON_EXISTS, method));
             } else {
-                implMethod.setPrototype(method);
+                if (implMethod.getClazz() == this) implMethod.setPrototype(method);
 
-                if (!hasPhp8Signatures() && !implMethod.equalsBySignature(method)) {
+                if (!hasPhp8Signatures() && !(nativeSignatureMatches == null
+                        ? legacyInterfaceSignatureMatches(implMethod, method) : nativeSignatureMatches.test(implMethod, method))) {
                     result.signature.add(InvalidMethod.error(InvalidMethod.Kind.INVALID_SIGNATURE, implMethod));
                 } else if (implMethod.isStatic() && !method.isStatic()) {
                     result.signature.add(InvalidMethod.error(InvalidMethod.Kind.MUST_NON_STATIC, implMethod));
@@ -750,6 +860,36 @@ ClassReader classReader;
             }
         }
         return result;
+    }
+
+    /** Native SPL parameter types are modern metadata; legacy implementations keep their old ANY contract. */
+    private boolean legacyInterfaceSignatureMatches(MethodEntity implementation, MethodEntity contract) {
+        java.lang.reflect.Method member = contract.getNativeMethod();
+        ClassEntity declaring = implementation.getClazz();
+        if (declaring != null && declaring.getModule() != null
+                && declaring.getModule().getPhpLanguageProfile() == PhpLanguageProfile.JPHP_LEGACY
+                && member != null && ((member.getDeclaringClass() == php.runtime.lang.spl.Serializable.class
+                && member.getName().equals("unserialize"))
+                || (member.getDeclaringClass() == php.runtime.lang.spl.iterator.SeekableIterator.class
+                && member.getName().equals("seek")))) {
+            String signature = php.runtime.common.HintType.ANY + "|";
+            if (contract.getReturnTypeChecker() != null)
+                signature += ":" + contract.getReturnTypeChecker().getSignature();
+            return implementation.getSignature().equals(signature);
+        }
+        return legacyNativeSignatureMatches(implementation, contract);
+    }
+
+    private boolean legacyNativeSignatureMatches(MethodEntity implementation, MethodEntity contract) {
+        // An untyped native return contract permits the PHP implementation to declare its return type.
+        if (contract.getClazz().getModule() == null && contract.getClazz().getNativeClass() != null
+                && (contract.getNativeMethod() != null || contract instanceof CompileMethodEntity)
+                && contract.getReturnTypeChecker() == null && implementation.getReturnTypeChecker() != null) {
+            String signature = implementation.getSignature();
+            int returnType = signature.indexOf(':');
+            return returnType >= 0 && signature.substring(0, returnType).equals(contract.getSignature());
+        }
+        return implementation.equalsBySignature(contract);
     }
 
     public Map<String, ClassEntity> getInterfaces() {
@@ -821,7 +961,7 @@ ClassReader classReader;
         PropertyEntity prototype = null;
 
         if (property.isStatic()) {
-            prototype = staticProperties.get(property.getLowerName());
+            prototype = staticProperties.get(hasPhp8Signatures()?property.getName():property.getLowerName());
             if (prototype != null && prototype.getModifier() != property.getModifier()) {
                 property.setPrototype(prototype);
             }
@@ -831,7 +971,7 @@ ClassReader classReader;
 
             staticProperties.put(property.getName(), property);
         } else {
-            prototype = properties.get(property.getLowerName());
+            prototype = properties.get(hasPhp8Signatures()?property.getName():property.getLowerName());
             if (prototype != null && prototype.getModifier() != property.getModifier()) {
                 property.setPrototype(prototype);
             }
@@ -843,6 +983,7 @@ ClassReader classReader;
         }
 
         if (prototype != null) {
+            if(hasPhp8Signatures() && prototype.getClazz()!=this && !prototype.isPrivate())property.setPrototype(prototype);
             if (property.getPrototype() != null) {
                 if (prototype.isProtected() && property.isPrivate()) {
                     result.addError(InvalidProperty.Kind.MUST_BE_PROTECTED, property);
@@ -1006,7 +1147,12 @@ ClassReader classReader;
             boolean scoped = hasPhp8Signatures();
             if (scoped) env.pushCall(getTrace(), null, null, "{constant-expression}", getName(), getName());
             try {
-                nativeInitEnvironment.invoke(null, env);
+                var session = php.runtime.PhpOwnershipExecution.current(env);
+                if (session == null) nativeInitEnvironment.invoke(null, env);
+                else {
+                    try { session.invokeInitializer(this, getTrace()); }
+                    catch (Throwable e) { env.forwardThrow(e); }
+                }
             } catch (InvocationTargetException e) {
                 env.__throwException(e);
             } catch (IllegalAccessException e) {
@@ -1040,6 +1186,8 @@ ClassReader classReader;
 
     private void initTraitEnvironment(Environment env, ClassEntity originClass, Set<ClassEntity> used, String composingTrait) throws Throwable {
         if (nativeInitEnvironment != null) {
+            if (php.runtime.PhpOwnershipExecution.current(env) != null)
+                throw new IllegalArgumentException("Trait initialization requires its composing-class invocation protocol");
             boolean scoped = hasPhp8Signatures();
             if (scoped) env.pushCall(getTrace(), null, null, composingTrait, originClass.getName(), originClass.getName());
             try {
@@ -1061,12 +1209,20 @@ ClassReader classReader;
 
     /** Explicit complete-provider route: no implicit class initialization or default evaluation. */
     public IObject createOwnershipShell(php.runtime.PhpOwnershipObjects.AllocationWitness witness, Environment env) throws Throwable {
+        rejectEnumAllocation(env,env.trace());
         witness.consumeFactory(this,nativeClazz,nativeConstructor,env);
         try {return (IObject)nativeConstructor.newInstance(env,this);}
         catch (InvocationTargetException failure) {env.__throwException(failure);return null;}
     }
 
     public <T extends IObject> T newObjectWithoutConstruct(Environment env) {
+        rejectEnumAllocation(env,env.trace());
+        var entry = php.runtime.PhpOwnershipExecution.currentEntry(env);
+        if (php.runtime.PhpOwnershipExecution.current(env) != null) {
+            if (entry == null) throw new IllegalArgumentException("Object allocation requires its current invocation frame");
+            try { return (T) newOwnershipObject(entry, env.trace(), false, true, new Memory[0]); }
+            catch (Throwable failure) { env.forwardThrow(failure); return null; }
+        }
         initializeRuntimeState(env);
         IObject object = null;
         try {
@@ -1086,6 +1242,7 @@ ClassReader classReader;
     }
 
     public <T extends IObject> T newMock(Environment env) throws Throwable {
+        rejectEnumAllocation(env,env.trace());
         if (nativeConstructor == null) {
             env.error(env.trace(), ErrorType.E_CORE_ERROR, "Cannot find a java constructor %s(Environment, ClassEntity)", getName());
         }
@@ -1100,6 +1257,7 @@ ClassReader classReader;
     }
 
     public void checkCanInstance(Environment env) {
+        rejectEnumAllocation(env,env.trace());
         if (isAbstract) {
             env.error(trace, "Cannot instantiate abstract class %s", name);
         } else if (type == Type.INTERFACE) {
@@ -1110,6 +1268,7 @@ ClassReader classReader;
     }
 
     public void checkCanInstance(Environment env, TraceInfo callTrace) {
+        rejectEnumAllocation(env,callTrace);
         if (env.getModuleManager().getPhpLanguageProfile(callTrace) != PhpLanguageProfile.PHP_8_5) {
             checkCanInstance(env);
             return;
@@ -1130,8 +1289,15 @@ ClassReader classReader;
     public <T extends IObject> T newObject(Environment env, TraceInfo trace, boolean doConstruct, boolean checks, Memory... args)
             throws Throwable {
 
+        rejectEnumAllocation(env,trace);
         if (checks) {
             checkCanInstance(env, trace);
+        }
+
+        var entry = php.runtime.PhpOwnershipExecution.currentEntry(env);
+        if (php.runtime.PhpOwnershipExecution.current(env) != null) {
+            if (entry == null) throw new IllegalArgumentException("Object allocation requires its current invocation frame");
+            return (T) newOwnershipObject(entry, trace, doConstruct, true, args);
         }
 
         initializeRuntimeState(env);
@@ -1147,24 +1313,79 @@ ClassReader classReader;
             return null;
         }
 
-        initializeInstanceProperties(env, object);
-
-        if (doConstruct && methodConstruct != null) {
-            ObjectInvokeHelper.invokeMethod(object, methodConstruct, env, trace, args, true);
+        try {
+            initializeInstanceProperties(env, object);
+            if (doConstruct && methodConstruct != null) {
+                php.runtime.invoke.PhpObjectLifecycle.beginConstruction(object);
+                ObjectInvokeHelper.invokeMethod(object, methodConstruct, env, trace, args, true);
+                php.runtime.invoke.PhpObjectLifecycle.completeConstruction(object);
+            }
+            return (T) object;
+        } catch (Throwable failure) {
+            php.runtime.invoke.PhpObjectLifecycle.failConstruction(object, failure);
+            throw failure;
         }
+    }
 
-        return (T) object;
+    private IObject newOwnershipObject(php.runtime.PhpOwnershipExecution.Entry entry, TraceInfo trace,
+                                       boolean doConstruct, boolean checkAccess, Memory[] args) throws Throwable {
+        var session = entry.session();
+        Environment env = session.environment();
+        php.runtime.reflection.helper.PhpObjectShellVerifier.requireLoadedShell(this);
+        if (methodDestruct != null) session.requireMethodCapability(methodDestruct);
+        if (doConstruct && methodConstruct != null) session.requireMethodCapability(methodConstruct);
+        try (var roots = session.newCallRoots()) {
+            if (doConstruct && methodConstruct != null && args != null)
+                for (Memory argument : args)
+                    roots.send(argument instanceof ReferenceMemory && ((ReferenceMemory) argument).isCanonicalReferenceCell()
+                            ? session.cell((ReferenceMemory) argument) : session.value(argument));
+            initializeRuntimeState(env);
+            var objects = entry.objects();
+            php.runtime.PhpOwnershipObjects.Provider provider;
+            try { provider = objects.provider(this); }
+            catch (IllegalArgumentException absent) {
+                provider = php.runtime.reflection.helper.PhpObjectShellVerifier.register(objects, env, this);
+            }
+            var defaults = new IdentityHashMap<PropertyEntity, php.runtime.PhpOwnershipValues.Binding>();
+            for (PropertyEntity property : provider.properties()) {
+                Memory value = property.getDefaultValue(env).toImmutable();
+                if (value instanceof ArrayMemory || value instanceof ObjectMemory)
+                    throw new IllegalArgumentException("Heap property defaults require their actual metadata-owner publication");
+                defaults.put(property, session.value(value));
+            }
+            try (var allocation = objects.allocate(provider, env, defaults)) {
+                IObject object = allocation.object();
+                entry.stageAllocation(allocation, allocation.restoration());
+                if (doConstruct && methodConstruct != null) {
+                    roots.stageReceiver(session.value(new ObjectMemory(object)));
+                    session.invokeCheckedMethod(methodConstruct, object, trace, roots, checkAccess);
+                }
+                return object;
+            }
+        }
     }
 
     private void initializeInstanceProperties(Environment env, IObject object) {
         ArrayMemory props = object.getProperties();
+        php.runtime.memory.helper.PhpPropertyGuard.OwnerToken lifetime=null;
         if (hasPhp8Signatures() && props instanceof php.runtime.memory.PhpObjectProperties) {
             for (ClassEntity owner = this; owner != null; owner = owner.parent)
                 for (PropertyEntity property : owner.getProperties())
-                    if (property.getGetter() == null)
+                    if (property.getGetter() == null && (property.getPhpHooks()==null || !property.getPhpHooks().isVirtual()))
                         ((php.runtime.memory.PhpObjectProperties) props).declare(property);
         }
         if (hasPhp8Signatures()) {
+            // A root class has one unique storage key per declared property; no inheritance walk or deduplication is needed.
+            if (parent == null) {
+                for (PropertyEntity declared : getProperties()) {
+                    if (declared.getClazz().getId() != id || declared.getGetter() != null || declared.getPhpHooks()!=null && declared.getPhpHooks().isVirtual()) continue;
+                    PropertyEntity property = declared.isPrivate() ? declared : findProperty(declared.getName());
+                    if (property == null || property.getGetter() != null) continue;
+                    lifetime=props.putAsKeyString(property.getSpecificName(), property.getDefaultValue(env).toImmutable())
+                            .attachInstancePropertySource(env, property,object,lifetime);
+                }
+                return;
+            }
             // PHP retains inherited slot order, including slots overridden by a child.
             Deque<ClassEntity> lineage = new ArrayDeque<>();
             for (ClassEntity owner = this; owner != null; owner = owner.parent) lineage.push(owner);
@@ -1172,11 +1393,11 @@ ClassReader classReader;
             while (!lineage.isEmpty()) {
                 ClassEntity owner = lineage.pop();
                 for (PropertyEntity declared : owner.getProperties()) {
-                    if (declared.getClazz().getId() != owner.getId() || declared.getGetter() != null) continue;
+                    if (declared.getClazz().getId() != owner.getId() || declared.getGetter() != null || declared.getPhpHooks()!=null && declared.getPhpHooks().isVirtual()) continue;
                     PropertyEntity property = declared.isPrivate() ? declared : findProperty(declared.getName());
                     if (property == null || property.getGetter() != null || !initialized.add(property.getSpecificName())) continue;
-                    props.putAsKeyString(property.getSpecificName(), property.getDefaultValue(env).toImmutable())
-                            .attachPropertySource(env, property);
+                    lifetime=props.putAsKeyString(property.getSpecificName(), property.getDefaultValue(env).toImmutable())
+                            .attachInstancePropertySource(env, property,object,lifetime);
                 }
             }
             return;
@@ -1184,10 +1405,10 @@ ClassReader classReader;
 
         for (PropertyEntity property : getProperties()) {
             if (id == property.clazz.getId() && property.getGetter() == null) {
-                props.putAsKeyString(
+                lifetime=props.putAsKeyString(
                         property.getSpecificName(),
                         property.getDefaultValue(env).toImmutable()
-                ).attachPropertySource(env, property);
+                ).attachInstancePropertySource(env, property,object,lifetime);
             }
         }
 
@@ -1197,10 +1418,10 @@ ClassReader classReader;
             for (PropertyEntity property : tmp.getProperties()) {
                 if (property.getClazz().getId() == otherId && property.getGetter() == null) {
                     if (property.modifier != Modifier.PROTECTED || props.getByScalar(property.getName()) == null)
-                        props.getByScalarOrCreate(
+                        lifetime=props.getByScalarOrCreate(
                                 property.getSpecificName(),
                                 property.getDefaultValue(env).toImmutable()
-                        ).attachPropertySource(env, property);
+                        ).attachInstancePropertySource(env, property,object,lifetime);
                 }
             }
             tmp = tmp.parent;
@@ -1209,9 +1430,11 @@ ClassReader classReader;
     }
 
     public <T extends IObject> T cloneObject(T value, Environment env, TraceInfo trace) throws Throwable {
+        if(isEnum())env.exception(trace,php.runtime.lang.exception.BaseError.class,"Trying to clone an uncloneable object of class %s",getName());
         php.runtime.PhpOwnershipObjects.rejectUnmanagedClone(value);
         // Keep virtual factory dispatch: specialized entities can reject cloning.
         IObject copy = this.newObjectWithoutConstruct(env);
+        php.runtime.memory.helper.PhpPropertyGuard.OwnerToken lifetime=null;
         boolean modernStorage = hasPhp8Signatures()
                 || env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
                 || value.getProperties() instanceof php.runtime.memory.PhpObjectProperties
@@ -1239,7 +1462,7 @@ ClassReader classReader;
                 if (value.getProperties() instanceof php.runtime.memory.PhpObjectProperties && key instanceof String) {
                     PropertyEntity declared = ((php.runtime.memory.PhpObjectProperties) value.getProperties()).declaration((String) key);
                     if (declared != null && !((php.runtime.memory.PhpObjectProperties) value.getProperties()).isExplicitlyUnset((String) key))
-                        target.attachPropertySource(env, declared);
+                        lifetime=target.attachInstancePropertySource(env, declared,copy,lifetime);
                 }
             }
             if (props instanceof php.runtime.memory.PhpObjectProperties && value.getProperties() instanceof php.runtime.memory.PhpObjectProperties)
@@ -1258,7 +1481,7 @@ ClassReader classReader;
                 for (ClassEntity owner=this;owner != null && stored == null;owner=owner.parent)
                     for (PropertyEntity candidate : owner.properties.values())
                         if (candidate.getSpecificName().equals(key)) {stored=candidate;break;}
-                if (stored != null) target.attachPropertySource(env,stored);
+                if (stored != null) lifetime=target.attachInstancePropertySource(env,stored,copy,lifetime);
                 continue;
             }
             if (key instanceof String) {
@@ -1277,7 +1500,9 @@ ClassReader classReader;
         }
 
         if (methodMagicClone != null) {
-            ObjectInvokeHelper.invokeMethod(copy, methodMagicClone, env, trace, null, true);
+            var readonlyClone=php.runtime.PhpReadonlyProperty.enterClone(copy);
+            try {ObjectInvokeHelper.invokeMethod(copy, methodMagicClone, env, trace, null, true);}
+            finally {php.runtime.PhpReadonlyProperty.leaveClone(readonlyClone);}
         }
 
         return (T) copy;
@@ -1298,6 +1523,11 @@ ClassReader classReader;
     public Memory incrementProperty(Environment env, TraceInfo trace, IObject object, String property,
                                     boolean decrement, boolean post, PropertyCallCache callCache, int cacheIndex) throws Throwable {
         PropertyEntity nativeField = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
+        if(nativeField!=null&&nativeField.getPhpHooks()!=null){
+            ReferenceMemory scratch=new ReferenceMemory(getProperty(env,trace,object,property,callCache,cacheIndex).toImmutable());
+            return php.runtime.PhpArithmetic.incrementReference(scratch,decrement,post,env,trace,
+                    updated->{try{setProperty(env,trace,object,property,updated,null,callCache,cacheIndex);}catch(Throwable failure){env.forwardThrow(failure);}});
+        }
         if (nativeField instanceof CompilePropertyEntity) {
             ReferenceMemory target = new ReferenceMemory(getProperty(env, trace, object, property, callCache, cacheIndex).toImmutable());
             return php.runtime.PhpArithmetic.incrementReference(target, decrement, post, env, trace,
@@ -1329,7 +1559,7 @@ ClassReader classReader;
                             object.getProperties().removeByScalar(key);
                             replacement = object.getProperties().putAsKeyString(key, value);
                         }
-                        if (declared != null && key.equals(declared.getSpecificName())) replacement.attachPropertySource(env, declared);
+                        if (declared != null && key.equals(declared.getSpecificName())) replacement.attachPropertySource(env, declared,object);
                     }
                 });
                 return target.toValue();
@@ -1350,6 +1580,8 @@ ClassReader classReader;
         return setProperty(env, trace, object, property, memory, new SetterCallback() {
             @Override
             public Memory invoke(Memory o1, Memory o2) {
+                if (usesModernPropertyPolicy(env, trace))
+                    return php.runtime.PhpByteStringValues.concatPropertyValue(o1, o2, env, trace);
                 return new StringMemory(o1.concat(o2));
             }
         }, callCache, cacheIndex);
@@ -1498,11 +1730,11 @@ ClassReader classReader;
             if (property != null && !property.isStatic() && property.getSpecificName().equals(storageKey)) return false;
         }
         checkProhibitedDynamicProperty(env, trace, storageKey);
-        return !isInstanceOfAsciiName("stdClass");
+        return !isInstanceOfAsciiName("stdClass") && !php.runtime.reflection.support.PhpAllowDynamicProperties.allows(this);
     }
 
     private void checkProhibitedDynamicProperty(Environment env, TraceInfo trace, String storageKey) {
-        if (usesModernPropertyPolicy(env, trace) && (type == Type.CLOSURE || type == Type.GENERATOR
+        if (isEnum() || nativeClazz == php.runtime.lang.PhpWeakReference.class || usesModernPropertyPolicy(env, trace) && (phpReadonly || type == Type.CLOSURE || type == Type.GENERATOR
                 || isInstanceOfAsciiName("Closure") || isInstanceOfAsciiName("Generator"))) {
             env.exception(trace, php.runtime.lang.exception.BaseError.class,
                     "Cannot create dynamic property %s::$%s", getName(), dynamicPropertyLabel(storageKey));
@@ -1561,6 +1793,7 @@ ClassReader classReader;
     }
 
     public void appendProperty(IObject object, String property, Memory value) {
+        if(isEnum())throw new IllegalArgumentException("Cannot mutate enum case properties through a native append");
         object.getProperties().put(property, value);
     }
 
@@ -1569,15 +1802,33 @@ ClassReader classReader;
         return props.refOfIndex(entity == null ? name : entity.getSpecificName());
     }
 
+    private php.runtime.lang.spl.iterator.ArrayIterator arrayIteratorProperty(IObject object, String property) {
+        if (!(object instanceof php.runtime.lang.spl.iterator.ArrayIterator) || findProperty(property) != null
+                || object.getProperties().getByScalar(property) != null) return null;
+        php.runtime.lang.spl.iterator.ArrayIterator iterator = (php.runtime.lang.spl.iterator.ArrayIterator) object;
+        return iterator.arrayAsProperties() ? iterator : null;
+    }
+
     public Memory setProperty(Environment env, TraceInfo trace,
                               IObject object, String property, Memory memory, SetterCallback callback,
                               PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
+        return setProperty(env,trace,object,property,memory,callback,callCache,cacheIndex,null,null);
+    }
+
+    public Memory setProperty(Environment env,TraceInfo trace,IObject object,String property,Memory memory,SetterCallback callback,
+            PropertyCallCache callCache,int cacheIndex,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original) throws Throwable {
+        var arrayIterator = arrayIteratorProperty(object, property);
+        if (arrayIterator != null) {
+            if (callback != null) memory = callback.invoke(arrayIterator.propertyGet(env, property), memory);
+            return arrayIterator.propertySet(env, property, memory);
+        }
         ReferenceMemory value;
+        if(object instanceof php.runtime.lang.IPhpNativePropertyGuard guard) guard.validateNativePropertyWrite(env,trace,property);
 
         PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
 
-        if (entity == null) checkProhibitedDynamicProperty(env, trace, property);
+        if (entity == null && !(phpReadonly && methodMagicSet!=null)) checkProhibitedDynamicProperty(env, trace, property);
 
         if (entity == null) {
             PropertyEntity staticEntity = staticProperties.get(property);
@@ -1594,6 +1845,14 @@ ClassReader classReader;
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
 
         ArrayMemory props = object.getProperties();
+        if(entity!=null&&accessFlag==0&&entity.getPhpHooks()!=null){
+            if(callback!=null){
+                memory=callback.invoke(getProperty(env,trace,object,property,callCache,cacheIndex,false,null,false,body,original),memory);
+                callback=null;
+            }
+            php.runtime.PhpPropertyAccess.check(entity,env,trace,php.runtime.PhpPropertyAccess.Intent.ASSIGN);
+            if(php.runtime.PhpPropertyHookAccess.write(entity,env,trace,object,memory,body,original))return memory;
+        }
 
         if (entity != null) {
             if (entity.setter != null) {
@@ -1617,6 +1876,14 @@ ClassReader classReader;
 
         value = props == null || accessFlag != 0 ? null : entity == null
                 ? findDynamicSlot(env, trace, props, property, callCache, cacheIndex) : props.getByScalar(entity.specificName);
+        if(entity!=null && accessFlag==0 && entity.getPhpSetModifier()!=null) {
+            if(callback!=null) {
+                memory=callback.invoke(getProperty(env,trace,object,property,callCache,cacheIndex),memory);callback=null;
+            }
+            if(value!=null || methodMagicSet==null)
+                php.runtime.PhpPropertyAccess.check(entity,env,trace,php.runtime.PhpPropertyAccess.Intent.ASSIGN);
+        }
+        if(entity!=null && entity.isPhpReadonly() && accessFlag==0) php.runtime.PhpReadonlyProperty.checkWrite(env,trace,entity,object,value);
 
         if (value == null) {
             boolean recursive = false;
@@ -1741,10 +2008,17 @@ ClassReader classReader;
     public Memory unsetProperty(Environment env, TraceInfo trace, IObject object, String property,
                                 PropertyCallCache callCache, int index)
             throws Throwable {
+        return unsetProperty(env,trace,object,property,callCache,index,null,null);
+    }
+
+    public Memory unsetProperty(Environment env,TraceInfo trace,IObject object,String property,PropertyCallCache callCache, int index,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original) throws Throwable {
+        var arrayIterator = arrayIteratorProperty(object, property);
+        if (arrayIterator != null) return arrayIterator.propertyUnset(env, property);
         ClassEntity context = env.getLastClassOnStack();
         PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, index);
 
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
+        if(entity!=null&&accessFlag==0&&entity.getPhpHooks()!=null){php.runtime.PhpPropertyHookAccess.beforeUnset(entity,env,trace,object,body,original);}
 
         if (entity == null) {
             PropertyEntity staticEntity = staticProperties.get(property);
@@ -1755,6 +2029,10 @@ ClassReader classReader;
 
         ArrayMemory props = object.getProperties();
         Memory removed=null;
+        if(entity!=null && accessFlag==0 && (methodMagicUnset==null || props!=null && props.getByScalar(entity.specificName)!=null
+                ))
+            php.runtime.PhpPropertyAccess.check(entity,env,trace,php.runtime.PhpPropertyAccess.Intent.UNSET);
+        if(entity!=null && entity.isPhpReadonly() && accessFlag==0) php.runtime.PhpReadonlyProperty.checkUnset(env,trace,entity,object,props==null?null:props.getByScalar(entity.specificName));
         if (props != null && accessFlag == 0) {
             if (entity != null && usesModernPropertyPolicy(env, trace)
                     && props instanceof php.runtime.memory.PhpObjectProperties) {
@@ -1804,10 +2082,18 @@ ClassReader classReader;
 
     public Memory emptyProperty(Environment env, TraceInfo trace, IObject object, String property)
             throws Throwable {
+        return emptyProperty(env,trace,object,property,null,null);
+    }
+
+    public Memory emptyProperty(Environment env,TraceInfo trace,IObject object,String property,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original) throws Throwable {
+        var arrayIterator = arrayIteratorProperty(object, property);
+        if (arrayIterator != null) return arrayIterator.propertyIsset(env, property).isNull() ? Memory.NULL
+                : arrayIterator.propertyGet(env, property).toBoolean() ? Memory.TRUE : Memory.NULL;
         ClassEntity contex = env.getLastClassOnStack();
         PropertyEntity entity = findCachedInstanceProperty(env, trace, property, null, 0);
 
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
+        if(entity!=null&&accessFlag==0&&entity.getPhpHooks()!=null){Memory hooked=php.runtime.PhpPropertyHookAccess.test(entity,env,trace,object,true,body,original);if(hooked!=null)return hooked;}
 
         ArrayMemory props = object.getProperties();
         if (props != null && accessFlag == 0) {
@@ -1850,9 +2136,16 @@ ClassReader classReader;
     public Memory issetProperty(Environment env, TraceInfo trace, IObject object, String property,
                                 PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
+        return issetProperty(env,trace,object,property,callCache,cacheIndex,null,null);
+    }
+
+    public Memory issetProperty(Environment env,TraceInfo trace,IObject object,String property,PropertyCallCache callCache, int cacheIndex,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original) throws Throwable {
+        var arrayIterator = arrayIteratorProperty(object, property);
+        if (arrayIterator != null) return arrayIterator.propertyIsset(env, property);
         PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
 
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
+        if(entity!=null&&accessFlag==0&&entity.getPhpHooks()!=null){Memory hooked=php.runtime.PhpPropertyHookAccess.test(entity,env,trace,object,false,body,original);if(hooked!=null)return hooked;}
 
         ArrayMemory props = object.getProperties();
         Memory tmp = null;
@@ -1934,6 +2227,12 @@ ClassReader classReader;
     public Memory getRefProperty(Environment env, TraceInfo trace, IObject object, String property,
                                  PropertyCallCache callCache, int cacheIndex)
             throws Throwable {
+        return getRefProperty(env,trace,object,property,callCache,cacheIndex,null,null);
+    }
+
+    public Memory getRefProperty(Environment env,TraceInfo trace,IObject object,String property,PropertyCallCache callCache,int cacheIndex,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original) throws Throwable {
+        var arrayIterator = arrayIteratorProperty(object, property);
+        if (arrayIterator != null) return arrayIterator.propertyGet(env, property);
         Memory value;
 
         PropertyEntity entity = findCachedInstanceProperty(env, trace, property, callCache, cacheIndex);
@@ -1953,6 +2252,11 @@ ClassReader classReader;
         }
 
         int accessFlag = entity == null ? 0 : entity.canAccess(env);
+        if(entity!=null&&accessFlag==0&&entity.getPhpHooks()!=null){
+            Memory hooked=php.runtime.PhpPropertyHookAccess.read(entity,env,trace,object,true,body,original);
+            if(hooked!=null)return hooked;
+        }
+        if(accessFlag==0)php.runtime.PhpPropertyAccess.check(entity,env,trace,php.runtime.PhpPropertyAccess.Intent.MUTABLE_BACKING_ADDRESS);
 
         ArrayMemory props = object.getProperties();
         value = props == null || accessFlag != 0 ? null : entity == null
@@ -1963,7 +2267,7 @@ ClassReader classReader;
             errorInvalidPropertyAccess(env, trace, entity, accessFlag);
         }
         if (value instanceof ReferenceMemory && entity != null)
-            ((ReferenceMemory)value).attachPropertySource(env, entity);
+            ((ReferenceMemory)value).attachPropertySource(env, entity,object);
 
         if (value == null) {
             if (methodMagicGet != null) {
@@ -1987,7 +2291,7 @@ ClassReader classReader;
                     : props.refOfIndex(entity.getSpecificName());
             if (entity != null && entity.getDeclaredType() != null && value instanceof ReferenceMemory) {
                 ((ReferenceMemory)value).unset();
-                ((ReferenceMemory)value).attachPropertySource(env, entity);
+                ((ReferenceMemory)value).attachPropertySource(env, entity,object);
             }
 
             if (methodMagicGet != null || methodMagicSet != null) {
@@ -2014,6 +2318,29 @@ ClassReader classReader;
         return getProperty(env, trace, object, property, callCache, cacheIndex, false, null, true);
     }
 
+    /** Exact array-unset container permission; quiet absence and object handles are value reads. */
+    public Memory getQuietArrayUnsetProperty(Environment env,TraceInfo trace,IObject object,String property,
+            PropertyCallCache callCache,int cacheIndex,php.runtime.reflection.support.PhpPropertyHooks.Hook body,IObject original)throws Throwable {
+        PropertyEntity entity=findCachedInstanceProperty(env,trace,property,callCache,cacheIndex);
+        if(entity!=null && entity.canAccess(env)==0 && entity.getPhpHooks()!=null) {
+            var getter=entity.getPhpHooks().get();
+            if(getter!=null && getter.method().isReturnReference()) {
+                // The validated reference hook may publish its actual CELL beyond setter visibility.
+                Memory published=php.runtime.PhpPropertyHookAccess.read(entity,env,trace,object,true,body,original);
+                if(published!=null)return published;
+            }
+        }
+        Memory result=body==null?getQuietProperty(env,trace,object,property,callCache,cacheIndex)
+                :getHookBodyProperty(env,trace,object,property,callCache,cacheIndex,false,true,body,original);
+        if(entity==null || entity.canAccess(env)!=0 || result.toValue().isObject())return result;
+        if(entity.getPhpHooks()==null) {
+            var storage=object.getProperties();var slot=storage==null?null:storage.getByScalar(entity.getSpecificName());
+            if(slot==null || slot.getValue().isUndefined())return result;
+        }
+        php.runtime.PhpPropertyAccess.check(entity,env,trace,php.runtime.PhpPropertyAccess.Intent.MUTABLE_BACKING_ADDRESS);
+        return result;
+    }
+
     public Memory getReflectedProperty(Environment env, TraceInfo trace, IObject object, PropertyEntity property) throws Throwable {
         return getProperty(env, trace, object, property.getName(), null, 0, false, property);
     }
@@ -2030,6 +2357,39 @@ ClassReader classReader;
 
     private Memory getProperty(Environment env, TraceInfo trace, IObject object, String property,
                                PropertyCallCache callCache, int cacheIndex, boolean referenceRead, PropertyEntity reflected, boolean quietRead) throws Throwable {
+        return getProperty(env,trace,object,property,callCache,cacheIndex,referenceRead,reflected,quietRead,null,null);
+    }
+
+    public Memory getHookBodyProperty(Environment env,TraceInfo trace,IObject object,String property,PropertyCallCache callCache,int cacheIndex,
+            boolean referenceRead,boolean quietRead,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original) throws Throwable {
+        if(referenceRead)return getRefProperty(env,trace,object,property,callCache,cacheIndex,body,original);
+        return getProperty(env,trace,object,property,callCache,cacheIndex,false,null,quietRead,body,original);
+    }
+
+    /** Only an actual object handle avoids acquiring permission for the containing property's indirect write. */
+    private void checkObjectWriteReceiverAddress(PropertyEntity property,Environment env,TraceInfo trace) {
+        if (property == null) return;
+        php.runtime.PhpPropertyAccess.check(property,env,trace,php.runtime.PhpPropertyAccess.Intent.MUTABLE_BACKING_ADDRESS);
+        if (property.isPhpReadonly()) env.exception(trace,php.runtime.lang.exception.BaseError.class,
+                "Cannot indirectly modify readonly property %s::$%s",property.getClazz().getName(),property.getName());
+    }
+
+    public Memory getObjectWriteReceiverProperty(Environment env,TraceInfo trace,IObject object,String property,PropertyCallCache callCache,int cacheIndex,
+            php.runtime.reflection.support.PhpPropertyHooks.Hook body,IObject original) throws Throwable {
+        return getProperty(env,trace,object,property,callCache,cacheIndex,false,null,false,body,original,true);
+    }
+
+    private Memory getProperty(Environment env,TraceInfo trace,IObject object,String property,PropertyCallCache callCache,int cacheIndex,
+            boolean referenceRead,PropertyEntity reflected,boolean quietRead,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original) throws Throwable {
+        return getProperty(env,trace,object,property,callCache,cacheIndex,referenceRead,reflected,quietRead,body,original,false);
+    }
+
+    private Memory getProperty(Environment env,TraceInfo trace,IObject object,String property,PropertyCallCache callCache,int cacheIndex,
+            boolean referenceRead,PropertyEntity reflected,boolean quietRead,php.runtime.reflection.support.PhpPropertyHooks.Hook body, IObject original,
+            boolean objectWriteReceiverRead) throws Throwable {
+        var arrayIterator = arrayIteratorProperty(object, property);
+        if (arrayIterator != null) return quietRead && arrayIterator.propertyIsset(env, property).isNull()
+                ? Memory.NULL : arrayIterator.propertyGet(env, property);
         Memory value;
 
         PropertyEntity entity = reflected == null ? findCachedInstanceProperty(env, trace, property, callCache, cacheIndex) : reflected;
@@ -2048,6 +2408,16 @@ ClassReader classReader;
         }
 
         int accessFlag = reflected != null || entity == null ? 0 : entity.canAccess(env);
+        if(entity!=null&&accessFlag==0&&entity.getPhpHooks()!=null){
+            Memory hooked=php.runtime.PhpPropertyHookAccess.read(entity,env,trace,object,referenceRead,body,original);
+            if(hooked!=null) {
+                if (objectWriteReceiverRead && entity.getPhpHooks().get()!=null
+                        && !entity.getPhpHooks().get().method().isReturnReference() && !hooked.toValue().isObject())
+                    env.exception(trace,php.runtime.lang.exception.BaseError.class,
+                            "Indirect modification of %s::$%s is not allowed",entity.getClazz().getName(),entity.getName());
+                return hooked;
+            }
+        }
 
         if (entity != null && accessFlag != 0) {
             value = null;
@@ -2060,8 +2430,14 @@ ClassReader classReader;
             }
         }
 
+        if(referenceRead && object instanceof php.runtime.lang.IPhpNativePropertyGuard guard)
+            guard.validateNativePropertyReference(env,trace,property,value);
         if (value != null) {
             if (quietRead && value.isUndefined()) return Memory.NULL;
+            if (objectWriteReceiverRead && !value.toValue().isObject()) checkObjectWriteReceiverAddress(entity,env,trace);
+            // Indirect object writes consume NULL from an uninitialized typed receiver without initializing it.
+            if (objectWriteReceiverRead && entity != null && entity.getDeclaredType() != null && value.isUndefined())
+                return Memory.NULL;
             if (entity != null) entity.readInitialized(env, trace, value);
             return value;
         }
@@ -2069,6 +2445,7 @@ ClassReader classReader;
         if (quietRead && methodMagicIsset != null && invokeMagicIsset(env, trace, object, property).isNull())
             return Memory.NULL;
 
+        if (objectWriteReceiverRead && accessFlag == 0) checkObjectWriteReceiverAddress(entity,env,trace);
         if (methodMagicGet != null) {
             Memory result;
 
@@ -2090,7 +2467,7 @@ ClassReader classReader;
                 InvokeArgumentHelper.checkType(env, trace, methodMagicGet, args);
                 result = methodMagicGet.invokeDynamic(object, env, trace, args);
                 if (entity != null && accessFlag == 0 && entity.getDeclaredType() != null) {
-                    if (referenceRead && !methodMagicGet.isReturnReference())
+                    if (!methodMagicGet.isReturnReference() && (referenceRead || objectWriteReceiverRead && !result.toValue().isObject()))
                         env.error(trace,ErrorType.E_NOTICE,Messages.ERR_INDIRECT_MODIFICATION_OVERLOADED_PROPERTY,name,property);
                     var module=methodMagicGet.getClazz().getModule();
                     var writeContext=php.runtime.PhpPropertyWriteContext.enter(env,trace,module != null && module.isStrictTypes());
@@ -2110,6 +2487,9 @@ ClassReader classReader;
             } finally {
                 env.popCall();
             }
+            if (objectWriteReceiverRead && !methodMagicGet.isReturnReference() && !result.toValue().isObject()
+                    && (entity == null || accessFlag != 0 || entity.getDeclaredType() == null))
+                env.error(trace,ErrorType.E_NOTICE,Messages.ERR_INDIRECT_MODIFICATION_OVERLOADED_PROPERTY,name,property);
             return result;
         }
 
@@ -2117,6 +2497,7 @@ ClassReader classReader;
         if (accessFlag != 0)
             errorInvalidPropertyAccess(env, trace, entity, accessFlag);
 
+        if (objectWriteReceiverRead && entity != null && entity.getDeclaredType() != null) return Memory.NULL;
         if (entity != null && entity.getDeclaredType() != null) entity.readInitialized(env, trace, null);
         env.error(trace, usesModernPropertyPolicy(env, trace) ? ErrorType.E_WARNING : ErrorType.E_NOTICE,
                 Messages.ERR_UNDEFINED_PROPERTY, getName(), property);
@@ -2179,7 +2560,7 @@ ClassReader classReader;
         return entity != null && entity.isPrivate() && entity.getClazz() != this && entity.getClazz() != context;
     }
 
-    private static interface SetterCallback {
+    public interface SetterCallback {
         Memory invoke(Memory o1, Memory o2);
         default Memory invokeTarget(ReferenceMemory target, Memory right) { return invoke(target, right); }
         default boolean assignsTarget() { return false; }
@@ -2652,7 +3033,13 @@ ClassReader classReader;
                         e = getException(env, el, Messages.ERR_CANNOT_USE_FINAL_ON_ABSTRACT);
                         break;
                     case FINAL:
-                        e = getException(env, el, Messages.ERR_CANNOT_OVERRIDE_FINAL_METHOD, true);
+                        MethodEntity finalPrototype = el.method.getPrototype();
+                        if (hasPhp8Signatures() && finalPrototype.getTrait() != null
+                                && finalPrototype.getClazz().getClassComposition() != null) {
+                            e = new FatalException("Cannot override final method "
+                                    + finalPrototype.getClazz().getName() + "::" + finalPrototype.getName() + "()",
+                                    el.method.getTrace());
+                        } else e = getException(env, el, Messages.ERR_CANNOT_OVERRIDE_FINAL_METHOD, true);
                         break;
                     case NON_ABSTRACT:
                         e = getException(env, el, Messages.ERR_NON_ABSTRACT_METHOD_MUST_CONTAIN_BODY);
@@ -2664,6 +3051,14 @@ ClassReader classReader;
                         e = getException(env, el, Messages.ERR_ACCESS_TYPE_FOR_INTERFACE_METHOD);
                         break;
                     case NON_EXISTS:
+                        // Modern inherited completion waits until all ordinary and hidden hook contracts are linked.
+                        if (ClassEntity.this.hasPhp8Signatures()) {
+                            if (ClassEntity.this.isClass() && !ClassEntity.this.isEnum() && !ClassEntity.this.isAbstract
+                                    && el.method.getClazz() == ClassEntity.this && el.method.getTrait() == null)
+                                e = new FatalException("Class " + ClassEntity.this.getName() + " declares abstract method "
+                                        + el.method.getName() + "() and must therefore be declared abstract", el.method.getTrace());
+                            break;
+                        }
                         if (nonExists == null) nonExists = new HashSet<>();
                         nonExists.add(el);
                         break;

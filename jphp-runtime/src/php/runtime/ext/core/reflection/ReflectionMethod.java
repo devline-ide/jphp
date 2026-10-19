@@ -125,6 +125,7 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
 
     @Signature
     public Memory getModifiers(Environment env, Memory... args){
+        if(PhpReflectionModifiers.modern(env,env.trace()))return LongMemory.valueOf(PhpReflectionModifiers.methodFlags(methodEntity));
         int mod = 0;
         if (methodEntity.isAbstract())
             mod |= IS_ABSTRACT;
@@ -221,9 +222,20 @@ public class ReflectionMethod extends ReflectionFunctionAbstract {
         Memory self = args[0];
 
         ArrayMemory values = args[1].toValue(ArrayMemory.class);
-        Memory[] arguments = env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
-                ? values.valuesForCall() : values.values();
-        return invokeReflected(env, self, arguments);
+        if (env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            if (!methodEntity.isStatic()) {
+                if (self.isNull()) exception(env, "Trying to invoke non static method %s::%s() without an object",
+                        methodEntity.getClazzName(), methodEntity.getName());
+                if (!self.toObject(IObject.class).getReflection().isInstanceOf(methodEntity.getClazz()))
+                    exception(env, "Given object is not an instance of the class this method was declared in");
+            }
+            Invoker target = methodEntity.isStatic()
+                    ? new StaticMethodInvoker(env, env.trace(), reflectedClass.getName(), methodEntity)
+                    : new DynamicMethodInvoker(env, env.trace(), self.toObject(IObject.class), methodEntity);
+            return php.runtime.invoke.PhpCallFrame.resolvedInvoker(env, env.trace(), target, values.size())
+                    .invokeKeyed(values, true);
+        }
+        return invokeReflected(env, self, values.values());
     }
 
     private Memory invokeReflected(Environment env, Memory self, Memory[] arguments) throws Throwable {

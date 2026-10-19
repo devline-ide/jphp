@@ -67,6 +67,23 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     private Stack<Integer> exprStackInit = new Stack<Integer>();
 
     private int lastLineNumber = -1;
+    // FIELD -> FIELD binding has no attested reference-CV consumer yet.
+    private int runtimeFieldReferenceBindingDepth;
+    public boolean isRuntimeFieldReferenceBinding() {return runtimeFieldReferenceBindingDepth != 0;}
+    private int runtimeReferenceIteratorDepth;
+    public boolean isRuntimeReferenceIterator() {return runtimeReferenceIteratorDepth != 0;}
+    /** Iterator consumption has no attested FIELD-to-reference-CV publication. */
+    public Memory writeForeachIteratorExpression(ExprStmtToken expression,boolean reference) {
+        ExprStmtToken prepared=expression.isStmtList()?expression:expression.getAsmExpr();
+        boolean propertyReference=reference && prepared!=null && prepared.getTokens().stream()
+                .anyMatch(token->token.getClass()==DynamicAccessGetRefExprToken.class);
+        if(propertyReference) {
+            runtimeReferenceIteratorDepth++;
+        }
+        try{return writeExpression(expression,true,false,true);}
+        finally{if(propertyReference)runtimeReferenceIteratorDepth--;}
+    }
+    private final Map<StackItem,MethodInsnNode> runtimeLiteralPairs=new IdentityHashMap<>();
     private final Set<Token> quietThisReads = Collections.newSetFromMap(new IdentityHashMap<>());
     // Only the current argument's property spine gets its callee's SEND_REF mode.
     private final Map<Token, LocalVariable> referenceArgumentFetches = new IdentityHashMap<>();
@@ -81,6 +98,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         compilerRules.put(IfStmtToken.class, IfElseCompiler.class);
         compilerRules.put(SwitchStmtToken.class, SwitchCompiler.class);
         compilerRules.put(FunctionStmtToken.class, FunctionCompiler.class);
+        compilerRules.put(ClassStmtToken.class, ClassDeclarationCompiler.class);
         compilerRules.put(EchoRawToken.class, EchoRawCompiler.class);
         compilerRules.put(EchoStmtToken.class, EchoCompiler.class);
         compilerRules.put(OpenEchoTagToken.class, OpenEchoTagCompiler.class);
@@ -119,6 +137,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         compilerRules.put(RequireOnceExprToken.class, ImportCompiler.class);
 
         compilerRules.put(NewExprToken.class, NewValueCompiler.class);
+        compilerRules.put(MatchExprToken.class, MatchValueCompiler.class);
+        compilerRules.put(ThrowExprToken.class, ThrowValueCompiler.class);
         compilerRules.put(StringBuilderExprToken.class, StringBuilderValueCompiler.class);
         compilerRules.put(UnsetExprToken.class, UnsetCompiler.class);
         compilerRules.put(IssetExprToken.class, IssetCompiler.class);
@@ -239,7 +259,10 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     public void makeVarStore(LocalVariable variable) {
-        code.add(new VarInsnNode(ASTORE, variable.index));
+        StackItem value = method.getStackCount() == 0 ? null : stackPeek();
+        if (!method.ownership().store(code, variable, value == null ? -1 : value.ownershipEvalId))
+            code.add(new VarInsnNode(ASTORE, variable.index));
+        else if (value != null) value.ownershipEvalId = -1;
     }
 
     public void makeVarLoad(LocalVariable variable) {
@@ -399,9 +422,29 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     public void writePushMemory(Memory memory) {
+        memory=CompilerUtils.immutableConstant(memory,getCompiler().getModule().getPhpLanguageProfile());
         Memory.Type type = Memory.Type.REFERENCE;
 
-        if (memory instanceof UndefinedMemory) {
+        if (memory instanceof PhpByteStringMemory) {
+            String binary = memory.toBinaryString();
+            // Modified UTF-8 encodes every projected byte in at most two bytes, including NUL.
+            // Conservative chunks keep each constant below the classfile u2 UTF length limit.
+            final int chunkSize = 16000;
+            if (binary.length() <= chunkSize) {
+                writePushConstString(binary);
+            } else {
+                writePushNewObject(StringBuilder.class);
+                for (int from = 0; from < binary.length(); from += chunkSize) {
+                    writePushConstString(binary.substring(from, Math.min(binary.length(), from + chunkSize)));
+                    writeSysDynamicCall(StringBuilder.class, "append", StringBuilder.class, String.class);
+                }
+                writeSysDynamicCall(StringBuilder.class, "toString", String.class);
+            }
+            writeSysStaticCall(PhpByteStringMemory.class, "fromBinaryString", PhpByteStringMemory.class, String.class);
+            if (binary.length() <= chunkSize) method.ownership().immutableByteLiteral((MethodInsnNode)code.getLast());
+            setStackPeekAsImmutable();
+            return;
+        } else if (memory instanceof UndefinedMemory) {
             code.add(new FieldInsnNode(
                     GETSTATIC, Type.getInternalName(Memory.class), "UNDEFINED", Type.getDescriptor(Memory.class)
             ));
@@ -422,6 +465,15 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writePushMemory(((KeyValueMemory) memory).getValue());
             writePopBoxing();
 
+            if(method.ownership().runtimeEnabled()) {
+                int childRuntimeEval=stackPeek().runtimeEvaluationId;
+                writeSysStaticCall(KeyValueMemory.class,"valueOf",Memory.class,Memory.class,Memory.class);
+                stackPeek().runtimeEvaluationId=childRuntimeEval;
+                Memory key=((KeyValueMemory)memory).key;
+                if(key.isString()||key.type==Memory.Type.INT)runtimeLiteralPairs.put(stackPeek(),(MethodInsnNode)code.getLast());
+                else method.ownership().runtimeUnsupported("literal-entry-key-conversion");
+                setStackPeekAsImmutable();return;
+            }
             Object arrayKey = ((KeyValueMemory) memory).getArrayKey();
 
             if (arrayKey instanceof String) {
@@ -451,12 +503,14 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 writeSysStaticCall(ArrayMemory.class, "createListed", ArrayMemory.class, int.class);
             }
 
+            stageRuntimeArray();
             ForeachIterator foreachIterator = ((ArrayMemory) memory).foreachIterator(false, false);
             while (foreachIterator.next()) {
                 writePushDup();
+                int childRuntimeEval;
                 if (array.isList()) {
                     writePushMemory(foreachIterator.getValue());
-                    writePopBoxing();
+                    writePopBoxing();childRuntimeEval=stackPeek().runtimeEvaluationId;
                     writeSysDynamicCall(ArrayMemory.class, "add", ReferenceMemory.class, Memory.class);
                 } else {
                     Memory key = foreachIterator.getMemoryKey();
@@ -467,12 +521,12 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     }
 
                     writePushMemory(foreachIterator.getValue());
-                    writePopBoxing();
+                    writePopBoxing();childRuntimeEval=stackPeek().runtimeEvaluationId;
 
                     writeSysDynamicCall(ArrayMemory.class, "put", ReferenceMemory.class, Object.class, Memory.class);
                 }
 
-                writePopAll(1);
+                writePopAll(1);releaseRuntimeEvaluation(childRuntimeEval,"ENTRY");
             }
             /*stackPop();
             stackPush(memory);*/
@@ -533,7 +587,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
     public boolean writePopBoxing(StackItem.Type type, boolean asImmutable, boolean useConstants) {
         switch (type) {
+            case STRING_VALUE:
+                writeSysStaticCall(php.runtime.PhpByteStringValues.class,"box",Memory.class,Object.class);
+                setStackPeekAsImmutable();return true;
             case BOOL:
+                int runtimeBooleanEval=stackPeek().runtimeEvaluationId;
                 /*if (useConstants && code.getLast() instanceof InsnNode) {
                     InsnNode node = (InsnNode) code.getLast();
 
@@ -557,6 +615,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 }*/
 
                 writeSysStaticCall(TrueMemory.class, "valueOf", Memory.class, type.toClass());
+                stackPeek().runtimeEvaluationId=runtimeBooleanEval;
                 setStackPeekAsImmutable();
                 return true;
             case SHORT:
@@ -839,9 +898,130 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         );
     }
 
+    private LocalVariable beginRuntimeNativePacket(CompileFunction.Method nativeMethod,int argc,int evalId) {
+        String owner=Type.getInternalName(nativeMethod.method.getDeclaringClass());
+        String descriptor=Type.getMethodDescriptor(nativeMethod.method);
+        method.ownership().runtimeProducer(evalId,"NATIVE_RESULT");
+        method.ownership().runtimeNativeMember(evalId,owner,nativeMethod.method.getName(),descriptor,argc);
+        LocalVariable packet=method.addLocalVariable("~runtimeNativePacket"+evalId,null,Object.class);
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(evalId));
+        code.add(new LdcInsnNode(Type.getType(nativeMethod.method.getDeclaringClass())));
+        code.add(new LdcInsnNode(nativeMethod.method.getName()));code.add(new LdcInsnNode(descriptor));code.add(new LdcInsnNode(argc));
+        code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeCall",
+                "(Lphp/runtime/PhpRuntimeOwnership$Frame;ILjava/lang/Class;Ljava/lang/String;Ljava/lang/String;I)Lphp/runtime/PhpRuntimeOwnership$NativePacket;",false));
+        code.add(new VarInsnNode(ASTORE,packet.index));return packet;
+    }
+    private void sendRuntimeNative(LocalVariable packet,int index,int sourceEval) {
+        if (packet == null) return;
+        LocalVariable raw=method.addLocalVariable("~runtimeNativeSend"+method.ownership().reserveRuntimeEval(),null,Memory.class);
+        code.add(new VarInsnNode(ASTORE,raw.index));code.add(new VarInsnNode(ALOAD,packet.index));
+        code.add(new LdcInsnNode(index));code.add(new VarInsnNode(ALOAD,raw.index));code.add(new LdcInsnNode(sourceEval));
+        code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeSend",
+                "(Lphp/runtime/PhpRuntimeOwnership$NativePacket;ILphp/runtime/Memory;I)Lphp/runtime/Memory;",false));
+        if (sourceEval >= 0) method.ownership().runtimeConsumer(sourceEval,"SEND");
+        stackPeek().runtimeEvaluationId=-1;
+    }
+    private void sendRuntimeNativeBorrow(LocalVariable packet,int index,int sourceEval,int callId,boolean fast,boolean wrappedTransport) {
+        LocalVariable raw=method.addLocalVariable("~runtimeNativeBorrow"+method.ownership().reserveRuntimeEval(),null,Memory.class);
+        code.add(new VarInsnNode(ASTORE,raw.index));code.add(new VarInsnNode(ALOAD,packet.index));
+        code.add(new LdcInsnNode(index));code.add(new VarInsnNode(ALOAD,raw.index));code.add(new LdcInsnNode(sourceEval));
+        code.add(new InsnNode(fast?ICONST_1:ICONST_0));code.add(new InsnNode(wrappedTransport?ICONST_1:ICONST_0));
+        MethodInsnNode borrow=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeBorrowSend",
+                "(Lphp/runtime/PhpRuntimeOwnership$NativePacket;ILphp/runtime/Memory;IZZ)Lphp/runtime/Memory;",false);
+        code.add(borrow);method.ownership().runtimeNativeBorrow(callId,borrow);
+        if(sourceEval>=0)method.ownership().runtimeConsumer(sourceEval,"SEND");
+        stackPeek().runtimeEvaluationId=-1;
+    }
+    private LocalVariable nativeDirectCvLocal(VariableExprToken variable) {
+        LocalVariable local=method.getLocalVariable(variable.getName());
+        AbstractInsnNode source=code.getLast();
+        while(source!=null&&source.getOpcode()<0)source=source.getPrevious();
+        return local!=null&&source instanceof VarInsnNode read&&read.getOpcode()==ALOAD&&read.var==local.index?local:null;
+    }
+    private void sendRuntimeNativeDirectCv(LocalVariable packet,int argument,LocalVariable local,int callId) {
+        AbstractInsnNode source=code.getLast();
+        while(source!=null&&source.getOpcode()<0)source=source.getPrevious();
+        if(local==null||!(source instanceof VarInsnNode read)||read.getOpcode()!=ALOAD||read.var!=local.index)
+            throw new IllegalArgumentException("Native direct CV lacks its exact physical local read");
+        LocalVariable scratch=method.addLocalVariable("~runtimeNativeDirectCv"+method.ownership().reserveRuntimeEval(),null,Memory.class);
+        VarInsnNode store=new VarInsnNode(ASTORE,scratch.index);code.add(store);
+        code.add(new VarInsnNode(ALOAD,packet.index));code.add(new LdcInsnNode(argument));
+        code.add(new VarInsnNode(ALOAD,scratch.index));code.add(new LdcInsnNode(local.index));
+        MethodInsnNode helper=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeDirectCvSend",
+                "(Lphp/runtime/PhpRuntimeOwnership$NativePacket;ILphp/runtime/Memory;I)Lphp/runtime/Memory;",false);
+        code.add(helper);method.ownership().runtimeNativeDirectCv(callId,local.index,read,store,helper);
+        stackPeek().runtimeEvaluationId=-1;
+    }
+    private void recordRuntimeHandler(CompileFunction.Method selected,ExprStmtToken argument,int index,int callId,
+                                      int producer,String closure) {
+        if (index==0 && producer>=0 && closure!=null && argument.isSingle()
+                && argument.getSingle() instanceof ClosureStmtToken
+                && selected.method.getDeclaringClass()==php.runtime.ext.core.LangFunctions.class
+                && selected.method.getName().equals("set_error_handler"))
+            method.ownership().runtimeHandlerSite(callId,producer,closure,(MethodInsnNode)code.getLast());
+    }
+    private void writeRuntimeNativeBody(Method selected,LocalVariable packet,int callId) {
+        writeRuntimeNativeBody(selected,selected,packet,callId);
+    }
+    private void writeRuntimeNativeBody(Method semantic,Method selected,LocalVariable packet,int callId) {
+        LocalVariable token=method.addLocalVariable("~runtimeNativeBody"+callId,null,Object.class);
+        LocalVariable failure=method.addLocalVariable("~runtimeNativeFailure"+callId,null,Throwable.class);
+        MethodInsnNode enter=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeEnterBody",
+                "(Lphp/runtime/PhpRuntimeOwnership$NativePacket;)Lphp/runtime/PhpRuntimeOwnership$NativeBody;",false);
+        code.add(new VarInsnNode(ALOAD,packet.index));code.add(enter);code.add(new VarInsnNode(ASTORE,token.index));
+        LabelNode start=new LabelNode(),end=new LabelNode(),handler=new LabelNode(),joined=new LabelNode();
+        code.add(start);writePushStaticCall(selected);MethodInsnNode body=(MethodInsnNode)code.getLast();code.add(end);
+        MethodInsnNode leave=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeLeaveBody",
+                "(Lphp/runtime/PhpRuntimeOwnership$NativeBody;)V",false);
+        code.add(new VarInsnNode(ALOAD,token.index));code.add(leave);code.add(new JumpInsnNode(GOTO,joined));
+        code.add(handler);code.add(new VarInsnNode(ASTORE,failure.index));code.add(new VarInsnNode(ALOAD,token.index));
+        code.add(new VarInsnNode(ALOAD,failure.index));
+        MethodInsnNode fail=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeFailBody",
+                "(Lphp/runtime/PhpRuntimeOwnership$NativeBody;Ljava/lang/Throwable;)Ljava/lang/Throwable;",false);
+        code.add(fail);code.add(new InsnNode(ATHROW));code.add(joined);
+        TryCatchBlockNode guard=new TryCatchBlockNode(start,end,handler,"java/lang/Throwable");
+        method.node.tryCatchBlocks.add(0,guard);
+        method.ownership().runtimeNativeBody(callId,semantic,selected,enter,body,leave,fail,guard);
+    }
+    private void finishRuntimeNative(LocalVariable packet,int evalId) {
+        if (packet == null) return;
+        StackItem.Type primitive=stackPeek().type;writePopBoxing();
+        MethodInsnNode boxing=(primitive==StackItem.Type.INT||primitive==StackItem.Type.LONG||primitive==StackItem.Type.BOOL)?(MethodInsnNode)code.getLast():null;
+        LocalVariable raw=method.addLocalVariable("~runtimeNativeResult"+evalId,null,Memory.class);
+        code.add(new VarInsnNode(ASTORE,raw.index));code.add(new VarInsnNode(ALOAD,packet.index));
+        code.add(new VarInsnNode(ALOAD,raw.index));code.add(new LdcInsnNode(evalId));
+        code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","nativeResult",
+                "(Lphp/runtime/PhpRuntimeOwnership$NativePacket;Lphp/runtime/Memory;I)Lphp/runtime/Memory;",false));
+        if(boxing!=null)method.ownership().runtimeNativeScalarResult(evalId,boxing,(MethodInsnNode)code.getLast());
+        code.add(new InsnNode(ACONST_NULL));code.add(new VarInsnNode(ASTORE,raw.index));
+        stackPeek().runtimeEvaluationId=evalId;
+    }
+    /** Keep historical immutable transports only for this module's legacy direct ord/chr calls. */
+    private static CompileFunction.Method legacyByteCharacterMethod(String name, CompileFunction.Method selected, int arity) {
+        if (selected == null || arity != 1 || selected.argsCount != 1
+                || selected.method.getDeclaringClass() != php.runtime.ext.core.StringFunctions.class
+                || !Arrays.equals(selected.parameterTypes, new Class<?>[]{Environment.class, TraceInfo.class, Memory.class}))
+            return selected;
+        String target;
+        Class<?> parameter;
+        if (name.equals("ord") && selected.method.getName().equals("nativeOrd") && selected.resultType == long.class) {
+            target = "ord"; parameter = char.class;
+        } else if (name.equals("chr") && selected.method.getName().equals("nativeChr") && selected.resultType == Memory.class) {
+            target = "chr"; parameter = int.class;
+        } else return selected;
+        try {
+            return new CompileFunction.Method(php.runtime.ext.core.StringFunctions.class.getDeclaredMethod(target, parameter), 1, false);
+        } catch (java.lang.NoSuchMethodException missing) {
+            throw new IllegalStateException("Missing historical byte-character transport", missing);
+        }
+    }
+
     Memory writePushCompileFunction(CallExprToken function, CompileFunction compileFunction, boolean returnValue,
                                     boolean writeOpcode, PushCallStatistic statistic) {
-        CompileFunction.Method method = compileFunction.find(function.getParameters().size());
+        CompileFunction.Method ordinary = compileFunction.find(function.getParameters().size());
+        CompileFunction.Method method = php8CallFrame() ? compileFunction.findDirect(function.getParameters().size())
+                : legacyByteCharacterMethod(compileFunction.name, ordinary, function.getParameters().size());
+        Runtime.DirectCall directEntry = method != ordinary ? ordinary.method.getAnnotation(Runtime.DirectCall.class) : null;
         if (method == null) {
             if (!writeOpcode)
                 return Memory.NULL;
@@ -875,6 +1055,20 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         Object[] arguments = new Object[types.length];
         int j = 0;
         boolean immutable = method.isImmutable;
+        boolean runtimeNative=writeOpcode && this.method.ownership().runtimeEnabled();
+        if (runtimeNative && immutable) {
+            Memory folded=writePushCompileFunction(function,compileFunction,true,false,statistic);
+            if (folded != null) return returnValue ? folded : null;
+            immutable=false;
+        }
+        int runtimeResultEval=-1;LocalVariable runtimePacket=null;
+        if (runtimeNative && !immutable) {
+            runtimeResultEval=this.method.ownership().reserveRuntimeEval();
+            runtimePacket=beginRuntimeNativePacket(method,function.getParameters().size(),runtimeResultEval);
+        }
+        Runtime.Frameless frameless=method.method.getAnnotation(Runtime.Frameless.class);
+        String nativeBorrow=frameless != null && Arrays.stream(frameless.value()).anyMatch(arity->arity==function.getParameters().size())
+                ? "borrowNativeFastArgument" : "borrowNativeArgument";
 
         boolean init = false;
         for (int i = 0; i < method.parameterTypes.length; i++) {
@@ -946,13 +1140,19 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                             writePushSmallInt(t);
                             writeArgumentExpression(next, fetchByReference, null, writeOpcode);
 
+                            int sourceRuntimeEval=stackPeek().runtimeEvaluationId;
+                            String sourceClosure=stackPeek().runtimeClosureInternalName;
                             //if (!isRef)  BUGFIX - array is memory[] and so we need to convert value to memory
                             writePopBoxing(!isRef);
                             if (fetchByReference)
                                 writeSysStaticCall(PhpCallFrame.class,"referenceNativeArgument",Memory.class,Memory.class);
-                            else if (borrowedNativeInput)
-                                writeSysStaticCall(PhpCallFrame.class,"borrowNativeArgument",Memory.class,Memory.class);
+                            else if (borrowedNativeInput && runtimePacket == null)
+                                writeSysStaticCall(PhpCallFrame.class,nativeBorrow,Memory.class,Memory.class);
 
+                            if (borrowedNativeInput && runtimePacket != null) {
+                                sendRuntimeNativeBorrow(runtimePacket,j+t,sourceRuntimeEval,runtimeResultEval,nativeBorrow.equals("borrowNativeFastArgument"),true);
+                                recordRuntimeHandler(method,next,j+t,runtimeResultEval,sourceRuntimeEval,sourceClosure);
+                            } else sendRuntimeNative(runtimePacket,j+t,sourceRuntimeEval);
                             code.add(new InsnNode(AASTORE));
                             stackPop();
                             stackPop();
@@ -1010,22 +1210,52 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                             init = true;
                         }
 
+                        boolean runtimeScalarLiteral=false;
                         if (isRef)
                             writeArgumentExpression(next, fetchByReference, null, writeOpcode);
                         else {
                             Memory tmp = writeExpression(next, true, true, true);
-                            if (tmp != null)
-                                writePushMemory(tmp);
+                            if (tmp != null) {
+                                if(runtimePacket!=null&&argType==int.class&&tmp instanceof LongMemory) {
+                                    writePushConstLong(tmp.toLong());writeSysStaticCall(LongMemory.class,"valueOf",Memory.class,long.class);runtimeScalarLiteral=true;
+                                }else if(runtimePacket!=null&&argType==String.class&&tmp.getClass()==StringMemory.class) {
+                                    writePushConstString(tmp.toString());writeSysStaticCall(StringMemory.class,"valueOf",Memory.class,String.class);runtimeScalarLiteral=true;
+                                }else writePushMemory(tmp);
+                            }
                         }
 
+                        int sourceRuntimeEval=stackPeek().runtimeEvaluationId;
+                        String sourceClosure=stackPeek().runtimeClosureInternalName;
                         if (fetchByReference || borrowedNativeInput) {
                             writePopBoxing(false);
                             if (fetchByReference) writeSysStaticCall(PhpCallFrame.class,"referenceNativeArgument",Memory.class,Memory.class);
-                            else writeSysStaticCall(PhpCallFrame.class,"borrowNativeArgument",Memory.class,Memory.class);
+                            else if (runtimePacket == null && !(directEntry != null && directEntry.liveArrayVariables()
+                                    && next.isSingle() && next.getSingle() instanceof VariableExprToken))
+                                writeSysStaticCall(PhpCallFrame.class,nativeBorrow,Memory.class,Memory.class);
+                        }
+                        if (runtimePacket != null) {
+                            writePopBoxing(false);
+                            if (fetchByReference) sendRuntimeNative(runtimePacket,j,sourceRuntimeEval);
+                            else {
+                                LocalVariable directCv = directEntry != null && directEntry.liveArrayVariables() && isRef
+                                        && next.isSingle() && next.getSingle() instanceof VariableExprToken variable
+                                        ? nativeDirectCvLocal(variable) : null;
+                                if (directCv != null) sendRuntimeNativeDirectCv(runtimePacket, j, directCv, runtimeResultEval);
+                                else sendRuntimeNativeBorrow(runtimePacket,j,sourceRuntimeEval,runtimeResultEval,nativeBorrow.equals("borrowNativeFastArgument"),isRef);
+                                recordRuntimeHandler(method,next,j,runtimeResultEval,sourceRuntimeEval,sourceClosure);
+                            }
                         }
                         writePop(argType, true, isMutable && !isRef);
+                        if(runtimeScalarLiteral&&j<function.getParameters().size()) {
+                            AbstractInsnNode last=code.getLast();
+                            if(argType==int.class&&last.getOpcode()==L2I&&last.getPrevious() instanceof MethodInsnNode)
+                                this.method.ownership().runtimeNativeScalarArgument(runtimeResultEval,j,(MethodInsnNode)last.getPrevious(),last);
+                            else if(argType==String.class&&last instanceof MethodInsnNode)
+                                this.method.ownership().runtimeNativeScalarArgument(runtimeResultEval,j,(MethodInsnNode)last,last);
+                        }
                         if (!isMutable && !isRef && stackPeek().type.isReference()) {
                             writeSysDynamicCall(Memory.class, "toValue", Memory.class);
+                            if (runtimePacket != null) this.method.ownership().runtimeNativeConversion(runtimeResultEval,(MethodInsnNode)code.getLast());
                         }
 
                         immutable = false;
@@ -1063,10 +1293,17 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         this.method.entity.setImmutable(false);
 
         writeLineNumber(function);
-        writePushStaticCall(method.method);
+        java.lang.reflect.Method member=php.runtime.invoke.PhpNativeResultUse.select(method.method,semanticDiscarded(function,returnValue) && php8CallFrame());
+        if (runtimePacket == null) writePushStaticCall(member);
+        else writeRuntimeNativeBody(method.method,member,runtimePacket,runtimeResultEval);
+        if (runtimePacket != null) {
+            if (method.resultType == void.class) writePushNull();
+            finishRuntimeNative(runtimePacket,runtimeResultEval);
+            if (statistic != null) statistic.returnType=StackItem.Type.REFERENCE;
+            if (!returnValue) writePopAll(1);
+        }
         if (returnValue) {
-            if (method.resultType == void.class)
-                writePushNull();
+            if (method.resultType == void.class && runtimePacket == null) writePushNull();
             setStackPeekAsImmutable();
         }
         return null;
@@ -1180,7 +1417,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             if (call.getName() instanceof NameToken) {
                 String name = ((NameToken) call.getName()).getName().toLowerCase(Locale.ROOT);
                 // PHP compiles these internal calls as temporary-value opcodes, not callable results.
-                if (compiler.getScope().findCompileFunction(name) != null && !hasUnpackedArguments(call.getParameters())
+                if (compiler.getScope().findCompileFunction(name,compiler.getModule().getPhpLanguageProfile()) != null && !hasUnpackedArguments(call.getParameters())
                         && nativeTemporaryResult(name, call.getParameters().size()))
                     return PhpCallFrame.VALUE;
             }
@@ -1280,7 +1517,114 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         return true;
     }
 
-    public void writeFrameArguments(Collection<ExprStmtToken> parameters, boolean returnValue) {
+    private boolean hasBoundArguments(Collection<ExprStmtToken> parameters, List<CallArgument> arguments) {
+        if (arguments != null) for (CallArgument argument : arguments)
+            if (argument.getKind() != CallArgument.Kind.POSITIONAL) return true;
+        return hasUnpackedArguments(parameters);
+    }
+
+    public void writeFrameArguments(Collection<ExprStmtToken> parameters, List<CallArgument> arguments,
+                                    boolean returnValue) {
+        writeFrameArguments(parameters,arguments,returnValue,null);
+    }
+    private void writeFrameArguments(Collection<ExprStmtToken> parameters,List<CallArgument> arguments,
+                                     boolean returnValue,Token call) {
+        // Capture semantic use before nested argument expressions change their own AST scope.
+        boolean discarded=semanticDiscarded(call,returnValue);
+        if (!php8CallFrame() || !hasBoundArguments(parameters, arguments)) {
+            writeFrameArguments(parameters,returnValue,discarded);
+            return;
+        }
+        writeProtectedFrameArguments(parameters,arguments,returnValue,discarded);
+    }
+
+    /** Construction must retire its actual pre-argument shell if any argument expression fails. */
+    public void writeConstructorFrameArguments(Collection<ExprStmtToken> parameters, List<CallArgument> arguments,
+                                               boolean returnValue) {
+        writeProtectedFrameArguments(parameters, arguments, returnValue);
+    }
+
+    private ExprStmtToken unpackedArgumentExpression(ExprStmtToken argument) {
+        ExprStmtToken asm = argument.getAsmExpr();
+        List<Token> tokens = (asm == null ? argument : asm).getTokens();
+        if (tokens.isEmpty() || !(tokens.get(tokens.size() - 1) instanceof ArgumentUnpackExprToken))
+            return argument;
+        // The descriptor supplies SEND_UNPACK. Do not emit the old VariadicMemory wrapper opcode.
+        ExprStmtToken value = new ExprStmtToken(null, null, new ArrayList<>(tokens.subList(0, tokens.size() - 1)));
+        value.setAsmExpr(value);
+        return value;
+    }
+
+    private void writeProtectedFrameArguments(Collection<ExprStmtToken> parameters,List<CallArgument> arguments,
+                                              boolean returnValue) {
+        writeProtectedFrameArguments(parameters,arguments,returnValue,!returnValue);
+    }
+    private void writeProtectedFrameArguments(Collection<ExprStmtToken> parameters,List<CallArgument> arguments,
+                                              boolean returnValue,boolean discarded) {
+        if (hasBoundArguments(parameters, arguments))
+            method.ownership().runtimeUnsupported("named-or-unpacked-call-without-destination-custody");
+        if (arguments != null && arguments.size() != parameters.size())
+            throw new IllegalArgumentException("Call argument metadata differs from expression count");
+        int id = method.nextStatementIndex(PhpCallFrame.class);
+        LocalVariable frame = method.addLocalVariable("~boundArgFrame" + id, null, PhpCallFrame.class);
+        LocalVariable result = method.addLocalVariable("~boundArgResult" + id, null, Memory.class);
+        LocalVariable failure = method.addLocalVariable("~boundArgFailure" + id, null, Throwable.class);
+        code.add(new VarInsnNode(ASTORE, frame.index)); stackPop();
+        LabelNode start = new LabelNode(), end = new LabelNode(), handler = new LabelNode(), joined = new LabelNode();
+        // Register before nested argument emission: inner cleanup handlers must retain first priority.
+        method.node.tryCatchBlocks.add(0, new TryCatchBlockNode(start, end, handler, "java/lang/Throwable"));
+        code.add(start);
+        int index = 0;
+        for (ExprStmtToken parameter : parameters) {
+            CallArgument argument = arguments == null ? null : arguments.get(index++);
+            ExprStmtToken asm = parameter.getAsmExpr();
+            boolean unpack = argument == null
+                    ? (asm == null ? parameter : asm).getLast() instanceof ArgumentUnpackExprToken
+                    : argument.getKind() == CallArgument.Kind.UNPACK;
+            if (unpack) {
+                // A spread operand has no single pending destination and must use an ordinary VALUE fetch.
+                writeVarLoad(frame);
+                writeExpression(unpackedArgumentExpression(parameter), true, false);
+                writePopBoxing();
+                writeSysDynamicCall(PhpCallFrame.class, "sendSpread", void.class, Memory.class);
+            } else {
+                writeVarLoad(frame);
+                if (argument != null && argument.getKind() == CallArgument.Kind.NAMED) {
+                    writePushConstString(argument.getName());
+                    writeSysDynamicCall(PhpCallFrame.class, "prepareNamed", void.class, String.class);
+                } else writeSysDynamicCall(PhpCallFrame.class, "preparePositional", void.class);
+                writeVarLoad(frame);
+                // The exact prepared destination controls FETCH_*_FUNC_ARG, including reordered references.
+                writeArgumentExpression(parameter, true, frame, true);
+                writePopBoxing();
+                writePushConstInt(argumentSourceKind(parameter));
+                writeSysDynamicCall(PhpCallFrame.class, "send", void.class, Memory.class, Integer.TYPE);
+            }
+        }
+        writeVarLoad(frame);
+        writeSysDynamicCall(PhpCallFrame.class, discarded ? "invokeDiscarded" : "invoke", Memory.class);
+        code.add(new VarInsnNode(ASTORE, result.index)); stackPop();
+        code.add(end);
+        writeVarLoad(frame);
+        writeSysDynamicCall(PhpCallFrame.class, "close", void.class);
+        code.add(new JumpInsnNode(GOTO, joined));
+        code.add(handler);
+        code.add(new VarInsnNode(ASTORE, failure.index));
+        code.add(new VarInsnNode(ALOAD, frame.index));
+        code.add(new VarInsnNode(ALOAD, failure.index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL, Type.getInternalName(PhpCallFrame.class), "fail",
+                "(Ljava/lang/Throwable;)Ljava/lang/Throwable;", false));
+        code.add(new InsnNode(ATHROW));
+        code.add(joined);
+        code.add(new VarInsnNode(ALOAD, result.index)); stackPush(Memory.Type.REFERENCE);
+        if (!returnValue) writePopAll(1);
+    }
+
+    public void writeFrameArguments(Collection<ExprStmtToken> parameters,boolean returnValue) {
+        writeFrameArguments(parameters,returnValue,!returnValue);
+    }
+    private void writeFrameArguments(Collection<ExprStmtToken> parameters,boolean returnValue,boolean discarded) {
+        int ownershipCall = stackPeek().ownershipCallId;
         LocalVariable frame=null;
         for (ExprStmtToken parameter : parameters) if (argumentPropertyFetch(parameter) != null) {
             frame=method.addLocalVariable("~referenceArgFrame"+method.nextStatementIndex(PhpCallFrame.class),makeLabel(),PhpCallFrame.class);
@@ -1292,10 +1636,15 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writePushDup();
             writeArgumentExpression(parameter, true, frame, true);
             writePopBoxing();
+            int argumentEval = stackPeek().ownershipEvalId; stackPeek().ownershipEvalId = -1;
             writePushConstInt(argumentSourceKind(parameter));
-            writeSysDynamicCall(PhpCallFrame.class, "send", void.class, Memory.class, Integer.TYPE);
+            if (ownershipCall >= 0) {
+                method.ownership().sendArgument(code, argumentEval); stackPop(); stackPop(); stackPop();
+            } else writeSysDynamicCall(PhpCallFrame.class, "send", void.class, Memory.class, Integer.TYPE);
         }
-        writeSysDynamicCall(PhpCallFrame.class, "invoke", Memory.class);
+        if (ownershipCall >= 0) {
+            method.ownership().invokeToEval(code, ownershipCall, discarded); stackPop(); stackPush(Memory.Type.REFERENCE); stackPeek().ownershipEvalId = ownershipCall;
+        } else writeSysDynamicCall(PhpCallFrame.class, discarded ? "invokeDiscarded" : "invoke", Memory.class);
         if (!returnValue) writePopAll(1);
     }
 
@@ -1303,7 +1652,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         if (call.isFirstClassCallable()) {
             writeSysDynamicCall(PhpCallFrame.class,"capture",Memory.class);
             if (!returnValue) writePopAll(1);
-        } else writeFrameArguments(call.getParameters(),returnValue);
+        } else writeFrameArguments(call.getParameters(),call.getArguments(),returnValue,call);
     }
 
     private void writeCallableFrame(Collection<ExprStmtToken> parameters, Token call, boolean returnValue) {
@@ -1311,6 +1660,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     private void writeCallableFrame(Collection<ExprStmtToken> parameters, Token call, boolean returnValue,boolean acquisition) {
+        if (!acquisition && parameters.isEmpty() && writeRuntimeCallableCv(call,returnValue)) return;
         writePopBoxing();
         writePushEnv();
         writePushTraceInfo(call);
@@ -1324,7 +1674,46 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         if (acquisition) {
             writeSysDynamicCall(PhpCallFrame.class,"capture",Memory.class);
             if (!returnValue) writePopAll(1);
-        } else writeFrameArguments(parameters, returnValue);
+        } else writeFrameArguments(parameters,call instanceof CallExprToken
+                ? ((CallExprToken)call).getArguments() : ((CallOperatorToken)call).getArguments(),returnValue,call);
+    }
+
+    /** Zero-argument lexical CALL consumes a compiler-witnessed, physically published CV. */
+    private boolean writeRuntimeCallableCv(Token call,boolean returnValue) {
+        if (!method.ownership().runtimeEnabled() || !(call instanceof CallExprToken)
+                || !(((CallExprToken)call).getName() instanceof VariableExprToken)) return false;
+        VariableExprToken token=(VariableExprToken)((CallExprToken)call).getName();
+        LocalVariable local=method.getLocalVariable(token.getName());
+        if (local == null) return false;
+        String closure=local.getRuntimeClosureInternalName();int producer=local.getRuntimeClosureProducerId();
+        if (closure == null || producer < 0 || stackPeek().runtimeClosureProducerId != producer
+                || !closure.equals(stackPeek().runtimeClosureInternalName)) return false;
+        writePopBoxing();
+        int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"CALL_RESULT");
+        LocalVariable operand=method.addLocalVariable("~runtimeCallable"+id,null,Memory.class);
+        LocalVariable trace=method.addLocalVariable("~runtimeCallableTrace"+id,null,TraceInfo.class);
+        LocalVariable packet=method.addLocalVariable("~runtimeCallablePacket"+id,null,Object.class);
+        code.add(new VarInsnNode(ASTORE,operand.index));stackPop();
+        writePushTraceInfo(call);code.add(new VarInsnNode(ASTORE,trace.index));stackPop();
+        LabelNode start=new LabelNode(),fallback=new LabelNode(),join=new LabelNode();
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNULL,fallback));code.add(start);
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(id));
+        code.add(new VarInsnNode(ALOAD,operand.index));code.add(new LdcInsnNode(local.index));code.add(new LdcInsnNode(-1));
+        code.add(new VarInsnNode(ALOAD,trace.index));code.add(new LdcInsnNode(0));
+        MethodInsnNode factory=new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Frame","callable",
+                "(ILphp/runtime/Memory;IILphp/runtime/env/TraceInfo;I)Lphp/runtime/PhpRuntimeOwnership$CallPacket;",false);code.add(factory);
+        code.add(new VarInsnNode(ASTORE,packet.index));code.add(new VarInsnNode(ALOAD,packet.index));code.add(new LdcInsnNode(id));
+        MethodInsnNode invoke=new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$CallPacket",semanticDiscarded(call,returnValue)?"invokeToEvalDiscarded":"invokeToEval","(I)Lphp/runtime/Memory;",false);code.add(invoke);
+        code.add(new JumpInsnNode(GOTO,join));code.add(fallback);
+        code.add(new VarInsnNode(ALOAD,operand.index));code.add(new VarInsnNode(ALOAD,method.getLocalVariable("~env").index));
+        code.add(new VarInsnNode(ALOAD,trace.index));code.add(new InsnNode(ICONST_0));
+        code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/invoke/PhpCallFrame","callable",
+                "(Lphp/runtime/Memory;Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;I)Lphp/runtime/invoke/PhpCallFrame;",false));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/invoke/PhpCallFrame",semanticDiscarded(call,returnValue)?"invokeDiscarded":"invoke","()Lphp/runtime/Memory;",false));code.add(join);
+        method.ownership().runtimeFallback(fallback,join);
+        method.ownership().runtimeCallSite(id,local.index,-1,producer,closure,0,factory,invoke,start,fallback,join);
+        stackPush(Memory.Type.REFERENCE);stackPeek().runtimeEvaluationId=id;
+        if (!returnValue) writePopAll(1);return true;
     }
 
     Memory writePushParentDynamicMethod(CallExprToken function, boolean returnValue, boolean writeOpcode,
@@ -1388,7 +1777,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             if (!(receiver.getToken() instanceof VariableExprToken)) writePopImmutable();
             writePhp8MethodName(access.getField(), access.getFieldExpr());
             writePushEnv();
-            writePushTraceInfo(access);
+            writePhp8MethodTraceInfo(access.getField(), access.getFieldExpr(), access);
             writePushConstInt(function.getParameters().size());
             writeSysStaticCall(PhpCallFrame.class, "method", PhpCallFrame.class,
                     Memory.class, Memory.class, Environment.class, TraceInfo.class, Integer.TYPE);
@@ -1413,6 +1802,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         return null;
     }
 
+    /** PHP method-call errors point at the method name, including a braced name expression. */
+    private void writePhp8MethodTraceInfo(ValueExprToken field, ExprStmtToken fieldExpression, Token fallback) {
+        writePushTraceInfo(field != null ? field : fieldExpression != null ? fieldExpression : fallback);
+    }
+
     private void writePhp8MethodName(ValueExprToken field, ExprStmtToken fieldExpression) {
         if (field instanceof NameToken) writePushString(((NameToken) field).getName());
         else if (field != null) writePush(field, true, false);
@@ -1434,7 +1828,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writeVarStore(capturedClass, false, false);
         }
         writePushEnv();
-        writePushTraceInfo(access);
+        writePhp8MethodTraceInfo(access.getField(), access.getFieldExpr(), access);
         if (constantClass) writePushConstString(((NameToken) clazz).getName());
         else if (clazz instanceof ParentExprToken || clazz instanceof StaticExprToken) {
             writePushEnv();
@@ -1642,13 +2036,85 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         public StackItem.Type returnType = StackItem.Type.REFERENCE;
     }
 
+    private void writeOwnedNamedFunctionFrame(CallExprToken function, String name, boolean returnValue) {
+        method.entity.setImmutable(false);
+        int index = method.clazz.getAndIncCallFuncCount();
+        writePushEnv(); writePushTraceInfo(function); writePushString(name.toLowerCase()); writePushString(name);
+        writeGetStatic("$CALL_FUNC_CACHE", FunctionCallCache.class); writePushConstInt(index); writePushConstInt(function.getParameters().size());
+        int callId = method.ownership().functionFrame(code, name, function.getParameters().size());
+        for (int i = 0; i < 7; i++) stackPop();
+        stackPush(null, StackItem.Type.REFERENCE); stackPeek().ownershipCallId = callId;
+        writeFrameArguments(function.getParameters(),returnValue,semanticDiscarded(function,returnValue));
+    }
+
+    private Memory writeCompileFunctionWithOwnership(CallExprToken function, CompileFunction compiled, boolean returnValue,
+                                                    boolean writeOpcode, PushCallStatistic statistic) {
+        if (!writeOpcode || !method.ownership().enabled()) return writePushCompileFunction(function, compiled, returnValue, writeOpcode, statistic);
+        Memory constant = writePushCompileFunction(function, compiled, returnValue, false, statistic);
+        if (constant != null) return constant;
+        int before = method.getStackCount();
+        LabelNode legacy = method.ownership().guardActive(code), end = new LabelNode();
+        LabelNode activeStart=new LabelNode(),activeEnd=new LabelNode();code.add(activeStart);
+        StackItem result;method.ownership().beginRuntimeActiveEmission();
+        try {
+            writeOwnedNamedFunctionFrame(function, ((NameToken) function.getName()).getName(), returnValue);
+            result=returnValue ? stackPop() : null;
+        } finally {method.ownership().endRuntimeActiveEmission();}
+        code.add(activeEnd);method.ownership().runtimeActiveBranch(activeStart,activeEnd);
+        code.add(new JumpInsnNode(GOTO, end)); code.add(legacy); method.ownership().beginPassive();
+        try {
+            Memory passive = writePushCompileFunction(function, compiled, returnValue, true, statistic);
+            if (returnValue) {
+                if (passive != null) writePushMemory(passive);writePopBoxing();
+                result.runtimeEvaluationId=stackPeek().runtimeEvaluationId;stackPop();
+            }
+            else writePopAll(method.getStackCount() - before);
+        } finally { method.ownership().endPassive(legacy, end); }
+        code.add(end); if (result != null) stackPush(result);
+        if (statistic != null) statistic.returnType = StackItem.Type.REFERENCE;
+        return null;
+    }
+
+    private boolean runtimeNamedEmission;
+    private Token discardedCallWitness;
+    private boolean semanticDiscarded(Token call,boolean physicalReturnValue) {
+        return !physicalReturnValue||call!=null&&call==discardedCallWitness;
+    }
+    private boolean writeRuntimeNamedFunctionFrame(CallExprToken function,String name,boolean returnValue) {
+        if(runtimeNamedEmission||!method.ownership().runtimeEnabled()||function.isFirstClassCallable()
+                ||hasBoundArguments(function.getParameters(),function.getArguments())||function.getParameters().size()!=1)return false;
+        var entity=compiler.findFunction(name);if(entity==null||entity.isReturnReference())return false;
+        var params=entity.getParameters();if(params==null||params.length!=1||!params[0].isReference()||params[0].getTypeChecker()!=null||params[0].isVariadic()||params[0].getDefaultValue()!=null||params[0].getDefaultInitializer()!=null)return false;
+        ExprStmtToken argument=function.getParameters().iterator().next();if(!argument.isSingle()||!(argument.getSingle() instanceof VariableExprToken))return false;
+        LocalVariable local=method.getLocalVariable(((VariableExprToken)argument.getSingle()).getName());if(local==null||!local.isReference()||local.name.equals("GLOBALS"))return false;
+        int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"FUNCTION_RESULT");
+        LocalVariable trace=method.addLocalVariable("~runtimeFunctionTrace"+id,null,TraceInfo.class),packet=method.addLocalVariable("~runtimeFunctionPacket"+id,null,Object.class);
+        writePushTraceInfo(function);code.add(new VarInsnNode(ASTORE,trace.index));stackPop();
+        LabelNode start=new LabelNode(),fallback=new LabelNode(),join=new LabelNode();
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNULL,fallback));code.add(start);
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(id));code.add(new LdcInsnNode(name.toLowerCase(Locale.ROOT)));code.add(new VarInsnNode(ALOAD,trace.index));
+        MethodInsnNode factory=new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Frame","functionPacket","(ILjava/lang/String;Lphp/runtime/env/TraceInfo;)Lphp/runtime/PhpRuntimeOwnership$FunctionPacket;",false);code.add(factory);
+        code.add(new VarInsnNode(ASTORE,packet.index));code.add(new VarInsnNode(ALOAD,packet.index));code.add(new InsnNode(ICONST_0));
+        VarInsnNode read=new VarInsnNode(ALOAD,local.index);code.add(read);code.add(new LdcInsnNode(local.index));
+        MethodInsnNode send=new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$FunctionPacket","sendCell","(ILphp/runtime/Memory;I)Lphp/runtime/Memory;",false);code.add(send);code.add(new InsnNode(POP));
+        code.add(new VarInsnNode(ALOAD,packet.index));code.add(new LdcInsnNode(id));MethodInsnNode invoke=new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$FunctionPacket",semanticDiscarded(function,returnValue)?"invokeToEvalDiscarded":"invokeToEval","(I)Lphp/runtime/Memory;",false);code.add(invoke);code.add(new JumpInsnNode(GOTO,join));code.add(fallback);
+        Token previousWitness=discardedCallWitness;boolean previousEmission=runtimeNamedEmission;
+        boolean discarded=semanticDiscarded(function,returnValue);runtimeNamedEmission=true;
+        if(discarded)discardedCallWitness=function;
+        try{writePushCall(function,true,true,null);stackPop();}
+        finally{runtimeNamedEmission=previousEmission;discardedCallWitness=previousWitness;}
+        code.add(join);method.ownership().runtimeFallback(fallback,join);
+        method.ownership().runtimeFunctionCall(id,name.toLowerCase(Locale.ROOT),entity.getInternalName(),"__invoke","(Lphp/runtime/env/Environment;[Lphp/runtime/Memory;)Lphp/runtime/Memory;",local.index,factory,send,read,invoke,start,fallback,join);
+        stackPush(Memory.Type.REFERENCE);stackPeek().runtimeEvaluationId=id;if(!returnValue)writePopAll(1);return true;
+    }
+
     Memory writePushCall(CallExprToken function, boolean returnValue, boolean writeOpcode,
                          PushCallStatistic statistic) {
         if (function.isFirstClassCallable() && !writeOpcode) return null;
         Token name = function.getName();
         if (name instanceof NameToken) {
             String realName = ((NameToken) name).getName();
-            CompileFunction compileFunction = compiler.getScope().findCompileFunction(realName);
+            CompileFunction compileFunction = compiler.getScope().findCompileFunction(realName,compiler.getModule().getPhpLanguageProfile());
 
             // try find system function, like max, sin, cos, etc.
             if (compileFunction == null
@@ -1656,17 +2122,26 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     && compiler.getEnvironment().fetchFunction(realName) == null
                     && compiler.findFunction(realName) == null) {
                 String tryName = ((FulledNameToken) name).getLastName().getName();
-                compileFunction = compiler.getScope().findCompileFunction(tryName);
+                compileFunction = compiler.getScope().findCompileFunction(tryName,compiler.getModule().getPhpLanguageProfile());
             }
 
-            if (compileFunction != null && php8CallFrame() && (function.isFirstClassCallable() || hasUnpackedArguments(function.getParameters())))
+            if (compileFunction != null && php8CallFrame()
+                    && (function.getParameters().size()<compileFunction.getMinArgs() || function.getParameters().size()>compileFunction.getMaxArgs())) {
+                FunctionEntity declaration=compiler.getScope().fetchPhp85Function(compileFunction.name);
+                if(declaration==null)declaration=compiler.getScope().findUserFunction(compileFunction.name);
+                if(declaration instanceof php.runtime.reflection.CompileFunctionEntity
+                        && ((php.runtime.reflection.CompileFunctionEntity)declaration).hasCompletePhpSignature())
+                    compileFunction=null; // Existing call frame evaluates every SEND before reporting arity.
+            }
+            if (compileFunction != null && php8CallFrame() && (function.isFirstClassCallable() || hasBoundArguments(function.getParameters(),function.getArguments())))
                 compileFunction = null;
 
             if (compileFunction != null) {
-                return writePushCompileFunction(function, compileFunction, returnValue, writeOpcode, statistic);
+                return writeCompileFunctionWithOwnership(function, compileFunction, returnValue, writeOpcode, statistic);
             } else {
                 if (!writeOpcode)
                     return null;
+                if(writeRuntimeNamedFunctionFrame(function,realName,returnValue))return null;
                 method.entity.setImmutable(false);
                 int index = method.clazz.getAndIncCallFuncCount();
 
@@ -1678,7 +2153,12 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     writeGetStatic("$CALL_FUNC_CACHE", FunctionCallCache.class);
                     writePushConstInt(index);
                     writePushConstInt(function.getParameters().size());
-                    writeSysStaticCall(PhpCallFrame.class, "function", PhpCallFrame.class,
+                    if (method.ownership().enabled() && !function.isFirstClassCallable()
+                            && !hasBoundArguments(function.getParameters(),function.getArguments())) {
+                        int callId = method.ownership().functionFrame(code, realName, function.getParameters().size());
+                        for (int i = 0; i < 7; i++) stackPop();
+                        stackPush(null, StackItem.Type.REFERENCE); stackPeek().ownershipCallId = callId;
+                    } else writeSysStaticCall(PhpCallFrame.class, "function", PhpCallFrame.class,
                             Environment.class, TraceInfo.class, String.class, String.class,
                             FunctionCallCache.class, Integer.TYPE, Integer.TYPE);
                     writeAcquiredOrCalledFrame(function, returnValue);
@@ -1694,6 +2174,20 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     if (!returnValue) writePopAll(1);
                 }
             }
+        } else if(name instanceof ParentPropertyHookExprToken) {
+            if(!writeOpcode)return null;
+            method.entity.setImmutable(false);method.ownership().runtimeUnsupported("parent-property-hook-call");
+            var access=(ParentPropertyHookExprToken)name;
+            LocalVariable body=method.getLocalVariable("~propertyHook");
+            if(body==null)throw new IllegalArgumentException("Parent hook call lost its compiler-owned body witness");
+            writeVarLoad(body);writeVarLoad(method.getGeneratorEntity()==null?"~this":"~propertyHookThis");writePushEnv();writePushTraceInfo(function);
+            writePushConstString(access.getProperty());writePushConstInt(access.getHookKind());
+            writePushConstInt(function.getParameters().size());
+            writeSysStaticCall(php.runtime.PhpPropertyHookParentCall.class,"frame",PhpCallFrame.class,
+                    php.runtime.reflection.support.PhpPropertyHooks.Hook.class,IObject.class,Environment.class,TraceInfo.class,
+                    String.class,Integer.TYPE,Integer.TYPE);
+            writeProtectedFrameArguments(function.getParameters(),function.getArguments(),returnValue,semanticDiscarded(function,returnValue));
+            return null;
         } else if (name instanceof StaticAccessOperatorExprToken && php8CallFrame()) {
             method.entity.setImmutable(false);
             if (!writeOpcode) return null;
@@ -1745,12 +2239,54 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writeUndefineVariable(value, end);
     }
 
+    /** A literal global declaration imports only its attested physical global address. */
+    public boolean writeNamedGlobalImport(LocalVariable local) {
+        if (!method.ownership().runtimeEnabled() || method.isExternal() || !php8CallFrame()) return false;
+        LabelNode start=new LabelNode(),fallback=new LabelNode(),end=new LabelNode();
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNULL,fallback));
+        code.add(start);code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+        writePushConstInt(local.index);writePushConstString(local.name);writePushEnv();
+        writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"namedGlobal",Memory.class,
+                php.runtime.PhpRuntimeOwnership.Frame.class,int.class,String.class,Environment.class);
+        MethodInsnNode helper=(MethodInsnNode)code.getLast();
+        writeVarStore(local,false,false);code.add(new JumpInsnNode(GOTO,end));code.add(fallback);
+        writePushEnv();writePushConstString(local.name);
+        writeSysDynamicCall(Environment.class,"getOrCreateGlobal",Memory.class,String.class);
+        writeSysStaticCall(ReferenceMemory.class,"exportReference",Memory.class,Memory.class);
+        if (method.statement.isDynamicLocal()) {
+            writeVarLoad(local);writeSysStaticCall(Memory.class,"assignRefRight",Memory.class,Memory.class,Memory.class);writePopAll(1);
+        } else {
+            writeSysStaticCall(ReferenceMemory.class,"valueOf",Memory.class,Memory.class);writeVarStore(local,false,false);
+        }
+        code.add(end);method.ownership().runtimeFallback(fallback,end);
+        method.ownership().runtimeNamedGlobal(local.index,local.name,helper,start,fallback,end);
+        return true;
+    }
+
     public void writeDefineGlobalVar(String name) {
-        writePushEnv();
-        writePushConstString(name);
-        writeSysDynamicCall(Environment.class, "getOrCreateGlobal", Memory.class, String.class);
-        makeVarStore(method.getLocalVariable(name));
-        stackPop();
+        LocalVariable local=method.getLocalVariable(name);
+        if("GLOBALS".equals(name)&&method.ownership().runtimeEnabled()) {
+            LabelNode start=new LabelNode(),fallback=new LabelNode(),join=new LabelNode();
+            code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNULL,fallback));
+            code.add(start);code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(local.index));
+            MethodInsnNode address=new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Frame","globalsAddress",
+                    "(I)Lphp/runtime/memory/ReferenceMemory;",false);code.add(address);
+            code.add(new JumpInsnNode(GOTO,join));code.add(fallback);
+            writePushEnv();writePushConstString(name);
+            writeSysDynamicCall(Environment.class,"getOrCreateGlobal",Memory.class,String.class);
+            code.add(join);method.ownership().runtimeFallback(fallback,join);
+            method.ownership().runtimeGlobalImport(local.index,address,start,fallback,join);
+        } else {
+            writePushEnv();writePushConstString(name);
+            writeSysDynamicCall(Environment.class,"getOrCreateGlobal",Memory.class,String.class);
+        }
+        makeVarStore(local);stackPop();
+    }
+
+    public void invalidateGlobalVariable(String normalizedName) {
+        if(!method.isExternal())return;
+        LocalVariable local=method.getLocalVariable(normalizedName);
+        if(local!=null){local.setValue(null);local.setImmutable(false);local.clearRuntimeClosureWitness();}
     }
 
     public void writePushThis() {
@@ -1774,6 +2310,37 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     protected void writeDefineThis(LocalVariable variable) {
+        if (!method.ownership().runtimeLifecycleEnabled() || method.getGeneratorEntity() != null) {
+            writeDefineThisLegacy(variable);
+            return;
+        }
+        LabelNode start = new LabelNode(), fallback = new LabelNode(), end = new LabelNode();
+        code.add(start);
+        code.add(new VarInsnNode(ALOAD, method.ownership().runtimeFrameIndex()));
+        code.add(new JumpInsnNode(IFNULL, fallback));
+        code.add(new VarInsnNode(ALOAD, method.ownership().runtimeFrameIndex()));
+        code.add(new LdcInsnNode(variable.index));
+        VarInsnNode receiver = new VarInsnNode(ALOAD, method.getLocalVariable("~this").index);
+        code.add(receiver);
+        MethodInsnNode boxing = new MethodInsnNode(INVOKESTATIC, "php/runtime/memory/ObjectMemory", "valueOf",
+                "(Lphp/runtime/lang/IObject;)Lphp/runtime/Memory;", false);
+        code.add(boxing);
+        MethodInsnNode helper = new MethodInsnNode(INVOKEVIRTUAL, "php/runtime/PhpRuntimeOwnership$Frame", "importLifecycleReceiver",
+                "(ILphp/runtime/Memory;)Lphp/runtime/Memory;", false);
+        code.add(helper);
+        VarInsnNode store = new VarInsnNode(ASTORE, variable.index);
+        code.add(store);
+        code.add(new JumpInsnNode(GOTO, end));
+        code.add(fallback);
+        method.ownership().beginPassive();
+        try { writeDefineThisLegacy(variable); }
+        finally { method.ownership().endPassive(fallback, end); }
+        code.add(end);
+        method.ownership().runtimeFallback(fallback, end);
+        method.ownership().runtimeLifecycleReceiver(variable.index, receiver, boxing, helper, store, start, fallback, end);
+    }
+
+    private void writeDefineThisLegacy(LocalVariable variable) {
         if (method.clazz.isClosure() || method.getGeneratorEntity() != null) {
             writeVarLoad("~this");
             writeGetDynamic("self", Memory.class);
@@ -1827,6 +2394,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         if (variable == null) {
             LabelNode label = writeLabel(node, value.getMeta().getStartLine());
             variable = method.addLocalVariable(value.getName(), label, Memory.class);
+            method.ownership().manage(variable);
 
             if (methodStatement.isReference(value) || compiler.getScope().superGlobals.contains(value.getName())) {
                 variable.setReference(true);
@@ -1839,9 +2407,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             } else if (compiler.getScope().superGlobals.contains(value.getName())) { // super-globals
                 writeDefineGlobalVar(value.getName());
             } else if (methodStatement.isDynamicLocal()) { // ref-local variables
+                LabelNode ownershipEnd = method.ownership().address(code, variable);
                 writePushLocal();
                 writePushConstString(value.getName());
                 writeSysDynamicCall(Memory.class, "refOfIndex", Memory.class, String.class);
+                if (ownershipEnd != null) code.add(ownershipEnd);
                 makeVarStore(variable);
                 stackPop();
 
@@ -1849,12 +2419,14 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 variable.setValue(null);
                 variable.setReference(true);
             } else { // simple local variables
+                LabelNode ownershipEnd = variable.isReference() ? method.ownership().address(code, variable) : null;
                 if (variable.isReference()) {
                     writePushNewObject(ReferenceMemory.class);
                 } else {
                     writePushNull();
                 }
 
+                if (ownershipEnd != null) code.add(ownershipEnd);
                 makeVarStore(variable);
 
                 stackPop();
@@ -1928,13 +2500,36 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         return null;
     }
 
+    /** A fresh ARRAY owns an EVAL before evaluating its first element. Scratch JVM locals only borrow it. */
+    private void stageRuntimeArray() {
+        if (!method.ownership().runtimeEnabled()) return;
+        int id=method.ownership().reserveRuntimeEval();
+        method.ownership().runtimeProducer(id,"ARRAY_LITERAL");
+        LocalVariable scratch=method.addLocalVariable("~runtimeArray"+id,null,ArrayMemory.class);
+        code.add(new TypeInsnNode(CHECKCAST,Type.getInternalName(ArrayMemory.class)));
+        code.add(new VarInsnNode(ASTORE,scratch.index));
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(id));
+        code.add(new VarInsnNode(ALOAD,scratch.index));
+        code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpOwnershipArrays","runtimeFresh",
+                "(Lphp/runtime/PhpRuntimeOwnership$Frame;ILphp/runtime/memory/ArrayMemory;)Lphp/runtime/memory/ArrayMemory;",false));
+        stackPeek().runtimeEvaluationId=id;stackPeek().runtimeArrayValueProducer=true;
+    }
+    public void releaseRuntimeEvaluation(int id,String route) {
+        if (id < 0) return;
+        method.ownership().runtimeConsumer(id,route);
+        LabelNode end=new LabelNode();code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));
+        code.add(new JumpInsnNode(IFNULL,end));code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));
+        code.add(new LdcInsnNode(id));code.add(new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Frame","releaseEval","(I)V",false));code.add(end);
+    }
+
     public Memory writePushArray(ArrayExprToken array, boolean returnMemory, boolean writeOpcode) {
         boolean php8 = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         if (array.getParameters().isEmpty()) {
             if (returnMemory)
                 return new ArrayMemory();
-            else if (writeOpcode)
-                writeSysStaticCall(ArrayMemory.class, "valueOf", Memory.class);
+            else if (writeOpcode) {
+                writeSysStaticCall(ArrayMemory.class, "valueOf", Memory.class);stageRuntimeArray();
+            }
         } else {
             ArrayMemory ret = returnMemory ? new ArrayMemory() : null;
 
@@ -1958,11 +2553,13 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 } else {
                     writeSysStaticCall(ArrayMemory.class, "createListed", ArrayMemory.class, int.class);
                 }
+                stageRuntimeArray();
             }
 
             int parameterIndex = 0;
             for (ExprStmtToken param : array.getParameters()) {
                 boolean unpack = array.isUnpacked(parameterIndex++);
+                int parentRuntimeEval=ret==null?stackPeek().runtimeEvaluationId:-1;
                 if (ret == null)
                     writePushDup();
 
@@ -2007,7 +2604,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 }
 
                 writePopBoxing();
+                MethodInsnNode literalPair=runtimeLiteralPairs.remove(stackPeek());
                 writePopImmutable();
+                int childRuntimeEval=stackPeek().runtimeEvaluationId;
                 if (unpack) {
                     writePushEnv();
                     writePushTraceInfo(param);
@@ -2016,10 +2615,17 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     if (php8) {
                         writePushEnv();
                         writePushTraceInfo(param);
-                        writeSysDynamicCall(ArrayMemory.class, "addPhp8", ReferenceMemory.class, Memory.class, Environment.class, TraceInfo.class);
+                        if(literalPair!=null&&parentRuntimeEval>=0) {
+                            code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                            writePushConstInt(parentRuntimeEval);
+                            writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"literalEntry",ReferenceMemory.class,
+                                    ArrayMemory.class,Memory.class,Environment.class,TraceInfo.class,php.runtime.PhpRuntimeOwnership.Frame.class,int.class);
+                            method.ownership().runtimeLiteralEntry(parentRuntimeEval,literalPair,(MethodInsnNode)code.getLast());
+                        } else writeSysDynamicCall(ArrayMemory.class, "addPhp8", ReferenceMemory.class, Memory.class, Environment.class, TraceInfo.class);
                     } else writeSysDynamicCall(ArrayMemory.class, "add", ReferenceMemory.class, Memory.class);
                     writePopAll(1);
                 }
+                releaseRuntimeEvaluation(childRuntimeEval,"ENTRY");
             }
 
             if (ret != null)
@@ -2062,6 +2668,12 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         writePushGetFromArray(traceIndex, TraceInfo.class);
     }
 
+    /** A copied hook keeps the exact donor TraceInfo, including its file/profile identity. */
+    void writePushImportedHookTrace(String owner,int index) {
+        code.add(new FieldInsnNode(GETSTATIC,owner,"$TRC",Type.getDescriptor(TraceInfo[].class)));
+        stackPush(null,StackItem.Type.valueOf(TraceInfo[].class));setStackPeekAsImmutable();
+        writePushGetFromArray(index,TraceInfo.class);
+    }
     void writePushCreateTraceInfo(int line, int position) {
         writeGetStatic("$FN", String.class);
         writePushMemory(LongMemory.valueOf(line));
@@ -2109,7 +2721,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
             return new StringMemory(parent);
         } else if (macro instanceof FunctionMacroToken) {
-            if (method.isInitializer() && php8CallFrame()) return Memory.CONST_EMPTY_STRING;
+            if (method.isInitializer() && php8CallFrame()
+                    && (!method.isAttributeInitializer() || method.getAttributeCallableName().isEmpty())) return Memory.CONST_EMPTY_STRING;
             if (method.clazz == null) {
                 return Memory.CONST_EMPTY_STRING;
             }
@@ -2130,7 +2743,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             }
 
         } else if (macro instanceof MethodMacroToken) {
-            if (method.isInitializer() && php8CallFrame()) return Memory.CONST_EMPTY_STRING;
+            if (method.isInitializer() && php8CallFrame()
+                    && (!method.isAttributeInitializer() || method.getAttributeCallableName().isEmpty())) return Memory.CONST_EMPTY_STRING;
             if (method.clazz == null) {
                 return Memory.CONST_EMPTY_STRING;
             }
@@ -2193,14 +2807,16 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     Memory writePushName(NameToken token, boolean returnMemory, boolean writeOpcode) {
-        CompileConstant constant = compiler.getScope().findCompileConstant(token.getName());
+        CompileConstant constant = compiler.getScope().findCompileConstant(token.getName(),
+                compiler.getModule().getPhpLanguageProfile());
         if (constant != null) {
             if (returnMemory)
                 return constant.value;
             else if (writeOpcode)
                 writePushMemory(constant.value);
         } else {
-            ConstantEntity constantEntity = compiler.findConstant(token.getName());
+            ConstantEntity constantEntity = compiler.getModule().getPhpLanguageProfile()
+                    == php.runtime.common.PhpLanguageProfile.PHP_8_5 ? null : compiler.findConstant(token.getName());
             /*if (constantEntity == null)   // TODO: maybe it's not needed! we should search a namespaced constant in local context
                 constantEntity = compiler.getScope().findUserConstant(token.getName()); */
 
@@ -2220,8 +2836,17 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
                 // writePushDupLowerCase();
                 writePushTraceInfo(token);
-                writeSysDynamicCall(Environment.class, "__getConstant",
-                        Memory.class, String.class, String.class, TraceInfo.class);
+                if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                    writePushConstBoolean(token instanceof FulledNameToken && ((FulledNameToken) token).isConstantFallback());
+                    // Leading NUL cannot collide with user-static keys (which start with a JVM class name).
+                    writePushConstString("\0jphp.constant.fetch\0" + compiler.getModule().getInternalName()
+                            + "\0" + method.getMethodId() + "\0" + compiler.nextConstantFetchSite());
+                    writeSysDynamicCall(Environment.class, "__getConstant",
+                            Memory.class, String.class, String.class, TraceInfo.class, boolean.class, String.class);
+                } else {
+                    writeSysDynamicCall(Environment.class, "__getConstant",
+                            Memory.class, String.class, String.class, TraceInfo.class);
+                }
                 setStackPeekAsImmutable();
             }
         }
@@ -2242,8 +2867,15 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             return tryWritePush(item.getToken(), true, writeOpcode, heavyObjects);
         else if (item.getMemory() != null) {
             return item.getMemory();
-        } else if (toStack)
+        } else if (toStack) {
             stackPush(null, item.type);
+            stackPeek().ownershipEvalId = item.ownershipEvalId;
+            stackPeek().runtimeEvaluationId = item.runtimeEvaluationId;
+            stackPeek().runtimeSourceLocalId = item.runtimeSourceLocalId;
+            stackPeek().runtimeSourceRead = item.runtimeSourceRead;
+            stackPeek().runtimeArrayValueProducer=item.runtimeArrayValueProducer;
+            stackPeek().ownershipCallId = item.ownershipCallId;
+        }
         return null;
     }
 
@@ -2251,7 +2883,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         if (item.getToken() != null) {
             return tryGetType(item.getToken());
         } else if (item.getMemory() != null) {
-            return StackItem.Type.valueOf(item.getMemory().type);
+            return item.getMemory() instanceof PhpByteStringMemory || php8CallFrame() && item.getMemory() instanceof BinaryMemory
+                    ? StackItem.Type.REFERENCE : StackItem.Type.valueOf(item.getMemory().type);
         } else
             return item.type;
     }
@@ -2349,7 +2982,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         else if (value instanceof DoubleExprToken)
             return StackItem.Type.DOUBLE;
         else if (value instanceof StringExprToken)
-            return StackItem.Type.STRING;
+            return ((StringExprToken)value).hasRawBytes() ? StackItem.Type.REFERENCE : StackItem.Type.STRING;
         else if (value instanceof LineMacroToken)
             return StackItem.Type.LONG;
         else if (value instanceof MacroToken)
@@ -2357,7 +2990,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         else if (value instanceof ArrayExprToken)
             return StackItem.Type.ARRAY;
         else if (value instanceof StringBuilderExprToken)
-            return StackItem.Type.STRING;
+            return php8CallFrame() ? StackItem.Type.STRING_VALUE : StackItem.Type.STRING;
         else if (value instanceof CallExprToken) {
             PushCallStatistic statistic = new PushCallStatistic();
             writePushCall((CallExprToken) value, true, false, statistic);
@@ -2490,7 +3123,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 writePushEnv();
                 writePushTraceInfo(trace.getStartLine(), trace.getStartPosition());
                 writePushLocal();
-                writeSysDynamicCall(Environment.class, "__tick", void.class, TraceInfo.class, ArrayMemory.class);
+                if (method.ownership().enabled()) { method.ownership().tick(code); stackPop(); stackPop(); stackPop(); }
+                else writeSysDynamicCall(Environment.class, "__tick", void.class, TraceInfo.class, ArrayMemory.class);
             }
         }
     }
@@ -2509,8 +3143,21 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     public void writePopImmutable() {
+        if (stackPeek().type==StackItem.Type.STRING_VALUE) return;
         if (!stackPeek().immutable) {
+            int evalId = stackPeek().ownershipEvalId;
+            int runtimeEval=stackPeek().runtimeEvaluationId;
+            int sourceLocal=stackPeek().runtimeSourceLocalId;
+            VarInsnNode sourceRead=stackPeek().runtimeSourceRead;
+            boolean arrayProducer=stackPeek().runtimeArrayValueProducer;
+            String closureName=stackPeek().runtimeClosureInternalName;int closureProducer=stackPeek().runtimeClosureProducerId;
             writeSysDynamicCall(Memory.class, "toImmutable", Memory.class);
+            stackPeek().ownershipEvalId = evalId;
+            stackPeek().runtimeEvaluationId = runtimeEval;
+            stackPeek().runtimeSourceLocalId=sourceLocal;
+            stackPeek().runtimeSourceRead=sourceRead;
+            stackPeek().runtimeArrayValueProducer=arrayProducer;
+            stackPeek().runtimeClosureInternalName=closureName;stackPeek().runtimeClosureProducerId=closureProducer;
             setStackPeekAsImmutable();
         }
     }
@@ -2525,8 +3172,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writePushDup();
         }
 
+        int runtimeEval=stackPeek().runtimeEvaluationId;
         makeVarStore(variable);
         stackPop();
+        if (runtimeEval >= 0) method.ownership().runtimeConsumer(runtimeEval,"CV");
+        if (!returned) releaseRuntimeEvaluation(runtimeEval,"CV");
     }
 
     public void checkAssignableVar(VariableExprToken var) {
@@ -2542,9 +3192,21 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
         writePopBoxing(asImmutable);
 
+        variable.clearRuntimeClosureWitness();
         if (variable.isReference()) {
+            StackItem value = stackPeek();
+            if (method.ownership().assign(code, variable, false, value.ownershipEvalId,value.runtimeEvaluationId,returned)) {
+                if (!returned) recordRuntimeClosureCv(variable,token,value,value.runtimeEvaluationId);
+                value.ownershipEvalId = -1;
+                if (!returned) value.runtimeEvaluationId = -1;
+                if (!returned) writePopAll(1);
+                return;
+            }
+            int runtimeEval=value.runtimeEvaluationId;
             writeVarLoad(variable);
             writeSysStaticCall(Memory.class, "assignRight", Memory.class, Memory.class, Memory.class);
+            stackPeek().runtimeEvaluationId=runtimeEval;
+            if (runtimeEval >= 0) method.ownership().runtimeConsumer(runtimeEval,"CV");
             if (!returned)
                 writePopAll(1);
         } else {
@@ -2552,8 +3214,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 writePushDup();
             }
 
+            int runtimeEval=stackPeek().runtimeEvaluationId;
             makeVarStore(variable);
             stackPop();
+            if (runtimeEval >= 0) method.ownership().runtimeConsumer(runtimeEval,"CV");
+            if (!returned) releaseRuntimeEvaluation(runtimeEval,"CV");
         }
     }
 
@@ -2564,6 +3229,10 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     public void writeVarLoad(LocalVariable variable) {
         stackPush(Memory.Type.valueOf(variable.getClazz()));
         makeVarLoad(variable);
+        stackPeek().runtimeClosureInternalName=variable.getRuntimeClosureInternalName();
+        stackPeek().runtimeClosureProducerId=variable.getRuntimeClosureProducerId();
+        stackPeek().runtimeSourceLocalId=variable.index;
+        stackPeek().runtimeSourceRead=(VarInsnNode)code.getLast();
     }
 
     public void writeVarLoad(String name) {
@@ -2637,10 +3306,28 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         checkAssignableVar(variable);
 
         Memory value = R.getMemory();
+        String closureName=null;int closureProducer=-1;
+        local.clearRuntimeClosureWitness();
 
         writeLineNumber(variable);
 
-        if (local.isReference()) {
+        if (local.isReference() && local.isOwnershipLocal() && (method.ownership().enabled() || method.ownership().runtimeEnabled())) {
+            Memory result;
+            if (!R.isKnown()) { stackPush(R); result = null; }
+            else result = tryWritePush(R);
+            if (result != null) { writePushMemory(result); value = result; }
+            writePopBoxing();
+            if (!operator.isAsReference()) writePopImmutable();
+            StackItem candidate = stackPeek();
+            boolean published=method.ownership().assign(code, local, operator.isAsReference(), candidate.ownershipEvalId,candidate.runtimeEvaluationId,returnValue);
+            if (published && !returnValue && !operator.isAsReference()
+                    && recordRuntimeClosureCv(local,variable,candidate,candidate.runtimeEvaluationId)) {
+                closureName=candidate.runtimeClosureInternalName;closureProducer=candidate.runtimeClosureProducerId;
+            }
+            candidate.ownershipEvalId = -1;
+            if (!returnValue) candidate.runtimeEvaluationId = -1;
+            if (!returnValue) writePopAll(1);
+        } else if (local.isReference()) {
             String name = "assign";
             if (operator.isAsReference())
                 name = "assignRef";
@@ -2678,6 +3365,45 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
         if (methodStatement.isDynamicLocal())   */
         local.setValue(null);
+        if (closureName != null) local.setRuntimeClosureWitness(closureName,closureProducer);
+    }
+
+    private boolean writeRuntimeCloneCv(StackItem operand,Token token,OperatorExprToken operator,boolean returnValue) {
+        if (!(token instanceof VariableExprToken)) return false;
+        LocalVariable local=method.getLocalVariable(((VariableExprToken)token).getName());
+        if (local == null || local.getRuntimeClosureInternalName() == null || local.getRuntimeClosureProducerId() < 0) return false;
+        String closure=local.getRuntimeClosureInternalName();int producer=local.getRuntimeClosureProducerId();
+        writePush(operand);writePopBoxing();
+        int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"CLONE");
+        LocalVariable raw=method.addLocalVariable("~runtimeCloneSource"+id,null,Memory.class);
+        LocalVariable trace=method.addLocalVariable("~runtimeCloneTrace"+id,null,TraceInfo.class);
+        code.add(new VarInsnNode(ASTORE,raw.index));stackPop();
+        writePushTraceInfo(operator);code.add(new VarInsnNode(ASTORE,trace.index));stackPop();
+        LabelNode start=new LabelNode(),fallback=new LabelNode(),join=new LabelNode();
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNULL,fallback));code.add(start);
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(id));code.add(new LdcInsnNode(local.index));
+        code.add(new VarInsnNode(ALOAD,raw.index));code.add(new VarInsnNode(ALOAD,method.getLocalVariable("~env").index));code.add(new VarInsnNode(ALOAD,trace.index));
+        MethodInsnNode helper=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpOwnershipClosures","cloneLocalRuntime",
+                "(Lphp/runtime/PhpRuntimeOwnership$Frame;IILphp/runtime/Memory;Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;)Lphp/runtime/Memory;",false);code.add(helper);
+        code.add(new JumpInsnNode(GOTO,join));code.add(fallback);
+        code.add(new InsnNode(ACONST_NULL));code.add(new LdcInsnNode(id));code.add(new VarInsnNode(ALOAD,raw.index));
+        code.add(new VarInsnNode(ALOAD,method.getLocalVariable("~env").index));code.add(new VarInsnNode(ALOAD,trace.index));
+        code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpOwnershipClosures","cloneRuntime",
+                "(Lphp/runtime/PhpRuntimeOwnership$Frame;ILphp/runtime/Memory;Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;)Lphp/runtime/Memory;",false));code.add(join);
+        method.ownership().runtimeFallback(fallback,join);method.ownership().runtimeCloneSite(id,local.index,producer,closure,helper,start,fallback,join);
+        stackPush(Memory.Type.REFERENCE);stackPeek().runtimeEvaluationId=id;
+        stackPeek().runtimeClosureInternalName=closure;stackPeek().runtimeClosureProducerId=id;setStackPeekAsImmutable();
+        if (!returnValue) writePopAll(1);return true;
+    }
+
+    /** Compiler provenance is recorded only at the actual nonreturned VALUE publication. */
+    private boolean recordRuntimeClosureCv(LocalVariable local,VariableExprToken token,StackItem value,int eval) {
+        if (eval < 0 || value.runtimeClosureProducerId != eval || value.runtimeClosureInternalName == null
+                || token == null || methodStatement.variable(token).isReference() || methodStatement.variable(token).isUnstable()) return false;
+        MethodInsnNode publication=method.ownership().runtimeAddressPublication(eval,local.index);
+        if (publication == null) return false;
+        method.ownership().runtimeClosureCv(eval,local.index,value.runtimeClosureInternalName,publication);
+        local.setRuntimeClosureWitness(value.runtimeClosureInternalName,eval);return true;
     }
 
     void writeScalarOperator(StackItem L, StackItem.Type Lt,
@@ -2780,6 +3506,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
     public void writePopLong() {
         switch (stackPeek().type) {
+            case STRING_VALUE:
+                writeSysStaticCall(php.runtime.PhpByteStringValues.class,"toLong",long.class,Object.class);break;
             case LONG:
                 break;
             case FLOAT: {
@@ -2817,6 +3545,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
     public void writePopDouble() {
         switch (stackPeek().type) {
+            case STRING_VALUE:
+                writeSysStaticCall(php.runtime.PhpByteStringValues.class,"toDouble",double.class,Object.class);break;
             case DOUBLE:
                 break;
             case BYTE:
@@ -2849,6 +3579,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     public void writePopString() {
         StackItem.Type peek = stackPeek().type;
         switch (peek) {
+            case STRING_VALUE:
+                writeSysStaticCall(php.runtime.PhpByteStringValues.class,"toJavaString",String.class,Object.class);break;
             case STRING:
                 break;
             default:
@@ -2864,6 +3596,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
 
     public void writePopChar() {
         StackItem.Type peek = stackPeek().type;
+        if (peek == StackItem.Type.STRING_VALUE) {
+            writeSysStaticCall(php.runtime.PhpByteStringValues.class,"toChar",char.class,Object.class);return;
+        }
         if (peek == StackItem.Type.CHAR)
             return;
 
@@ -2882,8 +3617,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     public void writePopBoolean() {
+        int runtimeEval=stackPeek().runtimeEvaluationId;
         StackItem.Type peek = stackPeek().type;
         switch (peek) {
+            case STRING_VALUE:
+                writeSysStaticCall(php.runtime.PhpByteStringValues.class,"toBoolean",boolean.class,Object.class);break;
             case BOOL:
                 break;
             case BYTE:
@@ -2907,6 +3645,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             }
             break;
         }
+        releaseRuntimeEvaluation(runtimeEval,"POP");
     }
 
     public void writeDynamicAccessInfo(DynamicAccessExprToken dynamic, boolean addLowerName) {
@@ -2946,13 +3685,198 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         writePopBoxing();
 
         if (dynamic instanceof DynamicAccessAssignExprToken) {
-            if (((DynamicAccessAssignExprToken) dynamic).getValue() != null) {
-                writeExpression(((DynamicAccessAssignExprToken) dynamic).getValue(), true, false);
+            DynamicAccessAssignExprToken assignment=(DynamicAccessAssignExprToken) dynamic;
+            if (assignment.getValue() != null) {
+                boolean fieldBinding=assignment.getAssignOperator() instanceof AssignExprToken
+                        && ((AssignExprToken) assignment.getAssignOperator()).isAsReference();
+                if (fieldBinding) {
+                    if (method.ownership().runtimeEnabled()) method.ownership().runtimeUnsupported("property-reference-field-binding");
+                    runtimeFieldReferenceBindingDepth++;
+                }
+                try {writeExpression(assignment.getValue(), true, false);}
+                finally {if (fieldBinding) runtimeFieldReferenceBindingDepth--;}
                 writePopBoxing(true);
             }
         }
 
         writeDynamicAccessInfo(dynamic, addLowerName);
+    }
+
+    private void prepareRuntimeArrayVariable(VariableExprToken variable) {
+        if (!method.ownership().runtimeEnabled()) return;
+        LocalVariable local=method.getLocalVariable(variable.getName());
+        if (local == null || local.isReference() || !local.isOwnershipLocal()) return;
+        LabelNode end=new LabelNode();
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNULL,end));
+        code.add(new VarInsnNode(ALOAD,local.index));code.add(new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/Memory","isArray","()Z",false));
+        code.add(new JumpInsnNode(IFEQ,end));
+        LocalVariable publication=method.addLocalVariable("~runtimeArrayWrite"+method.ownership().reserveRuntimeEval(),null,Object.class);
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(local.index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Frame","prepareArrayWrite","(I)Lphp/runtime/PhpRuntimeOwnership$Publication;",false));
+        code.add(new VarInsnNode(ASTORE,publication.index));code.add(new VarInsnNode(ALOAD,publication.index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Publication","next","()Lphp/runtime/Memory;",false));
+        code.add(new VarInsnNode(ASTORE,local.index));code.add(new VarInsnNode(ALOAD,publication.index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Publication","afterLocalStore","()V",false));
+        code.add(new VarInsnNode(ALOAD,publication.index));code.add(new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Publication","commit","()V",false));
+        code.add(end);
+    }
+
+    /** Named native-table reads publish a real VALUE/CELL RESULT, never an ARRAY view owner. */
+    private boolean writeRuntimeGlobalRead(StackItem operand, ArrayGetExprToken operator) {
+        if (!method.ownership().runtimeEnabled() || !(operand.getToken() instanceof VariableExprToken)
+                || !"GLOBALS".equals(((VariableExprToken)operand.getToken()).getName())
+                || (operator.getClass()!=ArrayGetExprToken.class && operator.getClass()!=ArrayGetRefExprToken.class)
+                || operator.getParameters().size()!=1) return false;
+        ExprStmtToken parameter=operator.getParameters().get(0);
+        if (!parameter.isSingle()) return false;
+        Token literal=parameter.getSingle();String key;
+        if (literal instanceof StringExprToken && ((StringExprToken)literal).hasRawBytes()) return false;
+        if (literal instanceof StringExprToken) key=((StringExprToken)literal).getValue();
+        else if (literal instanceof IntegerExprToken && !((IntegerExprToken)literal).isBigValue())
+            key=String.valueOf(((IntegerExprToken)literal).getValue());
+        else return false;
+        LocalVariable root=method.getLocalVariable("GLOBALS");
+        if (root==null) return false;
+        boolean cell=operator instanceof ArrayGetRefExprToken;
+        int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"GLOBAL_RESULT");
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+        writePushConstInt(id);writePushConstInt(root.index);
+        VarInsnNode read=new VarInsnNode(ALOAD,root.index);code.add(read);stackPush(Memory.Type.REFERENCE);
+        writePushConstString(key);writePushConstBoolean(cell);writePushEnv();writePushTraceInfo(operator);
+        writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"globalRead",Memory.class,
+                php.runtime.PhpRuntimeOwnership.Frame.class,int.class,int.class,Memory.class,String.class,
+                boolean.class,Environment.class,TraceInfo.class);
+        method.ownership().runtimeGlobalRead(id,root.index,key,cell,(MethodInsnNode)code.getLast(),read);
+        stackPeek().runtimeEvaluationId=id;
+        return true;
+    }
+
+    /** Reads a witnessed address as VALUE without promoting or exporting its CELL. */
+    private boolean writeRuntimeConditionalLocal() {
+        StackItem value=stackPeek();int localId=value.runtimeSourceLocalId;
+        VarInsnNode read=value.runtimeSourceRead;
+        if(value.runtimeEvaluationId>=0||localId<0||read==null||read!=code.getLast()||read.getOpcode()!=ALOAD) return false;
+        LocalVariable local=method.getLocalVariables().values().stream().filter(candidate->candidate.index==localId).findFirst().orElse(null);
+        if(local==null||!local.isReference()||!local.isOwnershipLocal()||"GLOBALS".equals(local.name))return false;
+        int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"CV_READ_RESULT");
+        code.remove(read);code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));
+        code.add(new LdcInsnNode(id));code.add(new LdcInsnNode(localId));code.add(read);
+        MethodInsnNode helper=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","conditionalLocal",
+                "(Lphp/runtime/PhpRuntimeOwnership$Frame;IILphp/runtime/Memory;)Lphp/runtime/Memory;",false);code.add(helper);
+        method.ownership().runtimeConditionalLocal(id,localId,helper,read);value.runtimeEvaluationId=id;return true;
+    }
+
+    /** Each selected arm transfers its actual producer into a single result root. */
+    private void writeRuntimeConditional(ValueIfElseToken operator) {
+        writePopBoxing();int source=stackPeek().runtimeEvaluationId;
+        boolean retain=operator.getValue()==null;
+        int kind=operator instanceof ValueNullCoalesceIfElseToken?0:1;
+        int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"JOIN_RESULT");
+        LocalVariable scratch=method.addLocalVariable("~runtimeConditional"+id,null,Memory.class);
+        if(kind==0) {
+            MethodInsnNode read=method.ownership().runtimeGlobalReadHelper(source);
+            if(read!=null)method.ownership().runtimeQuietGlobalRead(source,read);
+        }
+        code.add(new VarInsnNode(ASTORE,scratch.index));stackPop();
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(id));
+        code.add(new LdcInsnNode(source));code.add(new VarInsnNode(ALOAD,scratch.index));
+        code.add(new InsnNode(kind==0?ICONST_0:ICONST_1));code.add(new InsnNode(retain?ICONST_1:ICONST_0));
+        MethodInsnNode test=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","conditionalTest",
+                "(Lphp/runtime/PhpRuntimeOwnership$Frame;IILphp/runtime/Memory;IZ)Z",false);code.add(test);
+        LabelNode alternative=new LabelNode(),end=new LabelNode();
+        JumpInsnNode branch=new JumpInsnNode(IFEQ,alternative);code.add(branch);
+        int trueSource;
+        if(retain) {
+            code.add(new VarInsnNode(ALOAD,scratch.index));code.add(new VarInsnNode(ASTORE,scratch.index));trueSource=source;
+        }else trueSource=writeRuntimeConditionalArm(operator.getValue(),scratch);
+        MethodInsnNode yes=writeRuntimeConditionalResult(id,trueSource,scratch,true);
+        JumpInsnNode jump=new JumpInsnNode(GOTO,end);code.add(jump);code.add(alternative);
+        int falseSource=writeRuntimeConditionalArm(operator.getAlternative(),scratch);
+        MethodInsnNode no=writeRuntimeConditionalResult(id,falseSource,scratch,false);code.add(end);
+        if(trueSource>=-1&&falseSource>=-1)
+            method.ownership().runtimeConditional(id,source,kind,retain,trueSource,falseSource,test,branch,yes,jump,no,alternative,end,scratch.index);
+        else method.ownership().runtimeUnsupported("conditional-selected-arm-unlowered");
+        stackPush(Memory.Type.REFERENCE);stackPeek().runtimeEvaluationId=id;
+    }
+
+    private int writeRuntimeConditionalArm(ExprStmtToken arm,LocalVariable scratch) {
+        Token literal=arm.isSingle()?arm.getSingle():null;
+        if(literal instanceof NullExprToken) {
+            code.add(new FieldInsnNode(GETSTATIC,"php/runtime/Memory","NULL","Lphp/runtime/Memory;"));
+            code.add(new VarInsnNode(ASTORE,scratch.index));return -1;
+        }
+        if(literal instanceof StringExprToken&&!((StringExprToken)literal).hasRawBytes()&&((StringExprToken)literal).getSegments().isEmpty()) {
+            code.add(new LdcInsnNode(((StringExprToken)literal).getValue()));
+            code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/memory/StringMemory","valueOf","(Ljava/lang/String;)Lphp/runtime/Memory;",false));
+            code.add(new VarInsnNode(ASTORE,scratch.index));return -1;
+        }
+        writeExpression(arm,true,false);writePopBoxing();int source=stackPeek().runtimeEvaluationId;
+        code.add(new VarInsnNode(ASTORE,scratch.index));stackPop();return source<0?-2:source;
+    }
+
+    private MethodInsnNode writeRuntimeConditionalResult(int id,int source,LocalVariable scratch,boolean trueArm) {
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(id));
+        code.add(new LdcInsnNode(id));code.add(new LdcInsnNode(source));code.add(new VarInsnNode(ALOAD,scratch.index));
+        code.add(new InsnNode(trueArm?ICONST_1:ICONST_0));
+        MethodInsnNode result=new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","conditionalResult",
+                "(Lphp/runtime/PhpRuntimeOwnership$Frame;IIILphp/runtime/Memory;Z)Lphp/runtime/Memory;",false);code.add(result);return result;
+    }
+
+    private boolean writeRuntimeArrayIncrement(ArrayGetRefExprToken target,OperatorExprToken increment,boolean returned) {
+        if (!method.ownership().runtimeEnabled() || !incrementArrayTargets.contains(target)
+                || target.getParameters().size()!=1 || !(stackPeek().getToken() instanceof VariableExprToken)) return false;
+        String name=((VariableExprToken)stackPeek().getToken()).getName();
+        if ("GLOBALS".equals(name)) return false;
+        LocalVariable root=method.getLocalVariable(name);
+        if (root==null || !root.isReference() || !root.isOwnershipLocal()) return false;
+        ExprStmtToken parameter=target.getParameters().get(0);if (!parameter.isSingle()) return false;
+        Token literal=parameter.getSingle();String key;
+        if (literal instanceof StringExprToken && ((StringExprToken)literal).hasRawBytes()) return false;
+        if (literal instanceof StringExprToken) key=((StringExprToken)literal).getValue();
+        else if (literal instanceof IntegerExprToken && !((IntegerExprToken)literal).isBigValue())
+            key=String.valueOf(((IntegerExprToken)literal).getValue());
+        else return false;
+        stackPop();int id=method.ownership().reserveRuntimeEval();
+        method.ownership().runtimeProducer(id,"ARRAY_INCREMENT_RESULT");writeLineNumber(increment);
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+        writePushConstInt(id);writePushConstInt(root.index);
+        VarInsnNode read=new VarInsnNode(ALOAD,root.index);code.add(read);stackPush(Memory.Type.REFERENCE);
+        boolean decrement=increment instanceof DecExprToken,post=increment.getAssociation()==Association.LEFT;
+        writePushConstString(key);writePushConstBoolean(decrement);writePushConstBoolean(post);
+        writePushEnv();writePushTraceInfo(parameter);writePushTraceInfo(parameter);
+        writeSysStaticCall(php.runtime.PhpArithmetic.class,"arrayIncrement",Memory.class,
+                php.runtime.PhpRuntimeOwnership.Frame.class,int.class,int.class,Memory.class,String.class,
+                boolean.class,boolean.class,Environment.class,TraceInfo.class,TraceInfo.class);
+        method.ownership().runtimeArrayIncrement(id,root.index,key,decrement,post,(MethodInsnNode)code.getLast(),read);
+        stackPeek().runtimeEvaluationId=id;if (!returned) writePopAll(1);return true;
+    }
+
+    private boolean writeRuntimeArrayReference(StackItem operand,ArrayGetExprToken operator) {
+        if (!method.ownership().runtimeEnabled() || !(operand.getToken() instanceof VariableExprToken)
+                || operator.getClass()!=ArrayGetRefExprToken.class || !((ArrayGetRefExprToken)operator).isShortcut()
+                || operator.getParameters().size()!=1) return false;
+        String name=((VariableExprToken)operand.getToken()).getName();
+        if ("GLOBALS".equals(name)) return false;
+        LocalVariable root=method.getLocalVariable(name);
+        if (root==null || !root.isReference() || !root.isOwnershipLocal()) return false;
+        ExprStmtToken parameter=operator.getParameters().get(0);
+        if (!parameter.isSingle()) return false;
+        Token literal=parameter.getSingle();String key;
+        if (literal instanceof StringExprToken && ((StringExprToken)literal).hasRawBytes()) return false;
+        if (literal instanceof StringExprToken) key=((StringExprToken)literal).getValue();
+        else if (literal instanceof IntegerExprToken && !((IntegerExprToken)literal).isBigValue())
+            key=String.valueOf(((IntegerExprToken)literal).getValue());
+        else return false;
+        int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"ARRAY_REF_RESULT");
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+        writePushConstInt(id);writePushConstInt(root.index);
+        VarInsnNode read=new VarInsnNode(ALOAD,root.index);code.add(read);stackPush(Memory.Type.REFERENCE);
+        writePushConstString(key);writePushEnv();writePushTraceInfo(operator);
+        writeSysStaticCall(php.runtime.PhpOwnershipArrays.class,"arrayReference",Memory.class,
+                php.runtime.PhpRuntimeOwnership.Frame.class,int.class,int.class,Memory.class,String.class,Environment.class,TraceInfo.class);
+        method.ownership().runtimeArrayReference(id,root.index,key,(MethodInsnNode)code.getLast(),read);
+        stackPeek().runtimeEvaluationId=id;
+        return true;
     }
 
     void writeArrayGet(ArrayGetExprToken operator, boolean returnValue) {
@@ -2974,6 +3898,19 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         }
         boolean incrementArray = incrementArrayTargets.contains(operator);
         if (incrementArray || operator instanceof ArrayGetRefExprToken && ((ArrayGetRefExprToken) operator).isArithmeticTarget()) {
+            List<LocalVariable> preparedKeys=null;
+            if (method.ownership().enabled() && o.getToken() instanceof VariableExprToken) {
+                LocalVariable local=method.getLocalVariable(((VariableExprToken)o.getToken()).getName());
+                if (local != null && !local.isReference()) {
+                    preparedKeys=new ArrayList<>();
+                    for(ExprStmtToken key:operator.getParameters()) {
+                        writeExpression(key,true,false);writePopBoxing();
+                        LocalVariable saved=method.addLocalVariable("~runtimeIndex"+method.ownership().reserveRuntimeEval(),null,Memory.class);
+                        code.add(new VarInsnNode(ASTORE,saved.index));stackPop();preparedKeys.add(saved);
+                    }
+                    prepareRuntimeArrayVariable((VariableExprToken)o.getToken());
+                }
+            }
             if (o.getToken() instanceof VariableExprToken) writePushVariable((VariableExprToken) o.getToken());
             else writePush(o);
             writePopBoxing();
@@ -2982,13 +3919,16 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writeSysStaticCall(php.runtime.PhpArithmetic.class, incrementArray ? "arrayIncrementTarget" : "arrayTarget",
                     php.runtime.PhpArithmetic.ArrayTarget.class,
                     Memory.class, Environment.class, TraceInfo.class);
+            int keyIndex=0;
             for (ExprStmtToken key : operator.getParameters()) {
-                writeExpression(key, true, false);
-                writePopBoxing();
+                if (preparedKeys == null) {writeExpression(key, true, false);writePopBoxing();}
+                else writeVarLoad(preparedKeys.get(keyIndex++));
                 writeSysDynamicCall(php.runtime.PhpArithmetic.ArrayTarget.class, "index", php.runtime.PhpArithmetic.ArrayTarget.class, Memory.class);
             }
             return;
         }
+        if (writeRuntimeGlobalRead(o,operator)) return;
+        if (writeRuntimeArrayReference(o,operator)) return;
         writePush(o);
         writePopBoxing();
 
@@ -3001,6 +3941,20 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         for (ExprStmtToken param : operator.getParameters()) {
             writePushTraceInfo(traceIndex); // push dup trace
             writeExpression(param, true, false);
+            if (i == 0 && method.ownership().enabled() && o.getToken() instanceof VariableExprToken
+                    && (operator instanceof ArrayGetRefExprToken || operator instanceof ArrayGetUnsetExprToken)) {
+                LocalVariable local=method.getLocalVariable(((VariableExprToken)o.getToken()).getName());
+                if (local != null && !local.isReference()) {
+                    writePopBoxing();
+                    LocalVariable key=method.addLocalVariable("~runtimeWriteKey"+method.ownership().reserveRuntimeEval(),null,Memory.class);
+                    LocalVariable trace=method.addLocalVariable("~runtimeWriteTrace"+method.ownership().reserveRuntimeEval(),null,TraceInfo.class);
+                    LabelNode end=new LabelNode();
+                    code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNULL,end));
+                    code.add(new VarInsnNode(ASTORE,key.index));code.add(new VarInsnNode(ASTORE,trace.index));code.add(new InsnNode(POP));
+                    prepareRuntimeArrayVariable((VariableExprToken)o.getToken());
+                    code.add(new VarInsnNode(ALOAD,local.index));code.add(new VarInsnNode(ALOAD,trace.index));code.add(new VarInsnNode(ALOAD,key.index));code.add(end);
+                }
+            }
             if (operator instanceof ArrayGetUnsetExprToken && i == size - 1) {
                 writePopBoxing();
                 writeSysDynamicCall(Memory.class, "unsetOfIndex", void.class, TraceInfo.class, stackPeek().type.toClass());
@@ -3008,15 +3962,29 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     writePushNull();
             } else if (operator instanceof ArrayGetIssetExprToken && i == size - 1) {
                 writePopBoxing();
+                if (php8CallFrame()) {
+                    writePushEnv();
+                    writeSysStaticCall(php.runtime.PhpStringOffsets.class,"isset",Memory.class,
+                            Memory.class,TraceInfo.class,Memory.class,Environment.class);
+                    i++;continue;
+                }
                 writeSysDynamicCall(Memory.class, "issetOfIndex", Memory.class, TraceInfo.class, stackPeek().type.toClass());
             } else if (operator instanceof ArrayGetEmptyExprToken && i == size - 1) {
                 writePopBoxing();
+                if (php8CallFrame()) {
+                    writePushEnv();
+                    writeSysStaticCall(php.runtime.PhpStringOffsets.class,"empty",Memory.class,
+                            Memory.class,TraceInfo.class,Memory.class,Environment.class);
+                    i++;continue;
+                }
                 writeSysDynamicCall(Memory.class, "emptyOfIndex", Memory.class, TraceInfo.class, stackPeek().type.toClass());
             } else {
-                if (isShortcut && i == size - 1 && getCompiler().getModule().getPhpLanguageProfile()
-                        == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                if (getCompiler().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                     writePopBoxing();
-                    writeSysDynamicCall(Memory.class, "refOfIndexAsShortcut", Memory.class, TraceInfo.class, Memory.class);
+                    writePushEnv();
+                    writeSysStaticCall(php.runtime.PhpStringOffsets.class,
+                            operator instanceof ArrayGetRefExprToken ? (isShortcut && i == size - 1 ? "shortcut" : "reference") : "read",
+                            Memory.class, Memory.class, TraceInfo.class, Memory.class, Environment.class);
                     i++;
                     continue;
                 }
@@ -3032,6 +4000,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     }
                 }*/
 
+                if (stackPeek().type==StackItem.Type.STRING_VALUE) writePopBoxing();
                 writeSysDynamicCall(Memory.class, methodName, Memory.class, TraceInfo.class, stackPeek().type.toClass());
                 i++;
             }
@@ -3100,7 +4069,19 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         }
 
         if (operator instanceof IncExprToken || operator instanceof DecExprToken) {
-            if (modernIncrement) {
+            if (modernIncrement && method.ownership().runtimeEnabled() && variable!=null && variable.isReference()
+                    && variable.isOwnershipLocal() && !"GLOBALS".equals(variable.name)) {
+                int id=method.ownership().reserveRuntimeEval();method.ownership().runtimeProducer(id,"LOCAL_INCREMENT_RESULT");
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(id);writePushConstInt(variable.index);
+                VarInsnNode read=new VarInsnNode(ALOAD,variable.index);code.add(read);stackPush(Memory.Type.REFERENCE);
+                boolean decrement=operator instanceof DecExprToken,post=operator.getAssociation()==Association.LEFT;
+                writePushConstBoolean(decrement);writePushConstBoolean(post);writePushEnv();writePushTraceInfo(operator);
+                writeSysStaticCall(php.runtime.PhpArithmetic.class,"localIncrement",Memory.class,
+                        php.runtime.PhpRuntimeOwnership.Frame.class,int.class,int.class,Memory.class,boolean.class,boolean.class,Environment.class,TraceInfo.class);
+                method.ownership().runtimeLocalIncrement(id,variable.index,decrement,post,(MethodInsnNode)code.getLast(),read);
+                stackPeek().runtimeEvaluationId=id;if(!returnValue)writePopAll(1);
+            } else if (modernIncrement) {
                 writePush(o);
                 if (stackPeek().type.isConstant()) unexpectedToken(operator);
                 writePopBoxing();
@@ -3166,11 +4147,36 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     writeVarStore(variable, false);
                 }
             }
+        } else if (operator instanceof CloneExprToken && method.ownership().runtimeEnabled()
+                && writeRuntimeCloneCv(o,L,operator,returnValue)) {
+            // The exact CV producer and cloned result were published by the guarded helper.
+        } else if (operator instanceof CloneExprToken && method.ownership().runtimeEnabled()) {
+            writePush(o);writePopBoxing();
+            int sourceEval=stackPeek().runtimeEvaluationId;
+            int resultEval=method.ownership().reserveRuntimeEval();
+            method.ownership().runtimeProducer(resultEval,"CLONE");
+            if (!(L instanceof ClosureStmtToken))
+                method.ownership().runtimeUnsupported("clone-source-without-certified-closure-provenance");
+            LocalVariable source=method.addLocalVariable("~runtimeCloneSource"+resultEval,null,Memory.class);
+            code.add(new VarInsnNode(ASTORE,source.index));
+            code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new LdcInsnNode(resultEval));
+            code.add(new VarInsnNode(ALOAD,source.index));writePushEnv();writePushTraceInfo(operator);
+            code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpOwnershipClosures","cloneRuntime",
+                    "(Lphp/runtime/PhpRuntimeOwnership$Frame;ILphp/runtime/Memory;Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;)Lphp/runtime/Memory;",false));
+            stackPop();stackPop();stackPeek().runtimeEvaluationId=resultEval;setStackPeekAsImmutable();
+            releaseRuntimeEvaluation(sourceEval,"POP");
+            if (!returnValue) writePopAll(1);
         } else if (operator instanceof AmpersandRefToken) {
             writePush(o, false, false);
             if (compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
                 writePopBoxing(false);
+                int runtimeEval=stackPeek().runtimeEvaluationId,activeEval=stackPeek().ownershipEvalId;
+                int sourceLocal=stackPeek().runtimeSourceLocalId;
+                VarInsnNode sourceRead=stackPeek().runtimeSourceRead;
                 writeSysStaticCall(ReferenceMemory.class, "exportReference", Memory.class, Memory.class);
+                stackPeek().runtimeEvaluationId=runtimeEval;stackPeek().ownershipEvalId=activeEval;
+                stackPeek().runtimeSourceLocalId=sourceLocal;
+                stackPeek().runtimeSourceRead=sourceRead;
             }
             setStackPeekAsImmutable();
             Token token = o.getToken();
@@ -3193,6 +4199,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     && ((VariableExprToken) o.getToken()).getName().equals("this") && quietThisReads.add(o.getToken());
             try {writePush(o);} finally {if (quiet) quietThisReads.remove(o.getToken());}
             ValueIfElseToken valueIfElseToken = (ValueIfElseToken) operator;
+            if(method.ownership().runtimeEnabled())writeRuntimeConditionalLocal();
+            if(method.ownership().runtimeEnabled()&&stackPeek().runtimeEvaluationId>=0) {
+                writeRuntimeConditional(valueIfElseToken);setStackPeekAsImmutable(false);return null;
+            }
+            if(method.ownership().runtimeEnabled())method.ownership().runtimeUnsupported("conditional-test-source-unlowered");
 
             LabelNode end = new LabelNode();
             LabelNode elseL = new LabelNode();
@@ -3267,7 +4278,26 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writePush(o);
             writePopBoxing();
 
-            if (operator instanceof UnaryNumericExprToken) {
+            if (operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.VoidCastExprToken && php8CallFrame()) {
+                writePopAll(1);
+                if (returnValue) writePushNull();
+                return null;
+            }
+
+            if (operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.ObjectCastExprToken
+                    && stackPeek().runtimeEvaluationId>=0 && method.ownership().runtimeArrayCastSource(stackPeek().runtimeEvaluationId)) {
+                int source=stackPeek().runtimeEvaluationId,result=method.ownership().reserveRuntimeEval();
+                method.ownership().runtimeProducer(result,"OBJECT_CAST_RESULT");
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(result);writePushConstInt(source);writePushEnv();
+                writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"objectCast",Memory.class,
+                        Memory.class,php.runtime.PhpRuntimeOwnership.Frame.class,int.class,int.class,Environment.class);
+                method.ownership().runtimeObjectCast(result,source,(MethodInsnNode)code.getLast());
+                method.ownership().runtimeConsumer(source,"CAST");stackPeek().runtimeEvaluationId=result;
+            } else if (operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.StringCastExprToken && php8CallFrame()) {
+                writePushEnv();writePushTraceInfo(operator);
+                writeSysStaticCall(php.runtime.PhpByteStrings.class,"stringValue",Memory.class,Memory.class,Environment.class,TraceInfo.class);
+            } else if (operator instanceof UnaryNumericExprToken) {
                 writePushConstBoolean(((UnaryNumericExprToken) operator).isNegative());
                 writePushEnv();
                 writePushTraceInfo(operator);
@@ -3389,6 +4419,46 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         return null;
     }
 
+    /** Marks the finished Java String / immutable-byte carrier without claiming it is Memory. */
+    public void markStringValue() {
+        stackPop();stackPush(null,StackItem.Type.STRING_VALUE);setStackPeekAsImmutable();
+    }
+
+    private Class byteConcatOperandClass() {
+        StackItem.Type type=stackPeek().type;
+        if(type==StackItem.Type.FLOAT){writePopDouble();return double.class;}
+        if(type==StackItem.Type.INT || type==StackItem.Type.SHORT || type==StackItem.Type.BYTE){writePopLong();return long.class;}
+        if(type==StackItem.Type.LONG)return long.class;
+        if(type==StackItem.Type.DOUBLE)return double.class;
+        if(type==StackItem.Type.BOOL)return boolean.class;
+        if(type==StackItem.Type.CHAR)return char.class;
+        return Object.class;
+    }
+
+    private void writeByteConcatOperands(StackItem left,StackItem right,Token token,boolean address) {
+        // Save evaluated operands before the first coercion. Reference operands remain live.
+        LocalVariable savedRight=null;Class rightClass=null;StackItem rightItem=null;
+        if(!right.isKnown()) {
+            stackPush(right);rightClass=byteConcatOperandClass();rightItem=stackPop();
+            savedRight=method.addLocalVariable("~byteConcatRight"+method.nextStatementIndex(Object.class),null,rightClass);
+            code.add(new VarInsnNode(Type.getType(rightClass).getOpcode(ISTORE),savedRight.index));
+        }
+        writePush(left);Class leftClass=byteConcatOperandClass();StackItem leftItem=stackPop();
+        LocalVariable savedLeft=method.addLocalVariable("~byteConcatLeft"+method.nextStatementIndex(Object.class),null,leftClass);
+        code.add(new VarInsnNode(Type.getType(leftClass).getOpcode(ISTORE),savedLeft.index));
+        if(savedRight==null) {
+            writePush(right);rightClass=byteConcatOperandClass();rightItem=stackPop();
+            savedRight=method.addLocalVariable("~byteConcatRight"+method.nextStatementIndex(Object.class),null,rightClass);
+            code.add(new VarInsnNode(Type.getType(rightClass).getOpcode(ISTORE),savedRight.index));
+        }
+        code.add(new VarInsnNode(Type.getType(leftClass).getOpcode(ILOAD),savedLeft.index));stackPush(leftItem);
+        code.add(new VarInsnNode(Type.getType(rightClass).getOpcode(ILOAD),savedRight.index));stackPush(rightItem);
+        writePushEnv();writePushTraceInfo(token);
+        writeSysStaticCall(php.runtime.PhpByteStringValues.class,address ? "assign" : "concat",address ? Memory.class : Object.class,
+                address ? Memory.class : leftClass,rightClass,Environment.class,TraceInfo.class);
+        if(!address)markStringValue();else setStackPeekAsImmutable();
+    }
+
     private void writeBoxedBinaryOperands(StackItem left, StackItem right, boolean immutableRight) {
         if (right.isKnown()) {
             writePush(left);
@@ -3418,6 +4488,36 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             code.add(new InsnNode(SWAP));
             stackPush(boxedRight);
         }
+    }
+
+    private void writeRuntimeComparison(StackItem left,StackItem right,String name,OperatorExprToken operator) {
+        writeBoxedBinaryOperands(left,right,false);
+        StackItem rightValue=stackPop(),leftValue=stackPop();
+        int id=method.ownership().reserveRuntimeEval();
+        LocalVariable rightRaw=method.addLocalVariable("~comparisonRight"+id,null,Memory.class);
+        LocalVariable leftRaw=method.addLocalVariable("~comparisonLeft"+id,null,Memory.class);
+        code.add(new VarInsnNode(ASTORE,rightRaw.index));code.add(new VarInsnNode(ASTORE,leftRaw.index));
+        Method selected;
+        try {selected=php.runtime.PhpComparisonCalls.class.getMethod(name,Memory.class,Memory.class,Environment.class,TraceInfo.class);}
+        catch(java.lang.NoSuchMethodException absent){throw new IllegalStateException("Comparison BODY disappeared",absent);}
+        LabelNode managed=new LabelNode(),joined=new LabelNode();
+        code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));code.add(new JumpInsnNode(IFNONNULL,managed));
+        code.add(new VarInsnNode(ALOAD,leftRaw.index));stackPush(Memory.Type.REFERENCE);
+        code.add(new VarInsnNode(ALOAD,rightRaw.index));stackPush(Memory.Type.REFERENCE);
+        Method direct=selected;
+        if(selected.getReturnType()==Boolean.TYPE)try{direct=php.runtime.PhpComparison.class.getMethod(name,Memory.class,Memory.class,Environment.class,TraceInfo.class);}catch(java.lang.NoSuchMethodException absent){throw new IllegalStateException("Ordinary comparison BODY disappeared",absent);}
+        writePushEnv();writePushTraceInfo(operator);writePushStaticCall(direct);
+        MethodInsnNode ordinary=(MethodInsnNode)code.getLast();
+        stackPop();code.add(new JumpInsnNode(GOTO,joined));code.add(managed);
+        LocalVariable packet=beginRuntimeNativePacket(new CompileFunction.Method(selected,2,false),2,id);
+        method.ownership().runtimeComparisonFallback(id,ordinary,null);
+        code.add(new VarInsnNode(ALOAD,leftRaw.index));stackPush(Memory.Type.REFERENCE);
+        sendRuntimeNativeBorrow(packet,0,leftValue.runtimeEvaluationId,id,false,false);
+        code.add(new VarInsnNode(ALOAD,rightRaw.index));stackPush(Memory.Type.REFERENCE);
+        sendRuntimeNativeBorrow(packet,1,rightValue.runtimeEvaluationId,id,false,false);
+        writePushEnv();writePushTraceInfo(operator);writeRuntimeNativeBody(selected,packet,id);finishRuntimeNative(packet,id);
+        if(selected.getReturnType()==Boolean.TYPE){writeSysDynamicCall(Memory.class,"toBoolean",Boolean.TYPE);stackPeek().runtimeEvaluationId=id;}
+        code.add(joined);
     }
 
     private void writeNumericBinaryOperands(StackItem left, StackItem right, StackItem.Type type) {
@@ -3557,13 +4657,105 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             unexpectedToken(operator);
 
         if (operator instanceof AssignExprToken && (L instanceof ArrayAssignTargetExprToken || o2.capturedArrayAssignment)) {
-            writeBoxedBinaryOperands(o2, o1, false);
-            writeSysDynamicCall(php.runtime.NullCoalesceAssignment.class, operator.getCode(), Memory.class, Memory.class);
+            if (!returnValue && o2.runtimeGlobalSiteId>=0 && !((AssignExprToken)operator).isAsReference()
+                    && o1.runtimeEvaluationId<0 && o1.runtimeSourceLocalId<0
+                    && (o1.getMemory()==Memory.NULL || o1.getToken() instanceof NullExprToken)) {
+                // Preserve target/key effects; the exact scalar has its own producer before physical STORE.
+                writePush(o2);writePopBoxing();
+                int scalar=method.ownership().reserveRuntimeEval();
+                method.ownership().runtimeProducer(scalar,"NULL_LITERAL");
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(scalar);
+                writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"globalNull",Memory.class,
+                        php.runtime.PhpRuntimeOwnership.Frame.class,int.class);
+                method.ownership().runtimeGlobalNull(scalar,(MethodInsnNode)code.getLast());
+                stackPeek().runtimeEvaluationId=scalar;
+            } else if (!returnValue && o2.runtimeGlobalSiteId>=0 && !((AssignExprToken)operator).isAsReference()
+                    && o1.runtimeEvaluationId<0 && o1.runtimeSourceLocalId<0
+                    && (o1.getMemory()!=null && o1.getMemory().getClass()==LongMemory.class
+                    || o1.getToken() instanceof IntegerExprToken && !((IntegerExprToken)o1.getToken()).isBigValue())) {
+                // Target effects already ran; this exact literal now has its own real producer before STORE.
+                writePush(o2);writePopBoxing();
+                int scalar=method.ownership().reserveRuntimeEval();long value=o1.getMemory()!=null?o1.getMemory().toLong():((IntegerExprToken)o1.getToken()).getValue();
+                method.ownership().runtimeProducer(scalar,"SCALAR_LITERAL");
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(scalar);writePushConstLong(value);
+                writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"globalScalar",Memory.class,
+                        php.runtime.PhpRuntimeOwnership.Frame.class,int.class,long.class);
+                method.ownership().runtimeGlobalScalar(scalar,value,(MethodInsnNode)code.getLast());
+                stackPeek().runtimeEvaluationId=scalar;
+            } else if (!returnValue && o2.runtimeGlobalSiteId<0 && o2.runtimeArraySiteId>=0
+                    && "assign".equals(operator.getCode()) && !((AssignExprToken)operator).isAsReference()
+                    && o1.runtimeEvaluationId<0 && o1.runtimeSourceLocalId<0
+                    && (o1.getMemory()!=null && o1.getMemory().isString()
+                    && (o1.getMemory() instanceof PhpByteStringMemory?((PhpByteStringMemory)o1.getMemory()).byteLength():o1.getMemory().toString().length())<=16000
+                    || o1.getMemory()==null && o1.getToken() instanceof StringExprToken && ((StringExprToken)o1.getToken()).getSegments().isEmpty()
+                    && (((StringExprToken)o1.getToken()).hasRawBytes()?((StringExprToken)o1.getToken()).getPhp85Bytes().length:((StringExprToken)o1.getToken()).getValue().length())<=16000)) {
+                writePush(o2);writePopBoxing();
+                int scalar=method.ownership().reserveRuntimeEval();
+                Memory literal=o1.getMemory();
+                boolean raw=literal instanceof PhpByteStringMemory || literal==null && ((StringExprToken)o1.getToken()).hasRawBytes();
+                String value=literal!=null?(raw?literal.toBinaryString():literal.toString()):raw
+                        ?new String(((StringExprToken)o1.getToken()).getPhp85Bytes(),java.nio.charset.StandardCharsets.ISO_8859_1)
+                        :((StringExprToken)o1.getToken()).getValue();
+                method.ownership().runtimeProducer(scalar,"ENTRY_STRING_LITERAL");
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(scalar);writePushConstString(value);writePushConstBoolean(raw);
+                writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"entryString",Memory.class,
+                        php.runtime.PhpRuntimeOwnership.Frame.class,int.class,String.class,boolean.class);
+                method.ownership().runtimeEntryString(scalar,value,raw,(MethodInsnNode)code.getLast());
+                stackPeek().runtimeEvaluationId=scalar;stackPeek().runtimeArrayValueProducer=true;
+            } else if (!returnValue && o2.runtimeGlobalSiteId<0 && o2.runtimeArraySiteId>=0
+                    && "assign".equals(operator.getCode()) && !((AssignExprToken)operator).isAsReference()
+                    && o1.runtimeEvaluationId<0 && o1.runtimeSourceLocalId<0
+                    && (o1.getMemory()!=null && o1.getMemory().getClass()==LongMemory.class
+                    || o1.getToken() instanceof IntegerExprToken && !((IntegerExprToken)o1.getToken()).isBigValue())) {
+                // The already evaluated target precedes the literal EVAL and its physical ENTRY publication.
+                writePush(o2);writePopBoxing();
+                int scalar=method.ownership().reserveRuntimeEval();long value=o1.getMemory()!=null?o1.getMemory().toLong():((IntegerExprToken)o1.getToken()).getValue();
+                method.ownership().runtimeProducer(scalar,"ENTRY_SCALAR_LITERAL");
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(scalar);writePushConstLong(value);
+                writeSysStaticCall(php.runtime.PhpRuntimeOwnership.class,"entryScalar",Memory.class,
+                        php.runtime.PhpRuntimeOwnership.Frame.class,int.class,long.class);
+                method.ownership().runtimeEntryScalar(scalar,value,(MethodInsnNode)code.getLast());
+                stackPeek().runtimeEvaluationId=scalar;stackPeek().runtimeArrayValueProducer=true;
+            } else writeBoxedBinaryOperands(o2, o1, false);
+            StackItem entryValue=stackPeek();
+            if(!returnValue&&o2.runtimeGlobalSiteId>=0&&(entryValue.runtimeEvaluationId>=0||entryValue.runtimeSourceLocalId>=0)) {
+                int sourceEval=entryValue.runtimeEvaluationId,sourceLocal=sourceEval>=0?-1:entryValue.runtimeSourceLocalId;
+                int mode=((AssignExprToken)operator).isAsReference()?1:0;
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(sourceEval);writePushConstInt(sourceLocal);writePushConstInt(mode);
+                writeSysDynamicCall(php.runtime.NullCoalesceAssignment.class,"assignGlobalRuntime",Memory.class,
+                        Memory.class,php.runtime.PhpRuntimeOwnership.Frame.class,int.class,int.class,int.class);
+                method.ownership().runtimeGlobalAccess(o2.runtimeGlobalSiteId,o2.runtimeGlobalRootLocalId,o2.runtimeGlobalKey,
+                        sourceEval,sourceLocal,mode,o2.runtimeGlobalFactory,o2.runtimeGlobalIndex,(MethodInsnNode)code.getLast(),
+                        sourceEval>=0?null:entryValue.runtimeSourceRead);
+                if(sourceEval>=0)method.ownership().runtimeConsumer(sourceEval,"GLOBAL");
+                invalidateGlobalVariable(o2.runtimeGlobalKey);
+            } else if (!returnValue && "assign".equals(operator.getCode()) && o2.runtimeArraySiteId>=0 && entryValue.runtimeEvaluationId>=0 && entryValue.runtimeArrayValueProducer) {
+                int sourceEval=entryValue.runtimeEvaluationId;
+                code.add(new VarInsnNode(ALOAD,method.ownership().runtimeFrameIndex()));stackPush(Memory.Type.REFERENCE);
+                writePushConstInt(sourceEval);
+                writeSysDynamicCall(php.runtime.NullCoalesceAssignment.class,"assignRuntime",Memory.class,
+                        Memory.class,php.runtime.PhpRuntimeOwnership.Frame.class,int.class);
+                method.ownership().runtimeArrayEntry(o2.runtimeArraySiteId,sourceEval,o2.runtimeArrayRootLocalId,
+                        o2.runtimeArrayAppend,o2.runtimeArrayFactory,o2.runtimeArrayStep,(MethodInsnNode)code.getLast());
+                method.ownership().runtimeConsumer(sourceEval,"ENTRY");
+            } else writeSysDynamicCall(php.runtime.NullCoalesceAssignment.class, operator.getCode(), Memory.class, Memory.class);
             setStackPeekAsImmutable();
             if (!returnValue) writePopAll(1);
         } else if (operator instanceof KeyValueExprToken && ((KeyValueExprToken) operator).isArrayEntry()) {
             writeBoxedBinaryOperands(o2, o1, !((KeyValueExprToken) operator).isValueReference());
+            int valueRuntimeEval=stackPeek().runtimeEvaluationId;
             writeSysStaticCall(KeyValueMemory.class, "valueOf", Memory.class, Memory.class, Memory.class);
+            stackPeek().runtimeEvaluationId=valueRuntimeEval;
+            if(method.ownership().runtimeEnabled()) {
+                Memory key=o2.getMemory();
+                if(key!=null&&(key.isString()||key.type==Memory.Type.INT)||o2.getToken() instanceof StringExprToken||o2.getToken() instanceof IntegerExprToken)runtimeLiteralPairs.put(stackPeek(),(MethodInsnNode)code.getLast());
+                else method.ownership().runtimeUnsupported("literal-entry-key-conversion");
+            }
         } else if (getCompiler().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
                 && (operator instanceof PlusExprToken || operator instanceof MinusExprToken || operator instanceof MulExprToken)
                 && Lt.isLikeNumber() && Rt.isLikeNumber() && Lt != StackItem.Type.FLOAT && Rt != StackItem.Type.FLOAT) {
@@ -3599,11 +4791,42 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             }
         } else if (getCompiler().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
                 && CompilerUtils.isPhpComparison(operator)) {
+            if(method.ownership().runtimeEnabled())writeRuntimeComparison(o2,o1,name,operator);
+            else {
+                writeBoxedBinaryOperands(o2, o1, false);
+                writePushEnv();writePushTraceInfo(operator);
+                writeSysStaticCall(php.runtime.PhpComparison.class,name,operatorResult,
+                        Memory.class,Memory.class,Environment.class,TraceInfo.class);
+            }
+        } else if (!php8CallFrame() && (operator instanceof ConcatExprToken || operator instanceof AssignConcatExprToken)
+                && (!(Lt == StackItem.Type.STRING && Rt == StackItem.Type.STRING) || operator instanceof AssignConcatExprToken)) {
+            boolean assignment = operator instanceof AssignConcatExprToken;
+            boolean address = assignment && (variable == null || variable.isReference());
             writeBoxedBinaryOperands(o2, o1, false);
-            writePushEnv();
-            writePushTraceInfo(operator);
-            writeSysStaticCall(php.runtime.PhpComparison.class, name, operatorResult,
-                    Memory.class, Memory.class, Environment.class, TraceInfo.class);
+            writeSysStaticCall(php.runtime.PhpByteStrings.class, address ? "assignConcatLegacy" : "concatLegacy",
+                    Memory.class, Memory.class, Memory.class);
+            setStackPeekAsImmutable();
+            if (assignment && !address) {
+                if (returnValue) writePushDup();
+                makeVarStore(variable); variable.setValue(null); stackPop();
+            } else if (assignment && !returnValue) writePopAll(1);
+        } else if (php8CallFrame() && (operator instanceof ConcatExprToken || operator instanceof AssignConcatExprToken)
+                && (!(Lt==StackItem.Type.STRING && Rt==StackItem.Type.STRING) || operator instanceof AssignConcatExprToken)) {
+            boolean assignment=operator instanceof AssignConcatExprToken;
+            boolean address=assignment && (variable==null || variable.isReference());
+            writeByteConcatOperands(o2,o1,operator,address);
+            if (assignment && !address) {
+                writePopBoxing();if(returnValue)writePushDup();makeVarStore(variable);variable.setValue(null);stackPop();
+            } else if (assignment && !returnValue) writePopAll(1);
+        } else if (Lt==StackItem.Type.STRING_VALUE || Rt==StackItem.Type.STRING_VALUE) {
+            writeBoxedBinaryOperands(o2,o1,false);
+            writeSysDynamicCall(Memory.class,name,operatorResult,Memory.class);
+        } else if ((CompilerUtils.isPhpComparison(operator) || operator instanceof IdenticalExprToken
+                || operator instanceof NotIdenticalExprToken) && Lt.isConstant() && Rt.isConstant()
+                && !o1.isKnown() && !o2.isKnown()) {
+            // Both evaluated scalars already occupy the JVM stack; box them in physical operand order.
+            writeBoxedBinaryOperands(o2,o1,false);
+            writeSysDynamicCall(Memory.class,name,operatorResult,Memory.class);
         } else if (Lt.isConstant() && Rt.isConstant()) {
             if (operator instanceof AssignableOperatorToken)
                 unexpectedToken(operator);
@@ -3737,7 +4960,18 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     @SuppressWarnings("unchecked")
-    public Memory writeExpression(ExprStmtToken expression, boolean returnValue, boolean returnMemory, boolean writeOpcode) {
+    public Memory writeExpression(ExprStmtToken expression,boolean returnValue,boolean returnMemory,boolean writeOpcode) {
+        Token previous=discardedCallWitness;
+        ExprStmtToken prepared=expression.isStmtList()?expression:expression.getAsmExpr();
+        List<Token> tokens=prepared==null?Collections.emptyList():prepared.getTokens();
+        Token terminal=tokens.isEmpty()?null:tokens.getLast();
+        // A nullsafe branch join still needs Memory. Only its terminal call's semantic use is discarded.
+        // A void cast consumes the preceding result, and argument expressions get independent scopes.
+        discardedCallWitness=!returnValue&&!(terminal instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.VoidCastExprToken)?terminal:null;
+        try{return writeExpressionBody(expression,returnValue,returnMemory,writeOpcode);}
+        finally{discardedCallWitness=previous;}
+    }
+    private Memory writeExpressionBody(ExprStmtToken expression,boolean returnValue,boolean returnMemory,boolean writeOpcode) {
         int initStackSize = method.getStackCount();
         exprStackInit.push(initStackSize);
 
@@ -3750,6 +4984,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         }
 
         List<Token> tokens = expression.getTokens();
+        for(Token token:tokens)if(token instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.VoidCastExprToken
+                && (returnValue || tokens.getLast()!=token))throw new php.runtime.exceptions.ParseException("syntax error, unexpected token \"(void)\"",token.toTraceInfo(compiler.getContext()));
         List<ArrayGetRefExprToken> markedIncrementArrays = new ArrayList<>();
         if (php8CallFrame()) {
             Token previous = null;
@@ -3761,6 +4997,12 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 }
                 previous = token;
             }
+        }
+        // Calls/allocations to the left must run before a nullsafe receiver; ordinary CV reads keep their roles.
+        int firstNullsafe = -1;
+        if (php8CallFrame() && writeOpcode) for (int i=0;i<tokens.size();i++) {
+            DynamicAccessExprToken access=org.develnext.jphp.core.compiler.common.NullsafeChain.access(tokens.get(i));
+            if (access!=null && access.isNullsafe()) { firstNullsafe=i; break; }
         }
         int operatorCount = 0;
         for (Token token : tokens) {
@@ -3810,14 +5052,24 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     if (token instanceof ArrayAssignTargetExprToken
                             || token instanceof CallExprToken && ((CallExprToken) token).getName() instanceof OperatorExprToken) {
                         if (writeOpcode) {
-                            writePush((ValueExprToken) token, true, true);
+                            boolean callResult = token instanceof CallExprToken && tokenIndex == tokens.size() - 1 && nullsafeMissing == null ? returnValue : true;
+                            writePush((ValueExprToken) token, callResult, true);
                             method.entity.setImmutable(false);
                         } else
                             break;
+                    } else if (tokenIndex<firstNullsafe && (token instanceof CallExprToken || token instanceof NewExprToken
+                            || token instanceof ArrayExprToken || token instanceof ClosureStmtToken)) {
+                        writePush((ValueExprToken) token, true, true);
                     } else
                         stackPush((ValueExprToken) token);
                 } else if (token instanceof OperatorExprToken) { // + - * / % && || or ! and == > < etc.
                     operatorCount--;
+                    if (writeOpcode && token instanceof ArrayGetRefExprToken && tokenIndex+1<tokens.size()
+                            && (tokens.get(tokenIndex+1) instanceof IncExprToken || tokens.get(tokenIndex+1) instanceof DecExprToken)
+                            && writeRuntimeArrayIncrement((ArrayGetRefExprToken)token,(OperatorExprToken)tokens.get(tokenIndex+1),
+                            operatorCount>1 || nullsafeMissing!=null || returnValue)) {
+                        operatorCount--;tokenIndex++;method.entity.setImmutable(false);continue;
+                    }
                     if (operatorCount >= 0) {
                         Memory result;
                         if (operatorCount == 0) {
@@ -3857,8 +5109,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     writePush(stackPop());
             } else if (method.getStackCount() > 0) {
                 if (php8CallFrame() && writeOpcode && stackPeekToken() != null && !stackPeek().isConstant()) {
-                    // A discarded PHP expression still performs reads, getters and nested side effects.
-                    writePush(stackPopToken(), true, true);
+                    // Evaluate discarded reads, while preserving the result-use witness of a call.
+                    Token pending = stackPeekToken();
+                    writePush(stackPopToken(), pending instanceof CallableExprToken ? returnValue : true, true);
                 } else if (stackPeekToken() instanceof CallableExprToken) {
                     if (returnMemory)
                         result = tryWritePush(stackPopToken(), returnValue, writeOpcode, true);
@@ -3911,6 +5164,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                         code.add(new InsnNode(POP2));
                         break;
                     case 1:
+                        if (type==StackItem.Type.REFERENCE || type==StackItem.Type.ARRAY || type==StackItem.Type.OBJECT
+                                || type==StackItem.Type.STRING || "STRING_VALUE".equals(type.name()) || type==StackItem.Type.CLASS || type==StackItem.Type.KEY_VALUE)
+                            method.primitiveCells().discard(code);
                         code.add(new InsnNode(POP));
                         break;
                     default:
@@ -3918,6 +5174,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 }
             } else/* if (o.isInvalidForOperations())*/
                 unexpectedToken(token);
+            method.ownership().releaseEvaluation(code, o.ownershipEvalId); o.ownershipEvalId = -1;
+            releaseRuntimeEvaluation(o.runtimeEvaluationId,"POP");o.runtimeEvaluationId=-1;
         }
     }
 

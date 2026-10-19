@@ -7,6 +7,7 @@ import php.runtime.annotation.Reflection.Abstract;
 import php.runtime.annotation.Reflection.Signature;
 import php.runtime.env.Environment;
 import php.runtime.ext.core.classes.stream.Stream;
+import php.runtime.ext.core.classes.stream.MiscStream;
 import php.runtime.ext.core.classes.time.WrapTime;
 import php.runtime.lang.BaseObject;
 import php.runtime.lang.ForeachIterator;
@@ -14,9 +15,12 @@ import php.runtime.lang.spl.iterator.Iterator;
 import php.runtime.memory.BinaryMemory;
 import php.runtime.memory.LongMemory;
 import php.runtime.memory.ObjectMemory;
+import php.runtime.memory.PhpByteStringMemory;
 import php.runtime.reflection.ClassEntity;
 
 import java.io.InputStream;
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
 import java.sql.*;
 
 @Abstract
@@ -59,23 +63,39 @@ public class PSqlStatement extends BaseObject implements Iterator {
 
     @Signature
     public Memory getLastInsertId(Environment env) throws SQLException {
-        Memory keys = getGeneratedKeys(env);
-
-        if (keys.instanceOf(PSqlResult.class)) {
-            return keys.toObject(PSqlResult.class).getTyped(env, 0);
+        try (ResultSet keys = statement.getGeneratedKeys()) {
+            if (keys == null || !keys.next()) return Memory.NULL;
+            Memory value = new PSqlResult(env, keys).getTyped(env, 0);
+            // A mixed generated ID may be a JDBC-backed Blob stream; detach it before closing its cursor.
+            if (value.instanceOf(Stream.class)) {
+                try (InputStream input = Stream.getInputStream(env, value)) {
+                    return ObjectMemory.valueOf(new MiscStream(env, new ByteArrayInputStream(input.readAllBytes())));
+                } catch (IOException failure) {
+                    throw new SQLException("Could not read generated key stream", failure);
+                }
+            }
+            return value;
         }
-
-        return Memory.NULL;
     }
 
     @Signature
     public Memory getGeneratedKeys(Environment env) throws SQLException {
         ResultSet keys = statement.getGeneratedKeys();
 
-        if (keys != null && keys.next()) {
-            return ObjectMemory.valueOf(new PSqlResult(env, keys));
+        try {
+            if (keys != null && keys.next()) {
+                return ObjectMemory.valueOf(new PSqlResult(env, keys));
+            }
+        } catch (SQLException | RuntimeException | Error failure) {
+            if (keys != null) {
+                try { keys.close(); }
+                catch (SQLException | RuntimeException | Error cleanup) {
+                    if (cleanup != failure) failure.addSuppressed(cleanup);
+                }
+            }
+            throw failure;
         }
-
+        if (keys != null) keys.close();
         return Memory.NULL;
     }
 
@@ -116,7 +136,7 @@ public class PSqlStatement extends BaseObject implements Iterator {
             statement.setDate(index + 1, new Date(time.getDate().getTime()), time.getCalendar());
         } else if (value.instanceOf(Stream.class)) {
             statement.setBlob(index + 1, Stream.getInputStream(env, value));
-        } else if (value.toValue() instanceof BinaryMemory) {
+        } else if (value.toValue() instanceof BinaryMemory || value.toValue() instanceof PhpByteStringMemory) {
             statement.setBytes(index + 1, value.getBinaryBytes(env.getDefaultCharset()));
         } else {
             if (value.isNull()) {

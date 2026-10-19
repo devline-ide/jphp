@@ -1,0 +1,5 @@
+own_peer:ok:[3,4]
+child_private:Error:Cannot modify private(set) property A::$x from scope B
+child:ok:6
+global_protected:Error:Cannot modify protected(set) property A::$y from global scope
+state:3:6

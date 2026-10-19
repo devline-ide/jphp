@@ -1,0 +1,3 @@
+Fatal error: Cannot use "yield from" inside a by-reference generator in G:\DevLine-QA\jphp-property-hooks-20261013\generator-hooks-agent-r1\test-resources\resources\property_hooks\generator_resume\weak\reference_yield_from.php on line 2
+Stack trace:
+#0 {main}

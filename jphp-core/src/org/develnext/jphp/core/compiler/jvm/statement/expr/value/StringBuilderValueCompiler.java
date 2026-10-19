@@ -22,6 +22,9 @@ public class StringBuilderValueCompiler extends BaseExprCompiler<StringBuilderEx
     }
 
     public void writeBuilder(List<Token> tokens, boolean binary) {
+        if(compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            writeModernBuilder(tokens);return;
+        }
         expr.writePushNewObject(StringBuilder.class);
 
         for(Token el : tokens){
@@ -46,6 +49,30 @@ public class StringBuilderValueCompiler extends BaseExprCompiler<StringBuilderEx
         if (binary) {
             expr.writeSysStaticCall(BinaryMemory.class, "valueOf", Memory.class, String.class);
         }
+    }
+
+    private void writeModernBuilder(List<Token> tokens) {
+        expr.writePushNewObject(StringBuilder.class);
+        for(Token token:tokens) {
+            if(token instanceof ValueExprToken)expr.writePush((ValueExprToken)token,true,false);
+            else if(token instanceof ExprStmtToken)expr.writeExpression((ExprStmtToken)token,true,false,true);
+            else expr.unexpectedToken(token);
+            StackItem.Type type=expr.stackPeek().type;Class argument;
+            if(type==StackItem.Type.STRING_VALUE)argument=Object.class;
+            else if(type==StackItem.Type.STRING)argument=String.class;
+            else if(type==StackItem.Type.LONG)argument=long.class;
+            else if(type==StackItem.Type.DOUBLE)argument=double.class;
+            else if(type==StackItem.Type.BOOL)argument=boolean.class;
+            else if(type==StackItem.Type.CHAR)argument=char.class;
+            else if(type==StackItem.Type.FLOAT){expr.writePopDouble();argument=double.class;}
+            else if(type.isLikeInt()){expr.writePopLong();argument=long.class;}
+            else {expr.writePopBoxing();argument=Memory.class;}
+            expr.writePushEnv();expr.writePushTraceInfo(token);
+            expr.writeSysStaticCall(argument==Object.class ? php.runtime.PhpByteStringValues.class : php.runtime.PhpByteStringBuilders.class,
+                    "append",Object.class,Object.class,argument,php.runtime.env.Environment.class,php.runtime.env.TraceInfo.class);
+        }
+        expr.writeSysStaticCall(php.runtime.PhpByteStringBuilders.class,"finishObject",Object.class,Object.class);
+        expr.markStringValue();
     }
 
     @Override

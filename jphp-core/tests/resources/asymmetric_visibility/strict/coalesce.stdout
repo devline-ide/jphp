@@ -1,0 +1,6 @@
+existing:ok:2
+rhs
+null:Error:Cannot modify private(set) property H::$n from global scope
+rhs
+uninit:Error:Cannot modify private(set) property H::$u from global scope
+state:2:null

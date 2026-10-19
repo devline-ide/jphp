@@ -1,0 +1,7 @@
+Error|Undefined property P0::$x
+Error|Cannot access private property P1::$x
+Error|Must not write to virtual property C2::$x
+Error|Typed property C3::$x must not be accessed before initialization
+TypeError|Cannot assign string to property C4::$x of type int
+Error|Must not write to virtual property C5::$x
+numeric|6

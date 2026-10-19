@@ -1,0 +1,2 @@
+<?php 
+$phase=0;ob_start(function($s,$p)use(&$phase){$phase=$p;throw new Exception('chunk-failed');},3);try{echo 'abcd';}catch(Throwable $e){echo '|',$e::class,':',$e->getMessage(),':',$phase,'|';}echo 'tail';

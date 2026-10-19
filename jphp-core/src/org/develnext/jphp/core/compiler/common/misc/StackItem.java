@@ -9,7 +9,7 @@ import php.runtime.Memory;
 public class StackItem {
 
     public enum Type {
-        NULL, BOOL, BYTE, SHORT, INT, LONG, FLOAT, DOUBLE, STRING, CHAR, ARRAY, OBJECT, REFERENCE, CLASS, KEY_VALUE;
+        NULL, BOOL, BYTE, SHORT, INT, LONG, FLOAT, DOUBLE, STRING, STRING_VALUE, CHAR, ARRAY, OBJECT, REFERENCE, CLASS, KEY_VALUE;
 
         public Class toClass(){
             switch (this){
@@ -22,6 +22,7 @@ public class StackItem {
                 case INT: return Integer.TYPE;
                 case LONG: return Long.TYPE;
                 case STRING: return String.class;
+                case STRING_VALUE: return Object.class;
                 case ARRAY: return Memory.class; // !!! Memory, don't use ArrayMemory!!!
                 case OBJECT: return ObjectMemory.class;
                 case REFERENCE: return Memory.class;
@@ -73,7 +74,7 @@ public class StackItem {
         }
 
         public boolean isConstant(){
-            return this != REFERENCE && this != ARRAY && this != OBJECT;
+            return this != REFERENCE && this != ARRAY && this != OBJECT && this != STRING_VALUE;
         }
 
         public boolean isReference(){
@@ -107,6 +108,21 @@ public class StackItem {
     public final int size;
     public boolean immutable;
     public boolean capturedArrayAssignment;
+    public int runtimeArraySiteId = -1, runtimeArrayRootLocalId = -1;
+    public boolean runtimeArrayAppend, runtimeArrayValueProducer;
+    public org.objectweb.asm.tree.MethodInsnNode runtimeArrayFactory, runtimeArrayStep;
+    /** A compiler-tracked actual evaluation owner, independent of JVM representation/addressability. */
+    public int ownershipEvalId = -1;
+    public int runtimeEvaluationId = -1;
+    public int runtimeSourceLocalId = -1;
+    public org.objectweb.asm.tree.VarInsnNode runtimeSourceRead;
+    public int runtimeGlobalSiteId = -1, runtimeGlobalRootLocalId = -1;
+    public String runtimeGlobalKey;
+    public org.objectweb.asm.tree.MethodInsnNode runtimeGlobalFactory, runtimeGlobalIndex;
+    /** Closed lexical provenance carried only by actual generated producer/publication routes. */
+    public String runtimeClosureInternalName;
+    public int runtimeClosureProducerId = -1;
+    public int ownershipCallId = -1;
 
     public final Memory memory;
     public final ValueExprToken token;
@@ -124,7 +140,7 @@ public class StackItem {
     }
 
     public StackItem(Memory value){
-        this.type = Type.valueOf(value.type);
+        this.type = value instanceof php.runtime.memory.PhpByteStringMemory ? Type.REFERENCE : Type.valueOf(value.type);
         this.size = type.size();
         this.immutable = true;
         this.memory = value;

@@ -50,8 +50,10 @@ public class MethodEntity extends AbstractFunctionEntity {
 
     public MethodEntity(FunctionEntity entity){
         super(entity.getContext());
+        setPhpAttributes(entity.getPhpAttributes());
         setParameters(entity.getParameters());
         setReturnReference(entity.isReturnReference());
+        setGeneratorEntity(entity.getGeneratorEntity());
         setDeprecated(entity.isDeprecated());
         setAbstract(false);
         setAbstractable(false);
@@ -60,8 +62,11 @@ public class MethodEntity extends AbstractFunctionEntity {
 
     public MethodEntity(MethodEntity entity){
         super(entity.getContext());
+        setPhpAttributes(entity.getPhpAttributes());
+        setTrait(entity.getTrait());
         setParameters(entity.parameters);
         setReturnReference(entity.isReturnReference());
+        setGeneratorEntity(entity.getGeneratorEntity());
         setDeprecated(entity.isDeprecated());
         setAbstract(false);
         setAbstractable(false);
@@ -136,6 +141,7 @@ public class MethodEntity extends AbstractFunctionEntity {
         closureEntity1.setModule(clazz.getModule());
         closureEntity1.parameters = this.parameters;
         closureEntity1.setReturnReference(this.isReturnReference());
+        closureEntity1.setGeneratorEntity(getGeneratorEntity());
 
         MethodEntity m = new MethodEntity(this);
         m.setClazz(closureEntity1);
@@ -216,6 +222,7 @@ public class MethodEntity extends AbstractFunctionEntity {
 
     @Override
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
+        if (php.runtime.PhpOwnershipExecution.current(env) != null) return null;
         // Relative types require the current receiver/scope; never cache a checked value across calls.
         if (requiresReturnTypeCallScope()) return null;
         Memory result = getImmutableResultForTypeCheck(clazz.getModule());
@@ -236,6 +243,11 @@ public class MethodEntity extends AbstractFunctionEntity {
     }
 
     public Memory invokeDynamic(IObject _this, Environment env, TraceInfo trace, Memory... arguments) throws Throwable {
+        if (php.runtime.PhpOwnershipExecution.current(env) != null)
+            return php.runtime.PhpOwnershipExecution.invokeMethod(this,_this,env,trace,arguments);
+        if (php.runtime.PhpRuntimeOwnership.isInvoking(env,this))
+            return php.runtime.PhpRuntimeOwnership.invokeMethodBody(this,_this,env,trace,arguments);
+        env.runPendingFinalizers();
         try {
             if (isAbstract){
                 env.error(ErrorType.E_ERROR, "Cannot call abstract method %s", getSignatureString(false));
@@ -556,6 +568,7 @@ public class MethodEntity extends AbstractFunctionEntity {
 
     public MethodEntity duplicateForInject() {
         MethodEntity methodEntity = new MethodEntity(this.context);
+        methodEntity.setPhpAttributes(getPhpAttributes());
         methodEntity.setExtension(getExtension());
         methodEntity.setAbstract(isAbstract);
         methodEntity.setFinal(isFinal);
@@ -576,6 +589,7 @@ public class MethodEntity extends AbstractFunctionEntity {
 
         methodEntity.setReturnTypeNullable(isReturnTypeNullable());
         methodEntity.setReturnTypeChecker(getReturnTypeChecker());
+        methodEntity.setGeneratorEntity(getGeneratorEntity());
 
         if (trace == null || trace == TraceInfo.UNKNOWN)
             methodEntity.setTrace(getClazz().getTrace());

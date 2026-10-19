@@ -7,3 +7,19 @@ dependencies {
         transitive = false
     }
 }
+
+// A windowless check still runs on an owned alternate desktop: JavaFX initializes native state.
+configurations { gameCheckJavafx }
+dependencies {
+    for (module in ['base', 'graphics']) {
+        gameCheckJavafx("org.openjfx:javafx-${module}:25.0.4:win") { transitive = false }
+    }
+    testImplementation files(configurations.gameCheckJavafx)
+}
+tasks.register('gameSceneTimingCheck', JavaExec) {
+    group = 'verification'
+    dependsOn testClasses
+    classpath = sourceSets.test.runtimeClasspath.filter { !it.name.startsWith('javafx-') }
+    doFirst { jvmArgs '--module-path', configurations.gameCheckJavafx.asPath, '--add-modules', 'javafx.graphics', '--enable-native-access=javafx.graphics' }
+    mainClass = 'org.develnext.jphp.ext.game.support.GameSceneTimingCheck'
+}

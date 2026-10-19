@@ -20,7 +20,8 @@ import php.runtime.reflection.ClassEntity;
 import java.lang.ref.WeakReference;
 
 abstract public class BaseBaseException extends RuntimeException implements IObject, JPHPException {
-    protected final ArrayMemory props;
+    protected ArrayMemory props;
+    private php.runtime.PhpOwnershipThrowables.Certificate ownershipThrowable;
     protected ClassEntity clazz;
     protected Environment env;
     protected TraceInfo trace;
@@ -47,6 +48,20 @@ abstract public class BaseBaseException extends RuntimeException implements IObj
         this.env = env;
     }
 
+    public final php.runtime.PhpOwnershipThrowables.Certificate getOwnershipThrowable() {return ownershipThrowable;}
+    /** Only the exact helper's private certificate can publish this fresh native holder. */
+    public final void attachOwnershipThrowable(php.runtime.PhpOwnershipThrowables.Certificate certificate,
+            ArrayMemory properties,CallStackItem[] metadata,TraceInfo trace,String message) {
+        if(ownershipThrowable!=null || props.size()!=0 || callStack!=null)throw new IllegalStateException("Native throwable is not an empty shell");
+        certificate.validateAttachment(this,properties);
+        props=properties;callStack=metadata;this.trace=trace;nativeMessage=message;init=true;ownershipThrowable=certificate;
+    }
+    public final void clearOwnershipThrowable(php.runtime.PhpOwnershipThrowables.Certificate certificate) {
+        if(ownershipThrowable!=certificate || certificate.node().state()!=php.runtime.PhpOwnership.State.DISPOSED)throw new IllegalArgumentException("Native throwable cleanup is not its final disposal");
+        callStack=null;
+    }
+    @Override public String getMessage() {return ownershipThrowable==null?super.getMessage():nativeMessage;}
+
     public void setTraceInfo(Environment env, TraceInfo trace) {
         this.callStack = env.getCallStackSnapshot();
         this.trace = trace;
@@ -60,6 +75,7 @@ abstract public class BaseBaseException extends RuntimeException implements IObj
 
     @Override
     public ArrayMemory getProperties() {
+        if(ownershipThrowable!=null){ownershipThrowable.validateProperties(this,props);return props;}
         if (!init){
             init = true;
             if (trace != null) {
@@ -82,7 +98,9 @@ abstract public class BaseBaseException extends RuntimeException implements IObj
 
                 ArrayMemory backTrace = new ArrayMemory();
 
-                for(CallStackItem el : callStack) {
+                boolean modern=env.getModuleManager().getPhpLanguageProfile(trace)==php.runtime.common.PhpLanguageProfile.PHP_8_5;
+                for(int i=0;i<callStack.length;i++) {
+                    CallStackItem el=callStack[modern ? callStack.length-1-i : i];
                     backTrace.add(el.toArray());
                 }
 
@@ -109,6 +127,12 @@ abstract public class BaseBaseException extends RuntimeException implements IObj
     }
 
     public CallStackItem[] getCallStack() {
+        if(ownershipThrowable!=null){
+            if(callStack==null)return new CallStackItem[0];
+            CallStackItem[] copy=new CallStackItem[callStack.length];
+            for(int i=0;i<copy.length;i++){copy[i]=new CallStackItem(callStack[i]);copy[i].args=callStack[i].args==null?null:callStack[i].args.clone();}
+            return copy;
+        }
         Environment env = getEnvironment();
 
         if (env != null) {
@@ -136,34 +160,45 @@ abstract public class BaseBaseException extends RuntimeException implements IObj
         return clazz.refOfProperty(getProperties(), "message").toValue();
     }
 
+    private Memory ownedProperty(String name) {
+        var property=clazz.findProperty(name);
+        return getProperties().valueOfIndex(property==null?name:property.getSpecificName()).toValue();
+    }
+
     @Signature
     public Memory getCode(Environment env, Memory... args){
+        if(ownershipThrowable!=null)return ownedProperty("code");
         Memory code = clazz.refOfProperty(getProperties(), "code").toValue();
         return code.isNull() ? Memory.CONST_INT_0 : code;
     }
 
     @Signature
     public Memory getLine(Environment env, Memory... args){
+        if(ownershipThrowable!=null)return ownedProperty("line");
         return clazz.refOfProperty(getProperties(), "line").toValue();
     }
 
     @Signature
     public Memory getPosition(Environment env, Memory... args){
+        if(ownershipThrowable!=null)return ownedProperty("position");
         return clazz.refOfProperty(getProperties(), "position").toValue();
     }
 
     @Signature
     public Memory getFile(Environment env, Memory... args){
+        if(ownershipThrowable!=null)return ownedProperty("file");
         return clazz.refOfProperty(getProperties(), "file").toValue();
     }
 
     @Signature
     public Memory getTrace(Environment env, Memory... args){
+        if(ownershipThrowable!=null)return ownedProperty("trace");
         return clazz.refOfProperty(getProperties(), "trace").toValue();
     }
 
     @Signature
     public Memory getPrevious(Environment env, Memory... args) {
+        if(ownershipThrowable!=null)return ownedProperty("previous");
         return clazz.refOfProperty(getProperties(), "previous").toValue();
     }
 
@@ -229,6 +264,7 @@ abstract public class BaseBaseException extends RuntimeException implements IObj
 
     @Override
     public String toString() {
+        if(ownershipThrowable!=null)return getClass().getSimpleName()+": "+nativeMessage;
         if (clazz.methodMagicToString != null) {
             Environment environment = getEnvironment();
 

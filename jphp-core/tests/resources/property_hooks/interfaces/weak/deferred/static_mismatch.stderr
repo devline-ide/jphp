@@ -1,0 +1,4 @@
+Fatal error: Cannot redeclare non static I::$x as static C::$x in G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\weak\deferred\static_mismatch.php on line 1
+Stack trace:
+#0 G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\weak\deferred\static_mismatch.php(1): enter()
+#1 {main}

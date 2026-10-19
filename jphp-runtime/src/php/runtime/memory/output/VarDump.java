@@ -143,12 +143,16 @@ public class VarDump extends Printer {
     @Override
     protected void printObject(ObjectMemory value, int level, Set<Integer> used) {
         ClassEntity classEntity = value.getReflection();
-
+        if(value.value instanceof php.runtime.lang.BaseEnum actual) {
+            printer.write("enum("+classEntity.getName()+"::"+actual.enumCaseName()+")\n");return;
+        }
         if (used.contains(value.getPointer())){
             printer.write("*RECURSION*\n");
         } else {
             ArrayMemory arr;
-            if (classEntity.methodMagicDebugInfo != null) {
+            if (value.value instanceof php.runtime.lang.PhpWeakReference weak) {
+                arr = weak.weakDebugInfo();
+            } else if (classEntity.methodMagicDebugInfo != null) {
                 try {
                     Memory tmp = env.invokeMethod(value.value, classEntity.methodMagicDebugInfo.getName());
                     if (tmp.isArray()) {

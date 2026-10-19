@@ -1,0 +1,1 @@
+a:6:{i:0;i:4;i:1;i:4;i:2;a:2:{i:0;s:9:"TypeError";i:1;s:67:"Cannot assign array to reference held by property R::$x of type int";}i:3;i:4;i:4;i:4;i:5;a:2:{i:0;s:5:"Error";i:1;s:37:"Cannot modify readonly property R::$x";}}

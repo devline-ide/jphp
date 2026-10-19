@@ -15,6 +15,10 @@ import java.util.*;
 public final class PhpTypeDeclaration extends TypeChecker {
     public static final Set<String> BUILTINS = Set.of("int", "float", "string", "bool", "array", "object",
             "iterable", "mixed", "null", "true", "false", "callable", "void", "never");
+    private static final TypeChecker INT_CHECKER = TypeChecker.of(HintType.INT);
+    private static final TypeChecker FLOAT_CHECKER = TypeChecker.of(HintType.DOUBLE);
+    private static final TypeChecker STRING_CHECKER = TypeChecker.of(HintType.STRING);
+    private static final TypeChecker BOOL_CHECKER = TypeChecker.of(HintType.BOOLEAN);
     private final List<List<String>> alternatives;
     private final String signature;
 
@@ -45,6 +49,15 @@ public final class PhpTypeDeclaration extends TypeChecker {
         return BUILTINS.contains(name) || name.equals("static") ? index + 1 : 0;
     }
     public PhpTypeDeclaration bind(ClassEntity owner) {
+        boolean relative = false;
+        for (List<String> arm : alternatives) {
+            for (String name : arm) if (name.equals("self") || name.equals("parent")) {
+                relative = true;
+                break;
+            }
+            if (relative) break;
+        }
+        if (!relative) return this;
         return new PhpTypeDeclaration(alternatives.stream().map(a -> a.stream().map(n -> relative(n, owner)).toList()).toList());
     }
     public PhpTypeDeclaration forTraitComposition(ClassEntity owner) {
@@ -137,6 +150,15 @@ public final class PhpTypeDeclaration extends TypeChecker {
         }
         return false;
     }
+    private static TypeChecker scalarChecker(HintType type) {
+        return switch (type) {
+            case INT -> INT_CHECKER;
+            case DOUBLE -> FLOAT_CHECKER;
+            case STRING -> STRING_CHECKER;
+            case BOOLEAN -> BOOL_CHECKER;
+            default -> TypeChecker.of(type);
+        };
+    }
     private static boolean checkAtom(Environment env, Memory value, String name, String ownerName) {
         return switch (name) {
             case "null" -> value.isNull();
@@ -147,7 +169,7 @@ public final class PhpTypeDeclaration extends TypeChecker {
             case "never" -> false;
             default -> {
                 HintType builtin = HintType.of(name);
-                yield builtin != null && (BUILTINS.contains(name) || name.equals("self") || name.equals("parent")) ? TypeChecker.of(builtin).check(env, value, false, ownerName)
+                yield builtin != null && (BUILTINS.contains(name) || name.equals("self") || name.equals("parent")) ? scalarChecker(builtin).check(env, value, false, ownerName)
                         : value.isObject() && PhpClassNames.matches(value.toValue(ObjectMemory.class).getReflection(), name, env);
             }
         };
@@ -162,7 +184,7 @@ public final class PhpTypeDeclaration extends TypeChecker {
         }
         // PHP's scalar preference is independent of declaration order; exact members win above.
         for (String name : List.of("int", "float", "string", "bool")) if (has(name)) {
-            Memory coerced = TypeChecker.of(HintType.of(name)).apply(env, value, false, false);
+            Memory coerced = scalarChecker(HintType.of(name)).apply(env, value, false, false);
             if (coerced != null) return coerced;
         }
         return null;
@@ -180,6 +202,11 @@ public final class PhpTypeDeclaration extends TypeChecker {
     }
     public boolean isSubtypeOf(PhpTypeDeclaration parent, ClassEntity owner, ClassEntity parentOwner,
                                ModuleEntity module, Environment env) {
+        return isSubtypeOf(parent, owner, parentOwner, module, env, null);
+    }
+    public boolean isSubtypeOf(PhpTypeDeclaration parent, ClassEntity owner, ClassEntity parentOwner,
+                               ModuleEntity module, Environment env,
+                               java.util.function.Function<String, ClassEntity> nativeResolver) {
         if (parent.has("mixed")) return true;
         for (List<String> childArm : semanticAlternatives()) {
             boolean included = false;
@@ -187,7 +214,7 @@ public final class PhpTypeDeclaration extends TypeChecker {
                 boolean all = true;
                 for (String required : parentArm) {
                     boolean entailed = false;
-                    for (String actual : childArm) if (atomSubtype(actual, required, owner, parentOwner, module, env)) {entailed = true; break;}
+                    for (String actual : childArm) if (atomSubtype(actual, required, owner, parentOwner, module, env, nativeResolver)) {entailed = true; break;}
                     if (!entailed) {all = false; break;}
                 }
                 if (all) {included = true; break;}
@@ -201,7 +228,8 @@ public final class PhpTypeDeclaration extends TypeChecker {
                 : name.equals("parent") && owner.getParent() != null ? owner.getParent().getName() : name;
     }
     private static boolean atomSubtype(String child, String parent, ClassEntity owner, ClassEntity parentOwner,
-                                       ModuleEntity module, Environment env) {
+                                       ModuleEntity module, Environment env,
+                                       java.util.function.Function<String, ClassEntity> nativeResolver) {
         if (child.equals("never") || parent.equals("mixed")) return true;
         child = relative(child, owner); parent = relative(parent, parentOwner);
         if (PhpClassNames.canonicalKey(child).equals(PhpClassNames.canonicalKey(parent))) return true;
@@ -213,9 +241,9 @@ public final class PhpTypeDeclaration extends TypeChecker {
         if (parent.equals("object")) return named;
         if (parent.equals("iterable") && child.equals("array")) return true;
         if (!named) return false;
-        ClassEntity clazz = PhpClassNames.canonicalKey(owner.getName()).equals(PhpClassNames.canonicalKey(child)) ? owner : module.findClass(child);
+        ClassEntity clazz = PhpClassNames.canonicalKey(owner.getName()).equals(PhpClassNames.canonicalKey(child)) ? owner : nativeResolver == null ? module.findClass(child) : nativeResolver.apply(child);
         if (clazz == null && owner.getModule() != null) clazz = owner.getModule().findClass(child);
-        if (clazz == null) clazz = env.fetchClass(child, false, php.runtime.common.PhpLanguageProfile.PHP_8_5);
+        if (clazz == null && nativeResolver == null) clazz = env.fetchClass(child, false, php.runtime.common.PhpLanguageProfile.PHP_8_5);
         return clazz != null && (parent.equals("iterable") ? clazz.isInstanceOfLower("traversable")
                 : PhpClassNames.matches(clazz, parent, env));
     }

@@ -1,0 +1,3 @@
+Fatal error: Declaration of C::$x::set(B $value): void must be compatible with I::$x::set(A $value): void in G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\weak\top\both_wrong.php on line 1
+Stack trace:
+#0 {main}

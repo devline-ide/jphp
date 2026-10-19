@@ -1,0 +1,4 @@
+value:ok:2
+ref:Error:Cannot indirectly modify private(set) property H::$x from global scope
+callee
+state:9

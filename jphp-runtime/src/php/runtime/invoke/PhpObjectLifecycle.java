@@ -14,32 +14,70 @@ public final class PhpObjectLifecycle {
     public enum Reason { MANUAL_UNSET, ENVIRONMENT_FINALIZE, OWNERSHIP_RELEASE }
     private PhpObjectLifecycle() {}
 
+    public static void beginConstruction(IObject object) {
+        if (object instanceof php.runtime.lang.BaseObject) ((php.runtime.lang.BaseObject) object).beginPhpConstruction();
+    }
+    public static void completeConstruction(IObject object) {
+        if (object instanceof php.runtime.lang.BaseObject) ((php.runtime.lang.BaseObject) object).completePhpConstruction();
+    }
+    public static void failConstruction(IObject object, Throwable failure) {
+        try { object.doFinalize(); }
+        catch (Throwable cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+    }
+
+    /** Generated JVM entries only publish a pending receiver; PHP runs later on a runtime caller. */
+    public static void enqueueJvmFinalizer(IObject object) {
+        if (object.isFinalized()) return;
+        if (object instanceof php.runtime.lang.BaseObject && ((php.runtime.lang.BaseObject) object).isPhpConstructionPending()) return;
+        Environment env = object.getEnvironment();
+        if (env != null) env.enqueueJvmFinalizer(object);
+    }
+
     /**
      * The caller supplies the releasing environment. The finalized bit is set before any
      * callback, preserving resurrection/reentry behavior. This does not release property guards.
      * OWNERSHIP_RELEASE preserves the raw failure for the domain's explicit composition policy.
      */
     public static boolean destruct(IObject object, Environment releasingEnvironment, Reason reason) throws Throwable {
+        return destruct(object,releasingEnvironment,reason,null);
+    }
+    /** A certified lifecycle receiver is borrowed from FINALIZING, never staged as an owner. */
+    public static boolean destruct(php.runtime.PhpOwnershipObjects.ExecutionEntry entry,Environment releasingEnvironment) throws Throwable {
+        Objects.requireNonNull(entry);entry.validateEnvironment(releasingEnvironment);
+        IObject object=entry.receiver();
+        if (entry.method()!=object.getReflection().methodDestruct)
+            throw new IllegalArgumentException("Lifecycle entry does not identify the actual destructor");
+        return destruct(object,releasingEnvironment,Reason.OWNERSHIP_RELEASE,entry);
+    }
+    private static boolean destruct(IObject object,Environment releasingEnvironment,Reason reason,
+            php.runtime.PhpOwnershipObjects.ExecutionEntry entry) throws Throwable {
         Objects.requireNonNull(reason);
         ClassEntity entity = object.getReflection();
-        if (entity.methodDestruct == null || object.isFinalized()) return false;
+        if (entity.methodDestruct == null || object.isFinalized()
+                || object instanceof php.runtime.lang.BaseObject && ((php.runtime.lang.BaseObject) object).isPhpConstructionPending()) return false;
         object.doFinalize();
         releasingEnvironment.pushCall(object, entity.methodDestruct.getName());
         try {
             if (reason == Reason.MANUAL_UNSET) {
-                try {invoke(object, releasingEnvironment, entity, reason);}
+                try {invoke(object, releasingEnvironment, entity, reason,entry);}
                 catch (InvocationTargetException failure) {releasingEnvironment.__throwException(failure);}
                 catch (RuntimeException failure) {throw failure;}
                 catch (Throwable failure) {throw new CriticalException(failure);}
             } else {
-                invoke(object, releasingEnvironment, entity, reason);
+                invoke(object, releasingEnvironment, entity, reason,entry);
             }
         } finally {releasingEnvironment.popCall();}
         return true;
     }
-    private static void invoke(IObject object, Environment environment, ClassEntity entity, Reason reason) throws Throwable {
+    private static void invoke(IObject object, Environment environment, ClassEntity entity, Reason reason,
+            php.runtime.PhpOwnershipObjects.ExecutionEntry entry) throws Throwable {
+        if (entry!=null) {entry.dispatch(environment,environment.trace());return;}
         if (reason != Reason.ENVIRONMENT_FINALIZE && object instanceof IManualDestructable)
             ((IManualDestructable)object).onManualDestruct(environment);
+        if (reason == Reason.OWNERSHIP_RELEASE) {
+            php.runtime.PhpOwnershipExecution.Session session=php.runtime.PhpOwnershipExecution.current(environment);
+            if (session != null) {session.invokeDestructor(entity.methodDestruct,object,environment.trace());return;}
+        }
         entity.methodDestruct.invokeDynamic(object, environment,
                 reason == Reason.ENVIRONMENT_FINALIZE ? TraceInfo.UNKNOWN : environment.trace());
     }

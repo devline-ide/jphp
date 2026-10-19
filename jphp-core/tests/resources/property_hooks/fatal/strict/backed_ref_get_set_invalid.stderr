@@ -1,0 +1,3 @@
+Fatal error: Get hook of backed property H::x with set hook may not return by reference in G:\DevLine-QA\jphp-property-hooks-20261013\native-corpus1\php\strict\backed_ref_get_set_invalid.php on line 5
+Stack trace:
+#0 {main}

@@ -74,10 +74,28 @@ public class PhpNullsafeOperatorTest {
             if (!expected.equals(actual)) mismatches.add(fields[0] + " strict=" + fields[1] + " debug=" + debug
                     + " dump=" + dumped + " expected=" + expected + " actual=" + actual);
         }
-        assertEquals(276, checks);
+        assertEquals(424, checks);
         assertTrue(mismatches.size() + " mismatches: " + String.join("\n", mismatches.subList(0, Math.min(20, mismatches.size()))), mismatches.isEmpty());
     }
     @Test public void nativeNullsafeDebugSourceAndDump() throws Throwable { nativeOracle(true); }
     @Test public void nativeNullsafeOptimizedSourceAndDump() throws Throwable { nativeOracle(false); }
 
+    @Test public void parserNeedsNoEnvironmentAndLegacyRejectsNullsafe() throws Throwable {
+        var context=new Context("$o=null;$v=$o?->p?->m();");context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
+        var analyzer=new org.develnext.jphp.core.syntax.SyntaxAnalyzer(null,new org.develnext.jphp.core.tokenizer.Tokenizer(context));
+        assertEquals(2,analyzer.getTree().size());assertNull(analyzer.getEnvironment());
+        var expression=(org.develnext.jphp.core.tokenizer.token.stmt.ExprStmtToken)analyzer.getTree().get(1);
+        assertNull(expression.getAsmExpr());
+        assertEquals(2,expression.getTokens().stream().filter(token -> {
+            var access=org.develnext.jphp.core.compiler.common.NullsafeChain.access(token);
+            return access!=null && access.isNullsafe();
+        }).count());
+        var env=environment(false);
+        try {
+            var legacy=new Context("$o=null;$v=$o?->p;");legacy.setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);
+            try {new JvmCompiler(env,legacy).compile(false);fail("Legacy accepted nullsafe");}
+            catch (php.runtime.exceptions.support.ErrorException expected) {assertNotNull(expected.getMessage());}
+            catch (BaseBaseException expected) {assertFalse(expected.getMessage(env).toString().isEmpty());}
+        } finally {env.doFinal();}
+    }
 }

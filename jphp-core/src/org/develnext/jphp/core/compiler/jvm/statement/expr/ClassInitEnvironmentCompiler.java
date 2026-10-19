@@ -13,6 +13,13 @@ public class ClassInitEnvironmentCompiler extends BaseStatementCompiler<JvmCompi
     @Override
     public void write(JvmCompiler.ClassInitEnvironment token) {
         expr.writePushEnv();
+        if (token.getEntity().isUnresolvedDeclaration()) {
+            expr.writePushConstString(compiler.getModule().getInternalName());
+            expr.writePushConstString(token.getEntity().getName());
+            expr.writeSysDynamicCall(Environment.class,"__declareClass",ClassEntity.class,String.class,String.class);
+            expr.writePopAll(1);
+            return;
+        }
         expr.writePushConstString(token.getEntity().getName());
         expr.writePushConstString(token.getEntity().getLowerName());
         expr.writePushScalarBoolean(false);

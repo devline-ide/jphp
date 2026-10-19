@@ -1,0 +1,1 @@
+<?php echo ord('A'),'|',ord(chr(66)),'|',chr(67);

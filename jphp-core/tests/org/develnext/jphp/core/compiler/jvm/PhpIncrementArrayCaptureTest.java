@@ -55,7 +55,7 @@ public class PhpIncrementArrayCaptureTest extends JvmCompilerCase {
         return module;
     }
 
-    /** Retained value-copy currently exposes a wider ownership gap; this regression remains executable. */
+    /** Retained VALUE copies reject continuation; released copies and reference aliases remain writable. */
     @Test public void testNativeArrayWarningOwnerControls() throws Throwable {
         String[] names = {"readonly_peek", "value_copy_survives", "value_copy_unset", "reference_alias",
                 "arrayaccess_byref_once", "arrayaccess_byvalue_once"};

@@ -18,7 +18,36 @@ import java.util.Locale;
 public final class PhpMethodResolver {
     private PhpMethodResolver() {}
 
+    /** Checked resolution rejection, kept distinct from user autoloader exceptions. */
+    public static final class InvalidCallback extends RuntimeException {
+        private InvalidCallback(String reason) { super(reason); }
+        private InvalidCallback(String reason, php.runtime.lang.exception.BaseBaseException pending) { super(reason,pending); }
+        /** Preserve the PHP pending-exception identity through API-specific validation replacement. */
+        public php.runtime.lang.exception.BaseBaseException typeError(Environment env,TraceInfo trace,String message) throws Throwable {
+            try {
+                env.exception(trace,php.runtime.lang.exception.BaseTypeError.class,"%s",message);
+            } catch (php.runtime.lang.exception.BaseTypeError replacement) {
+                if (!(getCause() instanceof php.runtime.lang.exception.BaseBaseException pending)) return replacement;
+                var entry=php.runtime.PhpOwnershipExecution.currentEntry(env);
+                return entry==null ? InvokeHelper.chainFinallyException(replacement,pending) : entry.chainThrown(replacement,pending);
+            }
+            throw new IllegalStateException("TypeError allocation did not throw");
+        }
+    }
+    static void rejectCallback(String reason) { throw new InvalidCallback(reason); }
+    static void rejectCallback(String reason,php.runtime.lang.exception.BaseBaseException pending) { throw new InvalidCallback(reason,pending); }
+    private static void reject(Environment env,TraceInfo trace,boolean callback,String reason,String message,Object... args) {
+        if (callback) rejectCallback(reason);
+        env.exception(trace,BaseError.class,message,args);
+    }
+
     public static ClassEntity resolveClass(Memory value, Environment env, TraceInfo trace) {
+        return resolveClass(value,env,trace,false);
+    }
+    static ClassEntity resolveCallbackClass(Memory value, Environment env, TraceInfo trace) {
+        return resolveClass(value,env,trace,true);
+    }
+    private static ClassEntity resolveClass(Memory value, Environment env, TraceInfo trace,boolean callback) {
         value = value.toValue();
         if (value.isObject()) return value.toValue(ObjectMemory.class).getReflection();
         if (!value.isString()) {
@@ -28,7 +57,7 @@ public final class PhpMethodResolver {
         String name = value.toString();
         String lookup = name.startsWith("\\") ? name.substring(1) : name;
         ClassEntity clazz = env.fetchClass(lookup, lookup.toLowerCase(Locale.ROOT), true);
-        if (clazz == null) env.exception(trace, BaseError.class, "Class \"%s\" not found", name);
+        if (clazz == null) reject(env,trace,callback,"class \""+name+"\" not found","Class \"%s\" not found",name);
         return clazz;
     }
 
@@ -70,8 +99,12 @@ public final class PhpMethodResolver {
     }
 
     private static void concrete(MethodEntity method, Environment env, TraceInfo trace) {
-        if (method.isAbstract()) env.exception(trace, BaseError.class,
-                "Cannot call abstract method %s::%s()", method.getClazzName(), method.getName());
+        concrete(method,env,trace,false);
+    }
+    private static void concrete(MethodEntity method, Environment env, TraceInfo trace,boolean callback) {
+        if (method.isAbstract()) reject(env,trace,callback,
+                "cannot call abstract method "+method.getClazzName()+"::"+method.getName()+"()",
+                "Cannot call abstract method %s::%s()",method.getClazzName(),method.getName());
     }
 
     static Invoker instance(Memory receiver, Memory methodName, Environment env, TraceInfo trace) {
@@ -79,6 +112,12 @@ public final class PhpMethodResolver {
     }
 
     static Invoker instance(Memory receiver, Memory methodName, Environment env, TraceInfo trace, ClassEntity scope) {
+        return instance(receiver,methodName,env,trace,scope,false);
+    }
+    static Invoker internalInstance(Memory receiver, Memory methodName, Environment env, TraceInfo trace, ClassEntity scope) {
+        return instance(receiver,methodName,env,trace,scope,true);
+    }
+    private static Invoker instance(Memory receiver, Memory methodName, Environment env, TraceInfo trace, ClassEntity scope,boolean callback) {
         String name = methodName(methodName, env, trace);
         receiver = receiver.toValue();
         if (!receiver.isObject()) {
@@ -99,16 +138,17 @@ public final class PhpMethodResolver {
             return new MagicDynamicMethodInvoker(env, trace, object, clazz.methodMagicCall, name);
         }
         if (method == null) {
-            env.exception(trace, BaseError.class, "Call to undefined method %s::%s()", clazz.getName(), name);
+            reject(env,trace,callback,"class "+clazz.getName()+" does not have a method \""+name+"\"",
+                    "Call to undefined method %s::%s()",clazz.getName(),name);
             return null;
         }
-        checkAccess(method, name, env, trace, scope);
-        concrete(method, env, trace);
+        checkAccess(method,name,env,trace,scope,callback,clazz.getName());
+        concrete(method,env,trace,callback);
         return method.isStatic() ? new StaticMethodInvoker(env, trace, clazz.getName(), method)
                 : new DynamicMethodInvoker(env, trace, object, method);
     }
 
-    private static IObject lateObject(Environment env) {
+    static IObject lateObject(Environment env) {
         IObject object = env.getLateObject();
         if (object instanceof Closure && ((Closure) object).hasPhp8Binding()) {
             Memory self = ((Closure) object).getSelf();
@@ -135,8 +175,28 @@ public final class PhpMethodResolver {
         return stat(clazz, name, env, trace, null, 0, false, false, scope, object);
     }
 
+    static Invoker internalStatic(ClassEntity clazz,Memory name,Environment env,TraceInfo trace,ClassEntity scope,IObject object) {
+        return internalStatic(clazz,name,env,trace,scope,object,false);
+    }
+    static Invoker internalStatic(ClassEntity clazz,Memory name,Environment env,TraceInfo trace,ClassEntity scope,IObject object,boolean relative) {
+        return stat(clazz,name,env,trace,null,0,false,false,scope,object,true,false,relative,false);
+    }
     private static Invoker stat(ClassEntity clazz, Memory methodName, Environment env, TraceInfo trace,
                                 MethodCallCache cache, int cacheIndex, boolean forwarding, boolean callable, ClassEntity scope, IObject object) {
+        return stat(clazz,methodName,env,trace,cache,cacheIndex,forwarding,callable,scope,object,false);
+    }
+    static Invoker internalArrayStatic(ClassEntity clazz,Memory name,Environment env,TraceInfo trace,ClassEntity scope,IObject object,boolean relative,boolean closureCapture) {
+        return stat(clazz,name,env,trace,null,0,false,false,scope,object,true,true,relative,closureCapture);
+    }
+    static Invoker internalCaptureStatic(ClassEntity clazz,Memory name,Environment env,TraceInfo trace,ClassEntity scope,IObject object,boolean relative) {
+        return stat(clazz,name,env,trace,null,0,false,false,scope,object,true,false,relative,true);
+    }
+    private static Invoker stat(ClassEntity clazz, Memory methodName, Environment env, TraceInfo trace,
+                                MethodCallCache cache, int cacheIndex, boolean forwarding, boolean callable, ClassEntity scope, IObject object,boolean callback) {
+        return stat(clazz,methodName,env,trace,cache,cacheIndex,forwarding,callable,scope,object,callback,false,false,false);
+    }
+    private static Invoker stat(ClassEntity clazz, Memory methodName, Environment env, TraceInfo trace,
+                                MethodCallCache cache, int cacheIndex, boolean forwarding, boolean callable, ClassEntity scope, IObject object,boolean callback,boolean arrayCallback,boolean relative,boolean closureCapture) {
         String name = methodName(methodName, env, trace);
         String lowerName = name.toLowerCase(Locale.ROOT);
         String calledClass = forwarding ? env.getLateStatic() : clazz.getName();
@@ -144,26 +204,39 @@ public final class PhpMethodResolver {
         if (method != null) return new StaticMethodInvoker(env, trace, calledClass, method);
         method = clazz.findMethod(lowerName);
         boolean compatibleObject = object != null && object.getReflection().isInstanceOf(clazz);
+        // Native array lookup binds the caller object only when lexical scope derives from the named class.
+        boolean callbackObject = compatibleObject && (relative || scope != null && scope.isInstanceOf(clazz));
+        boolean objectArray = arrayCallback && callbackObject;
+        // Relative array forms may find a real method on the compatible caller object.
+        if (method == null && objectArray && relative) method=object.getReflection().findMethod(lowerName);
         if (method == null || access(method, env, scope) != 0) {
-            if (compatibleObject && object.getReflection().methodMagicCall != null) {
-                if (callable) env.exception(trace, BaseError.class,
-                        "Non-static method %s::%s() cannot be called statically",
-                        object.getReflection().methodMagicCall.getClazzName(), name);
+            if (compatibleObject && (!closureCapture || objectArray) && object.getReflection().methodMagicCall != null) {
+                if (callable) reject(env,trace,callback,
+                        "non-static method "+object.getReflection().methodMagicCall.getClazzName()+"::"+name+"() cannot be called statically",
+                        "Non-static method %s::%s() cannot be called statically",object.getReflection().methodMagicCall.getClazzName(),name);
                 return new MagicDynamicMethodInvoker(env, trace, object, object.getReflection().methodMagicCall, name);
             }
-            if (clazz.methodMagicCallStatic != null) {
+            if (!objectArray && clazz.methodMagicCallStatic != null) {
                 return new MagicStaticMethodInvoker(env, trace, calledClass, clazz.methodMagicCallStatic, name);
             }
         }
         if (method == null) {
-            env.exception(trace, BaseError.class, "Call to undefined method %s::%s()", clazz.getName(), name);
+            reject(env,trace,callback,"class "+clazz.getName()+" does not have a method \""+name+"\"",
+                    "Call to undefined method %s::%s()",clazz.getName(),name);
             return null;
         }
-        checkAccess(method, name, env, trace, scope);
-        concrete(method, env, trace);
+        // A class callback without a bound object rejects a concrete non-static target before visibility.
+        if (callback && !method.isStatic() && !callbackObject && !method.isAbstract()) {
+            reject(env,trace,true,"non-static method "+clazz.getName()+"::"+method.getName()+"() cannot be called statically",
+                    "Non-static method %s::%s() cannot be called statically",clazz.getName(),method.getName());
+            return null;
+        }
+        checkAccess(method,name,env,trace,scope,callback,clazz.getName());
+        concrete(method,env,trace,callback);
         if (!method.isStatic()) {
-            if (compatibleObject && !callable) return new DynamicMethodInvoker(env, trace, object, method);
-            env.exception(trace, BaseError.class, "Non-static method %s::%s() cannot be called statically", method.getClazzName(), method.getName());
+            if ((callback ? callbackObject : compatibleObject) && !callable) return new DynamicMethodInvoker(env, trace, object, method);
+            reject(env,trace,callback,"non-static method "+(callback?clazz.getName():method.getClazzName())+"::"+method.getName()+"() cannot be called statically",
+                    "Non-static method %s::%s() cannot be called statically",method.getClazzName(),method.getName());
             return null;
         }
         if (cache != null) cache.put(env, cacheIndex, method, clazz, lowerName, scope);
@@ -177,9 +250,11 @@ public final class PhpMethodResolver {
         return method.canAccess(env, scope);
     }
 
-    private static void checkAccess(MethodEntity method, String name, Environment env, TraceInfo trace, ClassEntity scope) {
+    private static void checkAccess(MethodEntity method, String name, Environment env, TraceInfo trace, ClassEntity scope,boolean callback,String callbackClass) {
         int denied = access(method, env, scope);
-        if (denied != 0) env.exception(trace, BaseError.class, "Call to %s method %s::%s() from %s",
+        if (denied != 0) reject(env,trace,callback,
+                "cannot access "+(denied==1?"protected":"private")+" method "+callbackClass+"::"+method.getName()+"()",
+                "Call to %s method %s::%s() from %s",
                 denied == 1 ? "protected" : "private", method.getClazzName(), name,
                 scope == null ? "global scope" : "scope " + scope.getName());
     }

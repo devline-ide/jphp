@@ -95,7 +95,7 @@ public final class PhpArithmetic {
             return value;
         }
         if (value.isString()) {
-            String text = value instanceof php.runtime.memory.BinaryMemory
+            String text = value instanceof php.runtime.memory.BinaryMemory || value instanceof php.runtime.memory.PhpByteStringMemory
                     ? value.toBinaryString() : value.toString();
             Memory numeric = PhpNumericString.parseStrict(text);
             if (numeric != null) return increment(numeric, decrement, env, trace);
@@ -117,6 +117,7 @@ public final class PhpArithmetic {
                 else break;
             }
             String result = (carry ? String.valueOf(prepend) : "") + new String(chars);
+            if (value instanceof php.runtime.memory.PhpByteStringMemory) return php.runtime.memory.PhpByteStringMemory.fromBinaryString(result);
             if (value instanceof php.runtime.memory.BinaryMemory) {
                 byte[] bytes = new byte[result.length()];
                 for (int i = 0; i < bytes.length; i++) bytes[i] = (byte) result.charAt(i);
@@ -196,6 +197,92 @@ public final class PhpArithmetic {
         return target.assign(result).toImmutable();
     }
 
+    /** The generated addressed opcode owns its actual result, never a virtual lvalue wrapper. */
+    public static Memory arrayIncrement(PhpRuntimeOwnership.Frame frame,int siteId,int rootLocalId,Memory actualRoot,
+                                        String literalKey,boolean decrement,boolean post,Environment env,TraceInfo fetchTrace,TraceInfo operationTrace) throws Throwable {
+        if (frame == null) return incrementTarget(arrayIncrementTarget(actualRoot,env,fetchTrace)
+                .index(new php.runtime.memory.StringMemory(literalKey)),decrement,post,env,operationTrace);
+        if (frame.authority().environment() != env) throw new IllegalArgumentException("ARRAY increment uses another Environment");
+        var holder=frame.arrayIncrementHolder(siteId,rootLocalId,actualRoot,literalKey,decrement,post);
+        var array=(php.runtime.memory.ArrayMemory)holder.raw();var origin=array.getRuntimeOrigin();
+        if (origin == null || origin.authority().domain() != holder.domain() || origin.node() != holder.node())
+            throw new IllegalArgumentException("ARRAY increment requires its complete actual physical backing protocol");
+        origin.validate(array);
+        Memory resolved=arrayIncrementTarget(actualRoot,env,fetchTrace).index(new php.runtime.memory.StringMemory(literalKey)).reference();
+        Memory result=resolved instanceof php.runtime.memory.ReferenceMemory && ((php.runtime.memory.ReferenceMemory)resolved).getRuntimeHolder()!=null
+                ? incrementRuntimeReference(frame,(php.runtime.memory.ReferenceMemory)resolved,decrement,post,env,operationTrace)
+                : incrementTarget(resolved,decrement,post,env,operationTrace);
+        try(var publication=frame.prepareEval(siteId,result,PhpRuntimeOwnership.Role.VALUE)) {
+            publication.storeDirect();publication.commit();
+        }
+        return result;
+    }
+
+    /** The scalar result and warning continuation belong to this exact addressed CV opcode. */
+    public static Memory localIncrement(PhpRuntimeOwnership.Frame frame,int siteId,int rootLocalId,Memory actualRoot,
+                                        boolean decrement,boolean post,Environment env,TraceInfo trace)throws Throwable {
+        if(frame==null)return incrementTarget(actualRoot,decrement,post,env,trace);
+        if(frame.authority().environment()!=env)throw new IllegalArgumentException("Local increment uses another Environment");
+        frame.validateLocalIncrement(siteId,rootLocalId,actualRoot,decrement,post);
+        Memory result=incrementRuntimeReference(frame,(php.runtime.memory.ReferenceMemory)actualRoot,decrement,post,env,trace);
+        try(var publication=frame.prepareEval(siteId,result,PhpRuntimeOwnership.Role.VALUE)){publication.storeDirect();publication.commit();}
+        return result;
+    }
+
+    /** Only the actual addressed opcode can mint this scalar operator proof. */
+    public static final class RuntimeIncrementTarget {
+        private final PhpRuntimeOwnership.Frame frame;
+        private final php.runtime.memory.ReferenceMemory target;
+        private final PhpRuntimeOwnership.Holder holder;
+        private final Memory before;
+        private Memory result;
+        private RuntimeIncrementTarget(PhpRuntimeOwnership.Frame frame,php.runtime.memory.ReferenceMemory target,Memory before) {
+            this.frame=frame;this.target=target;this.holder=target.getRuntimeHolder();this.before=before;
+            if(holder==null||!holder.matches(target)||holder.domain()!=frame.authority().domain())
+                throw new IllegalArgumentException("Increment target lacks its actual physical publisher");
+        }
+        public void validateTarget(php.runtime.memory.ReferenceMemory actual) {
+            if(actual!=target||actual.getRuntimeHolder()!=holder||!holder.matches(actual))
+                throw new IllegalArgumentException("Increment proof belongs to another physical target");
+        }
+        public PhpRuntimeOwnership.Frame frame(){return frame;}
+        public Memory scalar(){return before;}
+        public void validateValue(Memory candidate,boolean restore) {
+            if(candidate instanceof php.runtime.memory.ReferenceMemory||candidate.isArray()||candidate.isObject()
+                    ||candidate!=(restore?before:result))
+                throw new IllegalArgumentException("Increment publication is not its captured scalar or actual unary result");
+        }
+    }
+    private static Memory incrementRuntimeReference(PhpRuntimeOwnership.Frame frame,php.runtime.memory.ReferenceMemory target,
+            boolean decrement,boolean post,Environment env,TraceInfo trace)throws Throwable {
+        Memory before=target.getReference().toValue().toImmutable();
+        target.checkIncrementOverflow(before,decrement,env,trace);
+        boolean diagnostic=before.type==Memory.Type.BOOL||decrement&&before.isNull()
+                ||before.isString()&&!PhpNumericString.isNumeric(before instanceof php.runtime.memory.BinaryMemory?before.toBinaryString():before.toString());
+        if(!diagnostic)return incrementReference(target,decrement,post,env,trace);
+        RuntimeIncrementTarget proof=new RuntimeIncrementTarget(frame,target,before);
+        var captured=target.captureIncrementCell(proof);Throwable primary=null;
+        try {
+            Memory result;
+            try {result=increment(before,decrement,env,trace);proof.result=result;}
+            catch(Throwable failure) {
+                if(before.type==Memory.Type.BOOL||decrement&&before.isNull()) {
+                    try {captured.restore(before);}catch(Throwable cleanup){failure=frame.authority().domain().graph().composeFailure(failure,cleanup);}
+                }
+                throw failure;
+            }
+            try {result=before.type==Memory.Type.BOOL||decrement&&before.isNull()?captured.restore(before):captured.commit(result);}
+            catch(Throwable failure) {
+                if(!captured.hasRuntimeStore())try {captured.restore(before);}catch(Throwable cleanup){failure=frame.authority().domain().graph().composeFailure(failure,cleanup);}
+                throw failure;
+            }
+            return post?before:result;
+        }catch(Throwable failure){primary=failure;throw failure;}
+        finally {
+            try {captured.closeRuntime();}catch(Throwable cleanup){if(primary==null)throw cleanup;throw frame.authority().domain().graph().composeFailure(primary,cleanup);}
+        }
+    }
+
     public static ArrayTarget arrayTarget(Memory root, Environment env, TraceInfo trace) { return new ArrayTarget(root, env, trace, false); }
     public static ArrayTarget arrayIncrementTarget(Memory root, Environment env, TraceInfo trace) { return new ArrayTarget(root, env, trace, true); }
     public static final class ArrayTarget extends php.runtime.memory.ReferenceMemory {
@@ -240,7 +327,9 @@ public final class PhpArithmetic {
                                 if (key.isNull()) env.error(trace, ErrorType.E_DEPRECATED,
                                         "Using null as an array offset is deprecated, use an empty string instead");
                                 else key = LongMemory.valueOf(integerOperand(key.toValue(), key, env, trace));
-                                if (!lease.isAttached(current)) return reference = new php.runtime.memory.ReferenceMemory(Memory.NULL);
+                                var continuation=lease.continuation(current, env);
+                                if (continuation == null) return reference = new php.runtime.memory.ReferenceMemory(Memory.NULL);
+                                array=continuation;
                             }
                         } else if (key.getRealType() == Memory.Type.DOUBLE) {
                             key = LongMemory.valueOf(integerOperand(key.toValue(), key, env, trace));
@@ -252,7 +341,9 @@ public final class PhpArithmetic {
                                 try (var lease = array.pinWriteFetch()) {
                                     env.error(trace, ErrorType.E_WARNING, normalizedKey instanceof LongMemory
                                             ? "Undefined array key %s" : "Undefined array key \"%s\"", String.valueOf(normalizedKey));
-                                    if (!lease.isAttached(current)) return reference = new php.runtime.memory.ReferenceMemory(Memory.NULL);
+                                    var continuation=lease.continuation(current, env);
+                                    if (continuation == null) return reference = new php.runtime.memory.ReferenceMemory(Memory.NULL);
+                                    array=continuation;
                                 }
                             } else env.error(trace, ErrorType.E_WARNING, normalizedKey instanceof LongMemory
                                     ? "Undefined array key %s" : "Undefined array key \"%s\"", String.valueOf(normalizedKey));

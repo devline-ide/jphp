@@ -1,0 +1,3 @@
+Fatal error: Cannot redeclare property hook "get" in G:\DevLine-QA\jphp-property-hooks-20261013\native-corpus1\php\strict\duplicate_get_invalid.php on line 5
+Stack trace:
+#0 {main}

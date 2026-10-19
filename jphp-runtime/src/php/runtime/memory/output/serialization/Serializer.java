@@ -9,6 +9,7 @@ import php.runtime.lang.IObject;
 import php.runtime.lang.spl.Serializable;
 import php.runtime.memory.*;
 import php.runtime.reflection.ClassEntity;
+import php.runtime.reflection.MethodEntity;
 import php.runtime.reflection.PropertyEntity;
 
 import java.util.HashSet;
@@ -82,7 +83,7 @@ public class Serializer {
     }
 
     public void writeString(StringMemory memory){
-        String value = memory.toString();
+        String value = memory instanceof PhpByteStringMemory ? memory.toBinaryString() : memory.toString();
         printer.append("s:")
                 .append(value.length())
                 .append(":\"")
@@ -133,9 +134,13 @@ public class Serializer {
         if (used.add(memory.getPointer())){
             IObject object = memory.value;
             ClassEntity reflection = object.getReflection();
+            if (reflection.isAnonymous()) env.exception(php.runtime.lang.BaseException.class,
+                    "Serialization of '%s' is not allowed", reflection.getName());
             if (object instanceof Serializable){
                 Memory result;
-                env.pushCall(trace, object, "serialize");
+                MethodEntity callback = reflection.findMethod("serialize");
+                env.pushCall(trace, object, new Memory[0], "serialize",
+                        callback == null ? reflection.getName() : callback.getClazzName(), reflection.getName());
                 try {
                     result = ((Serializable) object).serialize(env);
 
@@ -145,7 +150,7 @@ public class Serializer {
                     }
 
                     if (result.isString()){
-                        String value = result.toString();
+                        String value = result.toValue() instanceof PhpByteStringMemory ? result.toBinaryString() : result.toString();
                         printer.append("C:")
                                 .append(reflection.getName().length())
                                 .append(":\"")

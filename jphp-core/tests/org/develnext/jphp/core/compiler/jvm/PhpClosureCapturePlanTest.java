@@ -72,6 +72,36 @@ public class PhpClosureCapturePlanTest {
         }
         assertEquals(8, checks);
     }
+    private void lexicalScopeLiteralHasNoRuntimePublisher(ClosureEntity closure) {
+        ClassNode original = new ClassNode(); new ClassReader(closure.getData()).accept(original, 0);
+        FieldNode literal = original.fields.stream().filter(f -> f.name.equals("__$attributeLexicalScope")).findFirst().orElseThrow();
+        assertEquals(ACC_PUBLIC | ACC_STATIC | ACC_FINAL, literal.access);
+        assertEquals("Ljava/lang/String;", literal.desc); assertEquals("C", literal.value);
+        assertTrue(PhpClosureShellVerifier.verify(closure.getData(), closure.getInternalName()));
+        for (int mutation = 0; mutation < 6; mutation++) {
+            ClassNode altered = new ClassNode(); new ClassReader(closure.getData()).accept(altered, 0);
+            FieldNode field = altered.fields.stream().filter(f -> f.name.equals("__$attributeLexicalScope")).findFirst().orElseThrow();
+            switch (mutation) {
+                case 0 -> field.access &= ~ACC_FINAL;
+                case 1 -> field.desc = "Lphp/runtime/Memory;";
+                case 2 -> field.value = null;
+                case 3 -> field.value = Integer.valueOf(1);
+                case 4 -> altered.fields.add(new FieldNode(ACC_PUBLIC | ACC_STATIC | ACC_FINAL,
+                        "foreignLiteral", "Ljava/lang/String;", null, "C"));
+                case 5 -> {
+                    MethodNode initializer = altered.methods.stream().filter(m -> m.name.equals("<clinit>")).findFirst().orElseThrow();
+                    InsnList writes = new InsnList(); writes.add(new LdcInsnNode("forged"));
+                    writes.add(new FieldInsnNode(PUTSTATIC, altered.name, field.name, field.desc));
+                    initializer.instructions.insert(writes);
+                }
+            }
+            ClassWriter bytes = new ClassWriter(0); altered.accept(bytes);
+            boolean verified = false;
+            try { verified = PhpClosureShellVerifier.verify(bytes.toByteArray(), closure.getInternalName()); }
+            catch (IllegalArgumentException malformed) { /* Invalid ConstantValue must also remain uncertified. */ }
+            assertFalse("Unsafe lexical scope mutation " + mutation, verified);
+        }
+    }
     @Test public void emptyStaticArrowAndThisPlansComeFromActualAst() throws Throwable {
         for (boolean debug : new boolean[]{false, true}) for (boolean dumped : new boolean[]{false, true}) {
             var env = environment(debug, new ByteArrayOutputStream());
@@ -84,6 +114,7 @@ public class PhpClosureCapturePlanTest {
                 plan(closures.get(0), origin, new String[0]); plan(closures.get(1), origin, new String[]{"a"}, ClosureEntity.CaptureMode.VALUE);
                 plan(closures.get(2), origin, new String[]{"a", "b"}, ClosureEntity.CaptureMode.VALUE, ClosureEntity.CaptureMode.VALUE);
                 plan(closures.get(3), origin, new String[0]); assertTrue(closures.get(1).getOwnershipCapturePlan().staticClosure());
+                lexicalScopeLiteralHasNoRuntimePublisher(closures.get(3));
                 assertTrue(closures.get(3).getOwnershipCapturePlan().usesThis()); load(env, module);
                 assertEquals(7, module.include(env).toValue(php.runtime.memory.ArrayMemory.class).valueOfIndex(2).toLong());
             } finally { env.doFinal(); }
@@ -97,7 +128,7 @@ public class PhpClosureCapturePlanTest {
             var module = dumper.load(new ByteArrayInputStream(bytes)); assertNull(module.getClosures().iterator().next().getOwnershipCapturePlan());
             assertEquals(0, module.getClosures().iterator().next().uses.length);
             for (int i = 0; i < 2; i++) {
-                bytes = save(env, module); assertEquals(9, ModuleDumper.readHeader(new ByteArrayInputStream(bytes)).getCompilerAbiVersion());
+                bytes = save(env, module); assertEquals(ModuleDumper.COMPILER_ABI_VERSION, ModuleDumper.readHeader(new ByteArrayInputStream(bytes)).getCompilerAbiVersion());
                 module = dumper.load(new ByteArrayInputStream(bytes)); assertEquals(8, module.getCompilerProvenance().getCompilerAbiVersion());
                 assertNull(module.getClosures().iterator().next().getOwnershipCapturePlan());
             }
@@ -156,6 +187,37 @@ public class PhpClosureCapturePlanTest {
             assertTrue(PhpClosureShellVerifier.verify(good, name)); assertFalse(PhpClosureShellVerifier.verify(good, "WrongClass"));
             assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> n.superName = "php/runtime/lang/BaseObject"), name));
             assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> n.fields.add(new FieldNode(ACC_PUBLIC, "hiddenOwner", "Lphp/runtime/Memory;", null, null))), name));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> n.fields.add(new FieldNode(ACC_PUBLIC|ACC_STATIC, "hidden", "Lphp/runtime/Memory;", null, null))), name));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> n.fields.stream().filter(f -> f.name.equals("$MEM")).findFirst().orElseThrow().desc="Ljava/lang/Object;"), name));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> n.methods.removeIf(m -> m.name.equals("<clinit>"))), name));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> {
+                var init=n.methods.stream().filter(m -> m.name.equals("<clinit>")).findFirst().orElseThrow();
+                var effect=new InsnList(); effect.add(new LdcInsnNode("jphp.shell.forbidden.effect")); effect.add(new LdcInsnNode("executed"));
+                effect.add(new MethodInsnNode(INVOKESTATIC,"java/lang/System","setProperty","(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;",false));
+                effect.add(new InsnNode(POP)); init.instructions.insert(effect); init.maxStack=Math.max(init.maxStack,2);
+            }), name));
+            assertNull(System.getProperty("jphp.shell.forbidden.effect"));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> {
+                var init=n.methods.stream().filter(m -> m.name.equals("<clinit>")).findFirst().orElseThrow();
+                var effect=new InsnList(); effect.add(new FieldInsnNode(GETSTATIC,"java/lang/System","out","Ljava/io/PrintStream;")); effect.add(new InsnNode(POP));
+                init.instructions.insert(effect);
+            }), name));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> {
+                var init=n.methods.stream().filter(m -> m.name.equals("<clinit>")).findFirst().orElseThrow();
+                for(var i:init.instructions) if(i instanceof MethodInsnNode && ((MethodInsnNode)i).owner.endsWith("FunctionCallCache")) {
+                    ((MethodInsnNode)i).owner="unknown/EffectfulCache"; break;
+                }
+            }), name));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> {
+                var init=n.methods.stream().filter(m -> m.name.equals("<clinit>")).findFirst().orElseThrow();
+                for(var i:init.instructions) if(i instanceof FieldInsnNode && i.getOpcode()==PUTSTATIC) { ((FieldInsnNode)i).owner="unknown/ForeignHolder"; break; }
+            }), name));
+            assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> {
+                var init=n.methods.stream().filter(m -> m.name.equals("<clinit>")).findFirst().orElseThrow();
+                var label=new LabelNode(); init.instructions.insert(new JumpInsnNode(GOTO,label)); init.instructions.add(label); init.instructions.add(new InsnNode(RETURN));
+            }), name));
+            var constants=compile(env,"return function(){return ['x'=>1,'b'=>true,'n'=>null,'v'=>1.5];};",PhpLanguageProfile.PHP_8_5);
+            assertTrue(constants.getClosures().iterator().next().getOwnershipCapturePlan().emptyShellConstructorVerified());
             assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> n.methods.stream().filter(m -> m.name.equals("<init>")).findFirst().orElseThrow().instructions.insert(new InsnNode(NOP))), name));
             assertFalse(PhpClosureShellVerifier.verify(changed(good, n -> {
                 var m = n.methods.stream().filter(x -> x.name.equals("<init>")).findFirst().orElseThrow();

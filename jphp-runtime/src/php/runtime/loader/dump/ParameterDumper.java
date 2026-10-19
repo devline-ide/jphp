@@ -60,23 +60,29 @@ public class ParameterDumper extends Dumper<ParameterEntity> {
         // raw
         byte[] type = TypeDeclarationDumper.save(entity.getTypeChecker());
         var initializer = entity.getDefaultInitializer();
-        if (initializer == null) print.writeRawData(type);
+        if (initializer == null && !entity.isPromoted()) print.writeRawData(type);
         else {
             var bytes = new java.io.ByteArrayOutputStream();
             var metadata = new DumpOutputStream(bytes);
             metadata.writeInt(0x5044494E); // PDIN: ABI8 executable parameter default descriptor.
-            metadata.writeInt(1);
+            metadata.writeInt(entity.isPromoted() ? 2 : 1);
             metadata.writeRawData(type);
-            metadata.writeName(initializer.moduleName());
-            metadata.writeName(initializer.javaClass());
-            metadata.writeName(initializer.method());
-            metadata.writeName(initializer.declarationScope());
+            if (entity.isPromoted()) {metadata.writeBoolean(true);metadata.writeBoolean(initializer != null);}
+            if (initializer != null) {
+                metadata.writeName(initializer.moduleName());
+                metadata.writeName(initializer.javaClass());
+                metadata.writeName(initializer.method());
+                metadata.writeName(initializer.declarationScope());
+            }
             print.writeRawData(bytes.toByteArray());
         }
     }
 
     @Override
     public ParameterEntity load(InputStream input) throws IOException {
+        return load(input,false);
+    }
+    ParameterEntity load(InputStream input,boolean hook) throws IOException {
         DumpInputStream data = new DumpInputStream(input);
         ParameterEntity entity = new ParameterEntity(context);
 
@@ -88,35 +94,49 @@ public class ParameterDumper extends Dumper<ParameterEntity> {
             entity.setTypeClass(typeClass);
         }
 
-        entity.setReference(data.readBoolean());
+        entity.setReference(hookFlag(data,hook));
 
-        entity.setMutable(data.readBoolean());
-        entity.setUsed(data.readBoolean());
-        entity.setVariadic(data.readBoolean());
-        entity.setNullable(data.readBoolean());
+        entity.setMutable(hookFlag(data,hook));
+        entity.setUsed(hookFlag(data,hook));
+        entity.setVariadic(hookFlag(data,hook));
+        entity.setNullable(hookFlag(data,hook));
 
         entity.setName(data.readName());
         entity.setTrace(data.readTrace(context));
 
-        entity.setDefaultValue(data.readMemory());
+        if(hook) {
+            if(data.readInt()!=-1) throw new php.runtime.loader.dump.io.DumpException("Hook parameter cannot contain a default value");
+            entity.setDefaultValue(null);
+        } else entity.setDefaultValue(data.readMemory());
         entity.setDefaultValueConstName(data.readName());
+        if(hook && entity.getDefaultValueConstName()!=null)throw new php.runtime.loader.dump.io.DumpException("Hook parameter cannot contain a default constant");
 
         byte[] metadata = data.readRawData();
         var raw = new DumpInputStream(new java.io.ByteArrayInputStream(metadata));
         ParameterEntity.DefaultInitializer initializer = null;
         byte[] type = metadata;
         if (metadata.length >= 4 && raw.readInt() == 0x5044494E) {
-            if (raw.readInt() != 1) throw new php.runtime.loader.dump.io.DumpException("Unsupported parameter initializer version");
+            int version=raw.readInt();
+            if (version != 1 && version != 2) throw new php.runtime.loader.dump.io.DumpException("Unsupported parameter initializer version");
             type = raw.readRawData();
-            try { initializer = new ParameterEntity.DefaultInitializer(raw.readName(), raw.readName(), raw.readName(), raw.readName()); }
+            if (version==2) entity.setPromoted(raw.readBoolean());
+            boolean hasInitializer=version==1 || raw.readBoolean();
+            try { if (hasInitializer) initializer = new ParameterEntity.DefaultInitializer(raw.readName(), raw.readName(), raw.readName(), raw.readName()); }
             catch (IllegalArgumentException invalid) { throw new php.runtime.loader.dump.io.DumpException(invalid.getMessage()); }
             if (raw.available() != 0) throw new php.runtime.loader.dump.io.DumpException("Invalid parameter initializer size");
-            if (entity.getDefaultValue() == null || !entity.getDefaultValue().isNull() || entity.getDefaultValueConstName() != null)
+            if (initializer != null && (entity.getDefaultValue() == null || !entity.getDefaultValue().isNull() || entity.getDefaultValueConstName() != null))
                 throw new php.runtime.loader.dump.io.DumpException("Invalid parameter initializer placeholder");
         }
+        if(hook && (initializer!=null || entity.isPromoted()))throw new php.runtime.loader.dump.io.DumpException("Hook parameter cannot be promoted or initialized");
         var declaration = TypeDeclarationDumper.load(type);
         if (declaration != null) entity.setTypeChecker(declaration);
         if (initializer != null) entity.setDefaultInitializer(initializer);
         return entity;
+    }
+    private static boolean hookFlag(DumpInputStream data,boolean hook) throws IOException {
+        if(!hook)return data.readBoolean();
+        int flag=data.readUnsignedByte();
+        if(flag>1)throw new php.runtime.loader.dump.io.DumpException("Invalid hook parameter boolean flag");
+        return flag==1;
     }
 }

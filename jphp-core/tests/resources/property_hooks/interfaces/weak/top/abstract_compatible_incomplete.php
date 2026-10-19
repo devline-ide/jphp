@@ -1,0 +1,1 @@
+<?php interface I {public int $x {get;set;}}abstract class C implements I {abstract public int $x {get;}}

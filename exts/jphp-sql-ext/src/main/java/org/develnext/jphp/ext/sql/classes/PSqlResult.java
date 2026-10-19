@@ -97,7 +97,9 @@ public class PSqlResult extends BaseObject {
                 return StringMemory.valueOf(set.getNString(index));
 
             case Types.BINARY:
-                return new BinaryMemory(set.getBytes(index));
+            case Types.VARBINARY:
+            case Types.LONGVARBINARY:
+                return binaryValue(env, set.getBytes(index));
 
             case Types.BLOB:
             case Types.CLOB:
@@ -106,12 +108,17 @@ public class PSqlResult extends BaseObject {
                     Blob blob = set.getBlob(index);
                     return ObjectMemory.valueOf(new MiscStream(env, blob.getBinaryStream()));
                 } catch (SQLException e) {
-                    return new BinaryMemory(set.getBytes(index));
+                    return binaryValue(env, set.getBytes(index));
                 }
 
             default:
                 return StringMemory.valueOf(set.getString(index));
         }
+    }
+
+    private Memory binaryValue(Environment env, byte[] bytes) {
+        return env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                ? new PhpByteStringMemory(bytes) : new BinaryMemory(bytes);
     }
 
     @Signature

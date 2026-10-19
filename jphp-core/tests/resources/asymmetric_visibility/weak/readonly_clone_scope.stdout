@@ -1,0 +1,2 @@
+private:Error:Cannot modify private(set) property A::$x from scope B
+state:1:2:1:8

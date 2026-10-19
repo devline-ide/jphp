@@ -46,6 +46,59 @@ public class SyntaxAnalyzer {
     //private Stack<Set<VariableExprToken>> rootLocalStack = new Stack<Set<VariableExprToken>>();
 
     private Map<String, ClassStmtToken> classes;
+    private final List<ClassStmtToken> anonymousClasses = new ArrayList<>();
+    private final List<ClassStmtToken> deferredClasses = new ArrayList<>();
+    public List<ClassStmtToken> getDeferredClasses() { return Collections.unmodifiableList(deferredClasses); }
+    public void registerDeferredClass(ClassStmtToken token) {
+        token.setDeclarationId(deferredClasses.size());
+        deferredClasses.add(token);
+    }
+    public void finishDeferredClass(ClassStmtToken token) {
+        int id = token.getDeclarationId();
+        if (id < 0 || id >= deferredClasses.size() || deferredClasses.get(id) != token)
+            throw new IllegalArgumentException("Class is not in this deferred declaration catalog");
+        for (MethodStmtToken method : token.getMethods()) if (method.isGenerator()) method.setGeneratorId(generatorSize++);
+        registerHookGenerators(token);
+    }
+
+    /** A named declaration body cannot inherit enclosing function/closure/goto state. */
+    public NamedClassContext enterNamedClass(ClassStmtToken token) { return new NamedClassContext(token); }
+    public final class NamedClassContext implements AutoCloseable {
+        private final ClassStmtToken savedClass = clazz;
+        private final FunctionStmtToken savedFunction = function;
+        private final Stack<FunctionStmtToken> savedClosures = closureStack;
+        private final Stack<Scope> savedScopes = scopeStack;
+        private final Stack<Scope> savedRoots = rootScopeStack;
+        private boolean closed;
+
+        private NamedClassContext(ClassStmtToken token) {
+            clazz = Objects.requireNonNull(token);
+            function = null;
+            closureStack = new Stack<>();
+            scopeStack = new Stack<>();
+            rootScopeStack = new Stack<>();
+            addScope(true);
+        }
+
+        @Override public void close() {
+            if (closed) return;
+            clazz = savedClass;
+            function = savedFunction;
+            closureStack = savedClosures;
+            scopeStack = savedScopes;
+            rootScopeStack = savedRoots;
+            closed = true;
+        }
+    }
+    public List<ClassStmtToken> getAnonymousClasses() { return Collections.unmodifiableList(anonymousClasses); }
+    public void registerAnonymousClass(ClassStmtToken token) {
+        token.setName(new NameToken(org.develnext.jphp.core.tokenizer.TokenMeta.of("class@anonymous\0" + anonymousClasses.size())));
+        anonymousClasses.add(token);
+    }
+    public void finishAnonymousClass(ClassStmtToken token) {
+        for (MethodStmtToken method : token.getMethods()) if (method.isGenerator()) method.setGeneratorId(generatorSize++);
+        registerHookGenerators(token);
+    }
     private List<FunctionStmtToken> functions;
     private List<ConstStmtToken> constants;
     private List<ClosureStmtToken> closures;
@@ -70,6 +123,8 @@ public class SyntaxAnalyzer {
 
         this.function = null;
         classes.clear();
+        anonymousClasses.clear();
+        deferredClasses.clear();
         functions.clear();
         constants.clear();
         closures.clear();
@@ -87,8 +142,14 @@ public class SyntaxAnalyzer {
     }
 
     public SyntaxAnalyzer(Environment environment, Tokenizer tokenizer, FunctionStmtToken function) {
-        if (tokenizer != null)
+        this(environment, tokenizer, function, -1, 0);
+    }
+
+    /** Physical origin of a DOC interpolation; ordinary analyzers retain the historical reset. */
+    public SyntaxAnalyzer(Environment environment, Tokenizer tokenizer, FunctionStmtToken function, int sourceLine, int sourcePosition) {
+        if (tokenizer != null) {
             tokenizer.reset();
+        }
         this.environment = environment;
         this.tokenizer = tokenizer;
 
@@ -109,10 +170,13 @@ public class SyntaxAnalyzer {
         generators.add(new NamespaceGenerator(this));
         generators.add(new UseGenerator(this));
         generators.add(new DeclareGenerator(this));
+        generators.add(new AttributeGenerator(this));
         generators.add(new ClassGenerator(this));
         generators.add(new ConstGenerator(this));
         generators.add(new FunctionGenerator(this));
+        generators.add(new PropertyHookGenerator(this));
         generators.add(new LambdaGenerator(this));
+        generators.add(new MatchGenerator(this));
         generators.add(new TryCatchGenerator(this));
         generators.add(new ThrowGenerator(this));
         generators.add(new NameGenerator(this));
@@ -127,8 +191,10 @@ public class SyntaxAnalyzer {
 
         addScope(true);
         //addLocalScope(true);
-        if (tokenizer != null)
-            process();
+        if (tokenizer != null) {
+            if (sourceLine >= 0) process(sourceLine, sourcePosition);
+            else process();
+        }
     }
 
     public Environment getEnvironment() {
@@ -152,6 +218,17 @@ public class SyntaxAnalyzer {
                 method.setGeneratorId(generatorSize++);
             }
         }
+        registerHookGenerators(clazz);
+    }
+
+    /** Hook bodies are independent declarations outside the ordinary PHP method map. */
+    private void registerHookGenerators(ClassStmtToken clazz) {
+        if(clazz.getProperties()==null)return;
+        for(ClassVarStmtToken property:clazz.getProperties())if(property.hasPropertyHooks())
+            for(PropertyHookStmtToken hook:property.getPropertyHooks()) {
+                MethodStmtToken method=hook.getMethod();
+                if(method.isGenerator() && method.getGeneratorId()<0)method.setGeneratorId(generatorSize++);
+            }
     }
 
     public void registerFunction(FunctionStmtToken function){
@@ -200,12 +277,18 @@ public class SyntaxAnalyzer {
     }
 
     protected void process(){
+        process(-1, 0);
+    }
+
+    private void process(int sourceLine, int sourcePosition){
         getContext().freezeImplicitClassImports();
         seededNamespaces.clear();
         implicitUses.clear();
         declaredClassNames.clear();
         tokenizer.reset();
+        if (sourceLine >= 0) tokenizer.setSourceOrigin(sourceLine, sourcePosition);
         tokenizer.setPhpLanguageProfile(getPhpLanguageProfile());
+        tokenizer.setCompileEnvironment(environment);
         tree.clear();
 
         Token token;
@@ -431,7 +514,8 @@ public class SyntaxAnalyzer {
                     namespaceDepth = delimiter instanceof BraceExprToken ? depth + 1 : -1;
                 }
             }
-            if ((token instanceof ClassStmtToken || token instanceof InterfaceStmtToken || token instanceof TraitStmtToken)
+            if ((token instanceof ClassStmtToken || token instanceof InterfaceStmtToken || token instanceof TraitStmtToken
+                    || getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5 && token.getClass()==NameToken.class && token.getWord().equalsIgnoreCase("enum"))
                     && next instanceof NameToken && !(next instanceof FulledNameToken)) {
                 declaredClassNames.computeIfAbsent(Context.normalizeClassImportAlias(namespaceName), ignored -> new HashSet<>())
                         .add(Context.normalizeClassImportAlias(((NameToken) next).getName()));
@@ -522,6 +606,29 @@ public class SyntaxAnalyzer {
     }
 
     public FulledNameToken getRealName(NameToken what, NamespaceUseStmtToken.UseType useType) {
+        if (getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && useType == CONSTANT && what instanceof FulledNameToken
+                && !((FulledNameToken) what).isProcessed(useType)) {
+            List<NameToken> parts = ((FulledNameToken) what).getNames();
+            if (parts.size() > 1 && parts.get(0).getName().equalsIgnoreCase("namespace")) {
+                List<NameToken> relative = namespace == null || namespace.getName() == null
+                        ? new ArrayList<>() : new ArrayList<>(namespace.getName().getNames());
+                relative.addAll(parts.subList(1, parts.size()));
+                FulledNameToken result = new FulledNameToken(what.getMeta(), relative);
+                result.setProcessed(useType);
+                return result;
+            }
+            if (parts.size() > 1 && namespace != null) for (NamespaceUseStmtToken use : namespace.getUses()) {
+                if (use.getUseType() != NamespaceUseStmtToken.UseType.CLASS) continue;
+                String alias = use.getAs() == null ? use.getName().getLastName().getName() : use.getAs().getName();
+                if (!parts.get(0).getName().equalsIgnoreCase(alias)) continue;
+                List<NameToken> resolved = new ArrayList<>(use.getName().getNames());
+                resolved.addAll(parts.subList(1, parts.size()));
+                FulledNameToken result = new FulledNameToken(what.getMeta(), resolved);
+                result.setProcessed(useType);
+                return result;
+            }
+        }
         return getRealName(what, namespace, useType);
     }
 
@@ -616,6 +723,8 @@ public class SyntaxAnalyzer {
             names.add(what);
 
         FulledNameToken t = new FulledNameToken(what.getMeta(), names);
+        t.setConstantFallback(useType == CONSTANT && !(what instanceof FulledNameToken
+                && !((FulledNameToken) what).isSingle()));
         t.setProcessed(useType);
         return t;
     }

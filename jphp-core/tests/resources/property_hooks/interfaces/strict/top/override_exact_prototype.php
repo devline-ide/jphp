@@ -1,0 +1,1 @@
+<?php declare(strict_types=1);interface I{public int $x{get;}}class P{public int $x{get=>1;}}class C extends P implements I{public int $x{get=>2;}}$m=(new ReflectionProperty(C::class,"x"))->getHook(PropertyHookType::Get);echo $m->getPrototype()->getDeclaringClass()->getName();

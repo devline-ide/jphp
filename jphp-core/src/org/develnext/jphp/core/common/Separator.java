@@ -15,10 +15,12 @@ public enum Separator {
     COMMA_OR_SEMICOLON,
     AS,
     ARRAY,
-    ARRAY_BLOCK;
+    ARRAY_BLOCK,
+    MATCH_CONDITION;
 
     public Class<Token>[] getTokenClass(){
         switch (this) {
+            case MATCH_CONDITION: return new Class[] {CommaToken.class, org.develnext.jphp.core.tokenizer.token.expr.operator.KeyValueExprToken.class};
             case COLON: return new Class[] {ColonToken.class};
             case SEMICOLON: return new Class[] {SemicolonToken.class};
             case COMMA: return new Class[] {CommaToken.class};
@@ -31,6 +33,7 @@ public enum Separator {
 
     public boolean is(Token token) {
         switch (this) {
+            case MATCH_CONDITION: return token instanceof CommaToken || token instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.KeyValueExprToken;
             case COLON: return token instanceof ColonToken;
             case SEMICOLON: return token instanceof SemicolonToken;
             case COMMA: return token instanceof CommaToken;

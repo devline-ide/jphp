@@ -330,6 +330,9 @@ final public class InvokeHelper {
     }
 
     public static Memory call(Environment env, TraceInfo trace, FunctionEntity function, Memory[] args, boolean internalCall)
+            throws Throwable {return call(env,trace,function,args,internalCall,false);}
+
+    public static Memory call(Environment env, TraceInfo trace, FunctionEntity function, Memory[] args, boolean internalCall,boolean discarded)
             throws Throwable {
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
         Memory result = modern ? null : function.getImmutableResultTyped(env, trace);
@@ -340,9 +343,16 @@ final public class InvokeHelper {
             return result;
         }
 
-        passed = InvokeArgumentHelper.makeArguments(
-                env, args, function.getParameters(), function.getName(), null, null, trace, internalCall
-        );
+        if(discarded)PhpNoDiscardInvocation.beforeBody(env,trace,function);
+        // Internal functions validate/coerce in their native implementation; declaration metadata
+        // is also used by Reflection and must not apply user-function coercion ahead of that call.
+        var bound = BoundArguments.current(env, args, function);
+        passed = function instanceof php.runtime.reflection.CompileFunctionEntity
+                ? bound == null || !bound.signature().completeNames() ? args
+                        : InvokeArgumentHelper.makeBoundNativeArguments(env, trace, bound)
+                : InvokeArgumentHelper.makeArgumentsForTarget(
+                        env, args, function, function.getParameters(), function.getName(), null, null, trace, internalCall
+                );
 
         if (modern) result = function.getImmutableResultTyped(env, trace);
         if (result != null) {
@@ -350,11 +360,14 @@ final public class InvokeHelper {
         }
 
         if (trace != null && function.isUsesStackTrace())
-            env.pushCall(trace, null, args, function.getName(), null, null);
+            env.pushCall(trace, null, BoundArguments.callArguments(env, args, function), function.getName(), null, null);
 
+        var nativeContext = internalCall && function instanceof php.runtime.reflection.CompileFunctionEntity
+                ? NativeFunctionContext.enterWeak(env, trace, function.getName()) : null;
         try {
             result = function.invoke(env, trace, passed);
         } finally {
+            if (nativeContext != null) nativeContext.close();
             if (trace != null && function.isUsesStackTrace())
                 env.popCall();
         }
@@ -516,9 +529,9 @@ final public class InvokeHelper {
 
         if (passed == null || modern) {
             passed = InvokeArgumentHelper.makeArguments(
-                    env, passed == null ? args : passed, method.getParameters(),
+                    env, passed == null ? args : passed, method, method.getParameters(),
                     modern ? method.getClazzName() : originClassName,
-                    isMagic ? method.getName() : originMethodName, originClassName, trace
+                    isMagic ? method.getName() : originMethodName, originClassName, trace, false
             );
         }
 
@@ -530,7 +543,7 @@ final public class InvokeHelper {
 
         try {
             if (trace != null)
-                env.pushCall(trace, null, args, originMethodName, method.getClazz().getName(), calledClass);
+                env.pushCall(trace, null, BoundArguments.callArguments(env, args, method), originMethodName, method.getClazz().getName(), calledClass);
 
             return method.invokeStatic(env, trace, passed);
         } finally {
@@ -556,6 +569,10 @@ final public class InvokeHelper {
 
     public static Memory callStatic(Environment env, TraceInfo trace, MethodEntity method, @Nullable String staticClass,
                                     Memory[] args, boolean checkAccess, boolean internalCall) throws Throwable {
+        return callStatic(env,trace,method,staticClass,args,checkAccess,internalCall,false);
+    }
+    public static Memory callStatic(Environment env, TraceInfo trace, MethodEntity method, @Nullable String staticClass,
+                                    Memory[] args, boolean checkAccess, boolean internalCall,boolean discarded) throws Throwable {
         if (checkAccess)
             checkAccess(env, trace, method);
 
@@ -571,8 +588,9 @@ final public class InvokeHelper {
 
         String staticClazz = staticClass == null ? originClassName : staticClass;
 
+        if(discarded)PhpNoDiscardInvocation.beforeBody(env,trace,method);
         Memory[] passed = InvokeArgumentHelper.makeArguments(
-                env, args, method.getParameters(), originClassName, originMethodName, staticClass, trace, internalCall
+                env, args, method, method.getParameters(), originClassName, originMethodName, staticClass, trace, internalCall
         );
         if (modern) {
             result = method.getImmutableResultTyped(env, trace);
@@ -583,7 +601,7 @@ final public class InvokeHelper {
         boolean useCallScope = callTrace != null && (method.isUsesStackTrace() || method.requiresReturnTypeCallScope());
         try {
             if (useCallScope) {
-                env.pushCall(callTrace, null, passed, originMethodName, originClassName, staticClazz);
+                env.pushCall(callTrace, null, BoundArguments.callArguments(env, passed, method), originMethodName, originClassName, staticClazz);
             }
 
             return method.invokeStatic(env, passed);

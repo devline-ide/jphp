@@ -73,6 +73,10 @@ public class FunctionEntity extends AbstractFunctionEntity {
     }
 
     public Memory invoke(Environment env, TraceInfo trace, Memory[] arguments) throws Throwable {
+        if (php.runtime.PhpOwnershipExecution.current(env) != null)
+            return php.runtime.PhpOwnershipExecution.invokeFunction(this,env,trace,arguments);
+        if (php.runtime.PhpRuntimeOwnership.isInvoking(env,this))
+            return php.runtime.PhpRuntimeOwnership.invokeFunctionBody(this,env,trace,arguments);
         try {
             return InvokeHelper.checkReturnType(
                     env, trace,
@@ -88,6 +92,7 @@ public class FunctionEntity extends AbstractFunctionEntity {
 
     @Override
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
+        if (php.runtime.PhpOwnershipExecution.current(env) != null || php.runtime.PhpRuntimeOwnership.isInvoking(env,this)) return null;
         Memory result = getImmutableResultForTypeCheck(module);
         if (result != null && module != null && module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
             return InvokeHelper.checkReturnType(env, trace, result, this);
@@ -112,6 +117,7 @@ public class FunctionEntity extends AbstractFunctionEntity {
         closureEntity1.setModule(module);
         closureEntity1.parameters = this.parameters;
         closureEntity1.setReturnReference(this.isReturnReference());
+        closureEntity1.setGeneratorEntity(getGeneratorEntity());
 
         MethodEntity m = new MethodEntity(this);
         m.setClazz(closureEntity1);

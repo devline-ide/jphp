@@ -73,7 +73,7 @@ public class ReflectionExtension extends Reflection {
     public Memory getConstants(Environment env, Memory... args){
         ArrayMemory result = new ArrayMemory();
         for(CompileConstant e : extension.getConstants().values()){
-            result.put(e.name, e.value);
+            result.put(e.name, "E_ALL".equals(e.name) ? env.findConstant(e.name) : e.value);
         }
         return result.toConstant();
     }

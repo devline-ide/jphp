@@ -96,15 +96,17 @@ public class LanguageProfileTest extends JvmCompilerCase {
         ByteArrayOutputStream bytes = new ByteArrayOutputStream();
         dumper.save(module, bytes);
         byte[] modern = bytes.toByteArray();
-        ByteArrayOutputStream legacy = new ByteArrayOutputStream();
-        DataOutputStream header = new DataOutputStream(legacy);
-        header.writeInt(ModuleDumper.DUMP_STAMP);
-        header.writeInt(ModuleDumper.LEGACY_DUMP_VERSION);
-        legacy.write(modern, 16, modern.length - 16);
-        ModuleEntity loaded = dumper.load(new ByteArrayInputStream(legacy.toByteArray()));
-        assertEquals(PhpLanguageProfile.JPHP_LEGACY, loaded.getPhpLanguageProfile());
-        env.getScope().loadModule(loaded);
-        assertEquals(123, loaded.include(env).toLong());
+        // A current body cannot become a historical format by replacing its header.
+        // Use the original ABI0 bytes to exercise the real legacy reader layout.
+        try (InputStream legacy = getClass().getClassLoader().getResourceAsStream("resources/legacy_jphp.phb")) {
+            assertNotNull(legacy);
+            ModuleEntity loaded = dumper.load(legacy);
+            assertEquals(PhpLanguageProfile.JPHP_LEGACY, loaded.getPhpLanguageProfile());
+            env.getScope().loadModule(loaded);
+            env.getScope().addUserModule(loaded);
+            env.registerModule(loaded);
+            assertEquals(42, loaded.include(env).toLong());
+        }
         for (int offset : new int[] {4, 8, 12}) {
             byte[] invalid = modern.clone();
             invalid[offset] = 0x7f;
@@ -248,16 +250,19 @@ public class LanguageProfileTest extends JvmCompilerCase {
 
     @Test
     public void testUnsupportedAttributesAreNotSilentlyDiscarded() throws Throwable {
-        for (String code : new String[] {"#[A] class C {} return 1;", "#[A]\nclass C {}\nreturn 1;"}) {
-            try {
-                runProfile(code, PhpLanguageProfile.PHP_8_5, false);
-                fail("Unsupported attribute was discarded");
-            } catch (php.runtime.exceptions.ParseException expected) {
-                assertTrue(expected.getMessage().contains("Attributes"));
+        // Unknown attribute classes remain lazy: preserve metadata, then reject actual instantiation.
+        String inspect = "$a=(new ReflectionClass('C'))->getAttributes(); "
+                + "try{$a[0]->newInstance();return 'unexpected constructor';}"
+                + "catch(Error $e){return count($a).':'.$a[0]->getName().':'.get_class($e).':'.$e->getMessage();}";
+        for (boolean dumped : new boolean[] {false, true}) {
+            for (String prefix : new String[] {"#[A] class C {} ", "#[A]\nclass C {}\n"}) {
+                assertEquals(1, runProfile(prefix + "return 1;", PhpLanguageProfile.PHP_8_5, dumped).toLong());
+                assertEquals("1:A:Error:Attribute class \"A\" not found",
+                        runProfile(prefix + inspect, PhpLanguageProfile.PHP_8_5, dumped).toString());
             }
+            assertEquals(1, runProfile("# A normal comment\nreturn 1;", PhpLanguageProfile.PHP_8_5, dumped).toLong());
+            assertEquals(1, runProfile("#[A]\nclass C {}\nreturn 1;", PhpLanguageProfile.JPHP_LEGACY, dumped).toLong());
         }
-        assertEquals(1, runProfile("# A normal comment\nreturn 1;", PhpLanguageProfile.PHP_8_5, false).toLong());
-        assertEquals(1, runProfile("#[A]\nclass C {}\nreturn 1;", PhpLanguageProfile.JPHP_LEGACY, false).toLong());
     }
 
     @Test

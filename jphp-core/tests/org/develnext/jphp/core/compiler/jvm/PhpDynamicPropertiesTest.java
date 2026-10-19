@@ -210,18 +210,32 @@ public class PhpDynamicPropertiesTest extends JvmCompilerCase {
         }
     }
 
+    /** Historical test identity retained; the implemented native handler now carries the contract. */
     @Test public void testAllowDynamicPropertiesAttributeRemainsExplicitlyUnsupported() throws Throwable {
-        for (String source : new String[]{"#[AllowDynamicProperties] class DPAttribute {}",
-                "#[\\AllowDynamicProperties] class DPAttribute {}"}) {
-            Environment env = new Environment(newScope());
+        for (String marker : new String[]{"AllowDynamicProperties", "\\AllowDynamicProperties"})
+                for (boolean debug : new boolean[]{false, true}) for (boolean dumped : new boolean[]{false, true}) {
+            var scope = newScope(); scope.setDebugMode(debug);
+            scope.registerExtension(new org.develnext.jphp.zend.ext.standard.StandardExtension());
+            var output = new ByteArrayOutputStream(); Environment env = new Environment(scope, output);
             try {
-                Context context = new Context(source);
-                context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
-                try { new JvmCompiler(env, context).compile(false); fail("Unsupported attribute silently accepted"); }
-                catch (ParseException expected) {
-                    assertEquals(ErrorType.E_PARSE, expected.getType());
-                    assertEquals("Attributes are not yet supported by the PHP_8_5 profile", expected.getMessage());
-                }
+                ModuleEntity module = compile(env, "#[" + marker + "] class DPAttribute {}"
+                        + "class DPChild extends DPAttribute {} class DPPlain {} $events=[];"
+                        + "set_error_handler(function($s,$m)use(&$events){$events[]=[$s,$m];return true;});"
+                        + "$a=new DPAttribute;$b=new DPChild;$c=new stdClass;$p=new DPPlain;"
+                        + "$a->x=1;unset($a->x);$a->x=2;$b->x=3;$c->x=4;$p->x=5;"
+                        + "restore_error_handler();return [$events,$a->x,$b->x,$c->x,$p->x,"
+                        + "(new ReflectionClass('DPAttribute'))->getAttributes()[0]->getName()];",
+                        PhpLanguageProfile.PHP_8_5, dumped);
+                scope.setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);
+                Memory result = module.include(env);
+                ArrayMemory events = result.valueOfIndex(0).toValue(ArrayMemory.class);
+                assertEquals("Only the unmarked class must warn", 1, events.size());
+                assertEquals(8192, events.valueOfIndex(0).valueOfIndex(0).toLong());
+                assertEquals("Creation of dynamic property DPPlain::$x is deprecated",
+                        events.valueOfIndex(0).valueOfIndex(1).toString());
+                for (int row = 1; row <= 4; row++) assertEquals(row + 1, result.valueOfIndex(row).toLong());
+                assertEquals("AllowDynamicProperties", result.valueOfIndex(5).toString());
+                env.flushAll(); assertEquals("All diagnostics captured", 0, output.size());
             } finally { env.doFinal(); }
         }
     }

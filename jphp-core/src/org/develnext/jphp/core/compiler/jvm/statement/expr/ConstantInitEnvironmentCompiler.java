@@ -10,11 +10,11 @@ public final class ConstantInitEnvironmentCompiler extends BaseStatementCompiler
     public ConstantInitEnvironmentCompiler(ExpressionStmtCompiler expr) { super(expr); }
     @Override public void write(JvmCompiler.ConstantInitEnvironment token) {
         expr.writePushEnv();
+        expr.writePushConstString(expr.getCompiler().getModule().getInternalName());
         expr.writePushConstString(token.item.getFulledName());
         expr.writeExpression(token.item.value, true, false);
         expr.writePopBoxing(true);
-        expr.writePushScalarBoolean(true);
-        expr.writeSysDynamicCall(Environment.class, "defineConstant", boolean.class, String.class, Memory.class, boolean.class);
+        expr.writeSysDynamicCall(Environment.class, "defineDeclaredConstant", boolean.class, String.class, String.class, Memory.class);
         expr.writePopAll(1);
     }
 }

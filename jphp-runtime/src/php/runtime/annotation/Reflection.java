@@ -16,6 +16,11 @@ public @interface Reflection {
     @Target({TYPE})
     public @interface UseJavaLikeNames {}
 
+    /** Native methods opt into explicit PHP return declarations, independent of Java return classes. */
+    @Retention(RetentionPolicy.RUNTIME)
+    @Target(TYPE)
+    public @interface NativePhpSignature {}
+
     @Retention(RetentionPolicy.RUNTIME)
     @Target({TYPE, METHOD, FIELD})
     public @interface Ignore {}
@@ -99,6 +104,8 @@ public @interface Reflection {
         boolean root() default false;
         Arg[] value() default {};
         Arg result() default @Arg(type = HintType.ANY);
+        String returnType() default "";
+        boolean namedVariadic() default false;
     }
 
     @Retention(RetentionPolicy.RUNTIME)
@@ -114,6 +121,7 @@ public @interface Reflection {
         Optional optional() default @Optional(exists = false);
         HintType type() default HintType.ANY;
         String typeClass() default "";
+        String typeDeclaration() default "";
 
         Class<? extends IObject> nativeType() default IObject.class;
         Class<? extends Enum> typeEnum() default Enum.class;
@@ -122,11 +130,13 @@ public @interface Reflection {
         boolean reference() default false;
         boolean readOnly() default false;
         boolean nullable() default false;
+        boolean variadic() default false;
     }
 
     @Retention(RetentionPolicy.RUNTIME)
     public @interface Optional {
         boolean undefined() default false;
+        String constantName() default "";
         String value() default "";
         HintType type() default HintType.ANY;
         boolean exists() default true;

@@ -1,0 +1,1 @@
+<?php declare(strict_types=1);interface I{public int $x{get;}}class C implements I{public int $x{get=>2;}}$m=(new ReflectionProperty(C::class,"x"))->getHook(PropertyHookType::Get);echo json_encode([$m->getName(),$m->getDeclaringClass()->getName(),$m->getPrototype()->getDeclaringClass()->getName(),(new ReflectionClass(C::class))->hasMethod('$x::get')]);

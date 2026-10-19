@@ -1,0 +1,4 @@
+Fatal error: Access level to C::$x must be public (as in class I) in G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\weak\deferred\private_get.php on line 1
+Stack trace:
+#0 G:\DevLine-QA\jphp-property-hooks-20261013\interface-agent-r1\test-resources\jphp-core\tests\resources\property_hooks\interfaces\weak\deferred\private_get.php(1): enter()
+#1 {main}

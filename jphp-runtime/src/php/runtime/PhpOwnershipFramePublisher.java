@@ -90,6 +90,16 @@ public final class PhpOwnershipFramePublisher implements PhpOwnershipHeap.Publis
         return publication;
     }
 
+    /** Package-private custody transfer: the destination adapter owns the actual raw store token. */
+    PhpOwnershipFrame.Publication prepareTransferToEdge(PhpOwnershipHeap.Snapshot expected,PhpOwnership.Slot edge) {
+        expected(expected);if (snapshot.binding() == null) throw new IllegalStateException("Ownership transfer source is empty");
+        return slot.prepareTransferToEdge(edge);
+    }
+    PhpOwnershipFrame.Publication prepareTransferFromEdge(PhpOwnershipHeap.Snapshot expected,PhpOwnership.Slot edge,Memory raw) {
+        expected(expected);if (snapshot.binding() != null) throw new IllegalArgumentException("Cleanup destination is not empty");
+        return slot.prepareTransferFromEdge(edge,raw);
+    }
+    void publishTransferredSnapshot(PhpOwnershipHeap.Snapshot next) {snapshot=next;}
     private static final class Publication implements PhpOwnershipHeap.Publication {
         private final PhpOwnershipFramePublisher destination,source;
         private final PhpOwnershipHeap.Snapshot oldDestination,oldSource,nextDestination,nextSource;

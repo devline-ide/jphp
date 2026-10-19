@@ -16,6 +16,18 @@ import java.lang.reflect.Field;
 
 public class PropertyEntity extends Entity {
     protected ClassEntity clazz;
+    private php.runtime.reflection.support.PhpPropertyHooks phpHooks;
+    public php.runtime.reflection.support.PhpPropertyHooks getPhpHooks() {return phpHooks;}
+    public void setPhpHooks(php.runtime.reflection.support.PhpPropertyHooks hooks) {
+        if (hooks!=null) hooks.validateFor(this);
+        phpHooks=hooks;
+    }
+    /** Compiler-only initial catalog; final inheritance/storage validation precedes module publication. */
+    public void installPhpHookDeclaration(php.runtime.reflection.support.PhpPropertyHooks hooks) {
+        if(phpHooks!=null || hooks==null) throw new IllegalArgumentException("Hook declaration is already installed or absent");
+        hooks.validateDeclarationFor(this);
+        phpHooks=hooks;
+    }
     protected ClassEntity trait;
     protected Modifier modifier = Modifier.PUBLIC;
     private Memory defaultValue;
@@ -23,8 +35,20 @@ public class PropertyEntity extends Entity {
 
     protected boolean isStatic;
     private boolean isFinal;
+    private boolean promoted;
+    private php.runtime.common.Modifier phpSetModifier;
+    public php.runtime.common.Modifier getPhpSetModifier() {return phpSetModifier;}
+    public void setPhpSetModifier(php.runtime.common.Modifier value) {phpSetModifier=value;}
+    private boolean phpReadonly;
+    public boolean isPhpReadonly() {return phpReadonly;}
+    public void setPhpReadonly(boolean value) {phpReadonly=value;}
+    public boolean isPromoted() {return promoted;}
+    public void setPromoted(boolean value) {promoted=value;}
     private php.runtime.reflection.support.PhpTypeDeclaration declaredType;
-    public boolean isFinal() {return isFinal;}
+    public Modifier effectiveSetModifier() {return phpSetModifier!=null?phpSetModifier:phpReadonly && modifier==Modifier.PUBLIC?Modifier.PROTECTED:modifier;}
+    public boolean isPrivateSet() {return effectiveSetModifier()==Modifier.PRIVATE && modifier!=Modifier.PRIVATE;}
+    public boolean isProtectedSet() {return effectiveSetModifier()==Modifier.PROTECTED && modifier==Modifier.PUBLIC;}
+    public boolean isFinal() {return isFinal || phpSetModifier==Modifier.PRIVATE && modifier!=Modifier.PRIVATE;}
     public void setFinal(boolean value) {isFinal = value;}
     public php.runtime.reflection.support.PhpTypeDeclaration getDeclaredType() {return declaredType;}
     public void setDeclaredType(php.runtime.reflection.support.PhpTypeDeclaration type) {declaredType = type;}
@@ -171,6 +195,7 @@ public class PropertyEntity extends Entity {
 
     public void setClazz(ClassEntity clazz) {
         this.clazz = clazz;
+        if(phpHooks!=null && clazz!=null) phpHooks.bindOwned(this);
         updateSpecificName();
     }
 
@@ -288,8 +313,12 @@ public class PropertyEntity extends Entity {
 
     public PropertyEntity duplicate() {
         PropertyEntity propertyEntity = new PropertyEntity(context);
+        propertyEntity.setPhpAttributes(getPhpAttributes());
         propertyEntity.setStatic(isStatic);
         propertyEntity.setFinal(isFinal);
+        propertyEntity.setPromoted(promoted);
+        propertyEntity.setPhpReadonly(phpReadonly);
+        propertyEntity.setPhpSetModifier(phpSetModifier);
         propertyEntity.setDeclaredType(declaredType);
         propertyEntity.setDocComment(docComment);
         propertyEntity.setName(name);
@@ -300,13 +329,15 @@ public class PropertyEntity extends Entity {
         propertyEntity.setTrace(trace);
         propertyEntity.setGetter(getter);
         propertyEntity.setSetter(setter);
+        propertyEntity.setPhpHooks(phpHooks);
         return propertyEntity;
     }
 
     public Memory assignValue(Environment env, TraceInfo trace, Object object, String name, Memory value) {
+        if(object instanceof php.runtime.lang.IPhpNativePropertyGuard guard) guard.validateNativePropertyWrite(env,trace,name);
         php.runtime.memory.ReferenceMemory reference=(php.runtime.memory.ReferenceMemory)((IObject) object).getProperties().refOfIndex(name);
-        reference.attachPropertySource(env, this);
-        return reference.assign(value);
+        reference.attachPropertySource(env, this,(IObject)object);
+        return phpReadonly ? php.runtime.PhpReadonlyProperty.reflectAssign(env,trace,this,(IObject)object,reference,value) : reference.assign(value);
     }
 
     public Memory getStaticValue(Environment env, TraceInfo trace) {

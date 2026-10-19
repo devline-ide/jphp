@@ -70,4 +70,9 @@ public class PSqlConnectionPool extends BaseObject {
     public PSqlConnection getConnection(Environment env) throws SQLException {
         return new PSqlConnection(env, pool.getConnection());
     }
+
+    @Signature
+    public void close() {
+        pool.close();
+    }
 }

@@ -1,0 +1,3 @@
+Fatal error: Must not use parent::$x::get() outside a property hook in G:\DevLine-QA\jphp-property-hooks-20261013\generator-hooks-agent-r1\test-resources\resources\property_hooks\generator_resume\weak\nested_forbidden.php on line 2
+Stack trace:
+#0 {main}

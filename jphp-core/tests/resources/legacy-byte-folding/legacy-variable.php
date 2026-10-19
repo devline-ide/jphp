@@ -1,0 +1,1 @@
+<?php function through($s,$n){return [ord($s),chr($n)];} $r=through('A',66);echo $r[0],'|',$r[1];

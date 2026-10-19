@@ -29,7 +29,8 @@ public class OutputBuffer {
     private Invoker invoker;
 
     private int chunkSize;
-    private boolean erase;
+    private static final int PHP85_BUFFER = 1 << 16, PHP85_ENDED = 1 << 17;
+    private int capabilities; // Native capability bits plus private lifecycle bits.
 
     private final Environment environment;
     private final OutputBuffer parentOutput;
@@ -42,6 +43,7 @@ public class OutputBuffer {
 
     private int lock = 0;
     private boolean isFlushed = false;
+    private boolean handlerDisabled;
     private TraceInfo trace;
 
     private int status;
@@ -55,7 +57,7 @@ public class OutputBuffer {
             this.invoker = Invoker.valueOf(environment, null, callback);
 
         this.chunkSize = chunkSize;
-        this.erase = erase;
+        this.capabilities = erase ? 112 : 48;
         this.parentOutput = parent;
 
         this.type = Type.INTERNAL;
@@ -119,13 +121,43 @@ public class OutputBuffer {
         return output;
     }
 
+    /** Isolates one embedding invocation's bytes while retaining the actual OutputBuffer identity. */
+    public ScopedOutput scopeOutput(OutputStream target,boolean pureBuffered) {
+        if(pureBuffered && (callback!=null || getClass()!=OutputBuffer.class))
+            throw new IllegalArgumentException("Embedding output needs its exact pure buffer protocol");
+        return new ScopedOutput(target,pureBuffered);
+    }
+    public final class ScopedOutput implements AutoCloseable {
+        private final ByteArrayOutputStream previousBuffer=buffer;
+        private final ByteArrayOutputStream scopedBuffer=new ByteArrayOutputStream(4098);
+        private final OutputStream previousOutput=output;
+        private final boolean previousBinary=binaryInBuffer,previousImplicit=implicitFlush,previousFlushed=isFlushed,previousDisabled=handlerDisabled;
+        private final int previousChunk=chunkSize,previousStatus=status,previousLock=lock,previousCapabilities=capabilities;
+        private final TraceInfo previousTrace=trace;
+        private boolean closed;
+        private ScopedOutput(OutputStream target,boolean pureBuffered) {
+            buffer=scopedBuffer;binaryInBuffer=false;status=HANDLER_START;isFlushed=false;handlerDisabled=false;capabilities &= ~PHP85_ENDED;
+            if(isRoot())output=target;
+            if(pureBuffered){implicitFlush=false;chunkSize=0;}
+        }
+        @Override public void close() {
+            if(closed)return;
+            if(buffer!=scopedBuffer)throw new IllegalStateException("Embedding output scopes must close in reverse order");
+            buffer=previousBuffer;output=previousOutput;binaryInBuffer=previousBinary;implicitFlush=previousImplicit;
+            isFlushed=previousFlushed;handlerDisabled=previousDisabled;capabilities=previousCapabilities;chunkSize=previousChunk;status=previousStatus;lock=previousLock;trace=previousTrace;
+            closed=true;
+        }
+    }
+
 
     public void setCallback(Memory callback, Invoker invoker) {
+        this.handlerDisabled = false;
         this.callback = callback;
         this.invoker = invoker;
     }
 
     public void setCallback(Memory callback) {
+        this.handlerDisabled = false;
         this.callback = callback;
 
         if (callback != null)
@@ -143,12 +175,15 @@ public class OutputBuffer {
     }
 
     public boolean isErase() {
-        return erase;
+        return (capabilities & 64) != 0;
     }
 
     public void setErase(boolean erase) {
-        this.erase = erase;
+        capabilities = (capabilities & ~64) | (erase ? 64 : 0);
     }
+
+    public int getCapabilities() { return capabilities & 112; }
+    public void setPhp85Capabilities(int flags) { capabilities = (flags & 112) | PHP85_BUFFER; }
 
     public Memory getContents() throws UnsupportedEncodingException {
         if (!binaryInBuffer){
@@ -170,10 +205,53 @@ public class OutputBuffer {
         reset();
     }
 
+    /** Explicit PHP flush/final phases; callback failures retire through the same raw-byte path. */
+    public void flushPhp85(boolean last) throws Throwable {
+        int phase = (last ? HANDLER_FINAL : HANDLER_FLUSH)
+                | (status == HANDLER_START ? HANDLER_START : 0);
+        if (last && (capabilities & PHP85_ENDED) != 0) return;
+        isFlushed = true;
+        try { doFlush(true, phase); }
+        finally { if (last) capabilities |= PHP85_ENDED; }
+        if (output != null) output.flush();
+    }
+
+    /** PHP 8 cleanup phases: START is sent once; a final clean never forwards callback output. */
+    public void cleanPhp85(boolean last) throws Throwable {
+        int phase = HANDLER_CLEAN | (last ? HANDLER_FINAL : 0)
+                | (status == HANDLER_START ? HANDLER_START : 0);
+        try {
+            if (invoker != null && !handlerDisabled) doFlush(false, phase);
+        } catch (Throwable failure) {
+            handlerDisabled = true;
+            throw failure;
+        } finally {
+            status = HANDLER_CLEAN | (last ? HANDLER_FINAL : 0);
+            if (last) capabilities |= PHP85_ENDED;
+            reset();
+        }
+    }
+
     protected void doFlush(boolean flush) throws Throwable {
+        doFlush(flush, -1);
+    }
+
+    private void doFlush(boolean flush, int phase) throws Throwable {
+        if (handlerDisabled) {
+            if (flush && buffer.size() != 0) {
+                if (output == null && parentOutput == null) return;
+                byte[] pending = buffer.toByteArray();
+                if (output != null) output.write(pending);
+                else parentOutput.write(pending);
+            }
+            reset();
+            return;
+        }
         /*if (buffer.size() == 0)
             return;*/
-        if (flush){
+        if (phase >= 0) {
+            status = phase;
+        } else if (flush){
             isFlushed = true;
             if (status != HANDLER_START && status != HANDLER_FLUSH)
                 status = HANDLER_WRITE;
@@ -196,20 +274,27 @@ public class OutputBuffer {
 
             invoker.setTrace(trace == null ? TraceInfo.UNKNOWN : trace);
             Memory result;
-            incLock();
             try {
-               result = invoker.call(args).toValue();
-            } finally {
-                decLock();
+                incLock();
+                try { result = invoker.call(args).toValue(); }
+                finally { decLock(); }
+            } catch (Throwable failure) {
+                if (phase >= 0) {
+                    handlerDisabled = true;
+                    if (flush) try { doFlush(true, -1); }
+                    catch (Throwable cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
+                }
+                throw failure;
             }
             if (result != Memory.FALSE){
-                byte[] data = result instanceof BinaryMemory
+                byte[] data = result instanceof BinaryMemory || result instanceof php.runtime.memory.PhpByteStringMemory
                         ? result.getBinaryBytes(environment.getDefaultCharset()) : result.toString().getBytes(environment.getDefaultCharset());
                 if (flush){
                     if (output == null) {
                         if (parentOutput == null) {
                             // A root without an output stream is an in-memory sink.
                             reset();
+                            if (result instanceof php.runtime.memory.PhpByteStringMemory) binaryInBuffer = true;
                             buffer.write(data);
                             status = HANDLER_FLUSH;
                             return;
@@ -245,10 +330,18 @@ public class OutputBuffer {
             _write(content.getBytes(environment.getDefaultCharset()));
     }
 
+    /** A modern source echo carries its actual trace into Stringable conversion. Ordinary scalars stay unboxed. */
+    public static void echoPhp85(Environment env, Memory value, TraceInfo trace) throws Throwable {
+        php.runtime.PhpPrimitiveCellRuntime.beforeEcho(value,env);
+        Memory actual=value.toValue();
+        if(actual.isObject()) actual=php.runtime.PhpByteStrings.stringValue(actual,env,trace);
+        env.echo(actual);
+    }
+
     public void write(Memory content) throws Throwable {
         if (!isLock()){
             content = content.toValue();
-            if (content instanceof BinaryMemory)
+            if (content instanceof BinaryMemory || content instanceof php.runtime.memory.PhpByteStringMemory)
                 write(content.getBinaryBytes(environment.getDefaultCharset()));
             else
                 write(content.toString());
@@ -261,6 +354,12 @@ public class OutputBuffer {
 
     protected void _write(byte[] bytes, int length) throws Throwable {
         if (isLock()) return;
+        if (handlerDisabled) {
+            if (output != null) output.write(bytes, 0, length);
+            else if (parentOutput != null) parentOutput.write(bytes, length);
+            else buffer.write(bytes, 0, length);
+            return;
+        }
 
         boolean needFlush = implicitFlush || (chunkSize > 0 && length + buffer.size() >= chunkSize);
 
@@ -269,22 +368,29 @@ public class OutputBuffer {
                 int cutLength = (length + buffer.size()) - chunkSize;
                 if (cutLength > 0){
                     buffer.write(bytes, 0, length);
-                    doFlush(true);
+                    flushAutomatic();
 
                     /*byte[] tmp = new byte[cutLength];
                     System.arraycopy(bytes, bytes.length - cutLength, tmp, 0, cutLength);
                     _write(tmp);*/
                 } else {
                     buffer.write(bytes, 0, length);
-                    doFlush(true);
+                    flushAutomatic();
                 }
             } else {
                 buffer.write(bytes, 0, length);
-                doFlush(true);
+                flushAutomatic();
             }
         } else {
             buffer.write(bytes, 0, length);
         }
+    }
+
+    private void flushAutomatic() throws Throwable {
+        if ((capabilities & PHP85_BUFFER) != 0) {
+            isFlushed = true;
+            doFlush(true, status == HANDLER_START ? HANDLER_START : HANDLER_WRITE);
+        } else doFlush(true);
     }
 
     public void write(byte[] bytes, int length) throws Throwable {
@@ -308,8 +414,9 @@ public class OutputBuffer {
     }
 
     public void close() throws Throwable {
-        if (!isBufferEmpty())
-            doFlush(true);
+        if ((capabilities & PHP85_BUFFER) != 0) {
+            if ((capabilities & PHP85_ENDED) == 0) flushPhp85(true);
+        } else if (!isBufferEmpty()) doFlush(true);
     }
 
     public int getBufferSize(){

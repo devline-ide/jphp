@@ -8,6 +8,11 @@ import org.develnext.jphp.core.tokenizer.token.expr.value.VariableExprToken;
 
 public class ArgumentStmtToken extends StmtToken {
     private boolean reference;
+    private java.util.List<PropertyHookStmtToken> promotedPropertyHooks=java.util.List.of();
+    public java.util.List<PropertyHookStmtToken> getPromotedPropertyHooks() {return promotedPropertyHooks;}
+    public void setPromotedPropertyHooks(java.util.List<PropertyHookStmtToken> hooks) {
+        promotedPropertyHooks=java.util.List.copyOf(hooks);
+    }
     private boolean variadic;
     private HintType hintType;
     private php.runtime.reflection.support.PhpTypeDeclaration declaredType;
@@ -15,6 +20,18 @@ public class ArgumentStmtToken extends StmtToken {
     private VariableExprToken name;
     private ExprStmtToken value;
     private boolean optional;
+    private php.runtime.common.Modifier promotionModifier;
+    private php.runtime.common.Modifier phpSetModifier;
+    public php.runtime.common.Modifier getPhpSetModifier() {return phpSetModifier;}
+    public void setPhpSetModifier(php.runtime.common.Modifier value) {phpSetModifier=value;}
+    private boolean phpReadonly;
+    public boolean isPhpReadonly() {return phpReadonly;}
+    public void setPhpReadonly(boolean value) {phpReadonly=value;}
+    private php.runtime.reflection.support.PhpTypeDeclaration promotedType;
+    public php.runtime.common.Modifier getPromotionModifier() {return promotionModifier;}
+    public void setPromotionModifier(php.runtime.common.Modifier value) {promotionModifier=value;}
+    public php.runtime.reflection.support.PhpTypeDeclaration getPromotedType() {return promotedType;}
+    public void setPromotedType(php.runtime.reflection.support.PhpTypeDeclaration value) {promotedType=value;}
 
     public ArgumentStmtToken(TokenMeta meta) {
         super(meta, TokenType.T_J_CUSTOM);

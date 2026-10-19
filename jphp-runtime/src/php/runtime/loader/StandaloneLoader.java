@@ -76,7 +76,7 @@ public class StandaloneLoader {
         scope.addConstantEntityFetchHandler(new EntityFetchHandler() {
             @Override
             public void fetch(CompileScope scope, String originName, String name) {
-                ModuleEntity module = fetchConstant(name);
+                ModuleEntity module = fetchConstant(originName);
 
                 if (module != null) {
                         loadModule(module);
@@ -159,7 +159,10 @@ public class StandaloneLoader {
             throw new NullPointerException("classLoader is null");
         }
 
-        this.loadLibraryDump(classLoader.getResourceAsStream("JPHP-INF/library.dump"));
+        try (InputStream input = classLoader.getResourceAsStream("JPHP-INF/library.dump")) {
+            if (input == null) throw new IOException("Cannot find standalone library: JPHP-INF/library.dump");
+            this.loadLibraryDump(input);
+        }
     }
 
     public void readConfig() {
@@ -331,35 +334,31 @@ public class StandaloneLoader {
     }
 
     protected void loadModule(ModuleEntity moduleEntity) {
+        // Read every generated member before definition; native Java extensions stay in the resource parent.
+        List<php.runtime.reflection.support.Entity> members = new ArrayList<>();
+        members.add(moduleEntity);
+        members.addAll(moduleEntity.getClasses());
+        members.addAll(moduleEntity.getFunctions());
+        members.addAll(moduleEntity.getClosures());
+        members.addAll(moduleEntity.getGenerators());
+        Map<php.runtime.reflection.support.Entity, byte[]> bytecode = new IdentityHashMap<>();
         try {
-            moduleEntity.setNativeClazz(classLoader.loadClass(moduleEntity.getInternalName()));
-
-            for (FunctionEntity functionEntity : moduleEntity.getFunctions()) {
-                functionEntity.setNativeClazz(
-                        classLoader.loadClass(functionEntity.getInternalName())
-                );
+            for (php.runtime.reflection.support.Entity member : members) {
+                byte[] data = member.getData();
+                if (data == null || data.length == 0) {
+                    String resource = member.getInternalName().replace('.', '/') + ".class";
+                    try (InputStream input = classLoader.getResourceAsStream(resource)) {
+                        if (input == null) throw new IOException("Cannot find standalone bytecode: " + resource);
+                        data = input.readAllBytes();
+                    }
+                }
+                bytecode.put(member, data);
             }
-
-            for (ClassEntity classEntity : moduleEntity.getClasses()) {
-                classEntity.setNativeClazz(
-                        classLoader.loadClass(classEntity.getCompiledInternalName())
-                );
-            }
-
-            for (ClosureEntity closureEntity : moduleEntity.getClosures()) {
-                closureEntity.setNativeClazz(
-                        classLoader.loadClass(closureEntity.getInternalName())
-                );
-            }
-
-            for (GeneratorEntity generatorEntity : moduleEntity.getGenerators()) {
-                generatorEntity.setNativeClazz(
-                        classLoader.loadClass(generatorEntity.getInternalName())
-                );
-            }
-        } catch (ClassNotFoundException e) {
-            throw new RuntimeException(e);
+        } catch (IOException failure) {
+            throw new RuntimeException(failure);
         }
+        for (var member : members) member.setData(bytecode.get(member));
+        scope.getClassLoader().loadModule(moduleEntity, true);
     }
 
     public Environment getScopeEnvironment() {

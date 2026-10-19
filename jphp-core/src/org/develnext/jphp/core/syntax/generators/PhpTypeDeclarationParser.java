@@ -130,7 +130,7 @@ final class PhpTypeDeclarationParser {
             if (analyzer.getClazz() == null) error("Cannot use \"" + lower + "\" when no class scope is active");
         }
         if (PhpTypeDeclaration.BUILTINS.contains(lower) || lower.equals("static")) return lower;
-        if (lower.equals("self")) return analyzer.getClazz().isTrait() ? "self" : analyzer.getClazz().getFulledName();
+        if (lower.equals("self")) return analyzer.getClazz().isTrait() || analyzer.getClazz().isAnonymous() ? "self" : analyzer.getClazz().getFulledName();
         if (lower.equals("parent")) {
             if (analyzer.getClazz().isTrait()) return "parent";
             if (analyzer.getClazz().getExtend() == null) error("Cannot use \"parent\" when current class scope has no parent");

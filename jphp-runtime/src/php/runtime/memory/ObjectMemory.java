@@ -33,6 +33,7 @@ public class ObjectMemory extends Memory {
 
     public ObjectMemory(IObject object){
         this();
+        php.runtime.PhpPrimitiveCellRuntime.beforeObjectConstruction(object);
         this.value = object;
     }
 
@@ -304,6 +305,9 @@ public class ObjectMemory extends Memory {
 
     @Override
     public ForeachIterator getNewIterator(final Environment env, boolean getReferences, boolean getKeyReferences) {
+        if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+            return ((php.runtime.lang.spl.iterator.ArrayIterator) value).internalIterator(env, getReferences, getKeyReferences);
+        }
         if (value instanceof IteratorAggregate) {
             return env.invokeMethodNoThrow(value, "getIterator").getNewIterator(env, getReferences, getKeyReferences);
         } else if (value instanceof Iterator) {
@@ -315,6 +319,14 @@ public class ObjectMemory extends Memory {
                 private boolean keyInit = false;
                 private boolean needNext = false;
                 private boolean rewind = false;
+
+                private void pushIteratorCall(String name) {
+                    // A native bridge can be inherited; its PHP scope remains the declaring method.
+                    var method = ObjectMemory.this.value.getReflection().findMethod(name);
+                    if (method == null || method.getClazz() == null)
+                        throw new IllegalStateException("Iterator bridge lacks its PHP method: " + name);
+                    env.pushCall(trace, ObjectMemory.this.value, null, name, method.getClazz().getName(), className);
+                }
 
                 @Override
                 public void reset() {
@@ -335,7 +347,7 @@ public class ObjectMemory extends Memory {
 
                     if (!rewind){
                         if (!isNative)
-                            env.pushCall(trace, ObjectMemory.this.value, null, "rewind", className, null);
+                            pushIteratorCall("rewind");
                         try {
                             return iterator.rewind(env).toValue() != FALSE;
                         } finally {
@@ -359,6 +371,11 @@ public class ObjectMemory extends Memory {
 
                 @Override
                 public boolean next() {
+                    return next(true);
+                }
+
+                @Override
+                public boolean next(boolean fetchValue) {
                     if (!rewind())
                         return false;
 
@@ -366,7 +383,7 @@ public class ObjectMemory extends Memory {
                     keyInit = false;
                     if (needNext){
                         if (!isNative)
-                            env.pushCall(trace, ObjectMemory.this.value, null, "next", className, null);
+                            pushIteratorCall("next");
                         try {
                             iterator.next(env);
                         } finally {
@@ -377,12 +394,12 @@ public class ObjectMemory extends Memory {
 
                     needNext = true;
                     if (!isNative)
-                        env.pushCall(trace, ObjectMemory.this.value, null, "valid", className, null);
+                        pushIteratorCall("valid");
                     try {
                         valid = iterator.valid(env).toBoolean();
-                        if (valid) {
+                        if (valid && fetchValue) {
                             if (!isNative)
-                                env.pushCall(trace, ObjectMemory.this.value, null, "current", className, null);
+                                pushIteratorCall("current");
                             try {
                                 currentValue = iterator.current(env);
                                 if (!getReferences)
@@ -391,7 +408,7 @@ public class ObjectMemory extends Memory {
                                 if (!isNative)
                                     env.popCall();
                             }
-                        } else {
+                        } else if (!valid) {
                             rewind = false;
                         }
                     } finally {
@@ -413,7 +430,7 @@ public class ObjectMemory extends Memory {
                         return (Memory)currentKey;
 
                     if (!isNative)
-                        env.pushCall(trace, ObjectMemory.this.value, null, "key", className, null);
+                        pushIteratorCall("key");
                     try {
                         currentKey = iterator.key(env).toImmutable();
                         keyInit = true;
@@ -467,6 +484,8 @@ public class ObjectMemory extends Memory {
 
                             int accessFlag = entity == null ? 0 : entity.canAccess(env);
                             if (accessFlag == 0){
+                                if(getReferences && entity!=null && entity.isPhpReadonly()) env.exception(env.trace(),php.runtime.lang.exception.BaseError.class,
+                                        "Cannot acquire reference to readonly property %s::$%s",entity.getClazz().getName(),entity.getName());
                                 currentKey = entity == null ? keyS : entity.getName();
                                 break;
                             } else
@@ -515,6 +534,7 @@ public class ObjectMemory extends Memory {
 
     @Override
     public Memory clone(Environment env, TraceInfo trace) throws Throwable {
+        if(getReflection().isEnum())env.exception(trace,php.runtime.lang.exception.BaseError.class,"Trying to clone an uncloneable object of class %s",getReflection().getName());
         php.runtime.PhpOwnershipObjects.rejectUnmanagedClone(value);
         if (value instanceof ICloneableObject) {
             return new ObjectMemory(((ICloneableObject) value).__clone(env, trace));
@@ -591,6 +611,13 @@ public class ObjectMemory extends Memory {
         }
     }
 
+    private boolean nativeArrayIteratorMember(String name) {
+        if (!(value instanceof php.runtime.lang.spl.iterator.ArrayIterator)) return false;
+        var method = getReflection().findMethod(name.toLowerCase(java.util.Locale.ROOT));
+        return method != null && method.getNativeMethod() != null
+                && method.getNativeMethod().getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class;
+    }
+
     @Override
     public Memory refOfIndex(final TraceInfo trace, final Memory index) {
         if (value instanceof ArrayAccess){
@@ -598,6 +625,10 @@ public class ObjectMemory extends Memory {
                 @Override
                 public Memory assign(Memory memory) {
                     Environment env = ObjectMemory.this.value.getEnvironment();
+                    if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+                        env.invokeMethodNoThrow(value, "offsetSet", index, memory);
+                        return memory;
+                    }
                     if (env != null && trace != null){
                         ArrayAccess array = (ArrayAccess)ObjectMemory.this.value;
                         Memory[] args = new Memory[]{ index, memory };
@@ -635,6 +666,11 @@ public class ObjectMemory extends Memory {
                 @Override
                 public Memory assign(double memory) {
                     return assign(DoubleMemory.valueOf(memory));
+                }
+
+                @Override
+                public Memory assignConcatLegacy(Memory memory) {
+                    return assign(php.runtime.PhpByteStrings.concatLegacyArrayAccess(toValue(), memory));
                 }
 
                 @Override
@@ -1049,6 +1085,14 @@ public class ObjectMemory extends Memory {
                 }
 
                 @Override
+                public ReferenceMemory getReferenceForBinding() {
+                    if (nativeArrayIteratorMember("offsetGet"))
+                        return ((ReferenceMemory) ((php.runtime.lang.spl.iterator.ArrayIterator) value)
+                                .offsetAddress(value.getEnvironment(), index)).getReferenceForBinding();
+                    return super.getReferenceForBinding();
+                }
+
+                @Override
                 public ReferenceMemory getReference() {
                     Memory ret = toValue();
                     if (ret instanceof ReferenceMemory)
@@ -1190,6 +1234,9 @@ public class ObjectMemory extends Memory {
 
     @Override
     public Memory valueOfIndex(TraceInfo trace, Memory index) {
+        if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+            return value.getEnvironment().invokeMethodNoThrow(value, "offsetGet", index);
+        }
         if (value instanceof ArrayAccess){
             Environment env = value.getEnvironment();
             if (env != null && trace != null){
@@ -1233,6 +1280,10 @@ public class ObjectMemory extends Memory {
 
     @Override
     public void unsetOfIndex(TraceInfo trace, Memory index) {
+        if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+            value.getEnvironment().invokeMethodNoThrow(value, "offsetUnset", index);
+            return;
+        }
         if (value instanceof ArrayAccess){
             Environment env = value.getEnvironment();
             if (env != null && trace != null){
@@ -1260,6 +1311,14 @@ public class ObjectMemory extends Memory {
     }
 
     private Memory issetOfIndex(TraceInfo trace, Memory index, boolean asEmpty) {
+        if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+            Environment env = value.getEnvironment();
+            Memory exists = nativeArrayIteratorMember("offsetExists")
+                    ? ((php.runtime.lang.spl.iterator.ArrayIterator) value).offsetIsset(env, index)
+                    : env.invokeMethodNoThrow(value, "offsetExists", index);
+            if (!exists.toBoolean()) return Memory.NULL;
+            return asEmpty ? env.invokeMethodNoThrow(value, "offsetGet", index) : Memory.TRUE;
+        }
         if (value instanceof ArrayAccess){
             Environment env = value.getEnvironment();
             if (env != null && trace != null){

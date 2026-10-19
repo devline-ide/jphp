@@ -12,6 +12,7 @@ public final class PhpPropertyWriteContext {
         public final TraceInfo trace;
         public final boolean strict;
         private final Frame previous;
+        public Frame previousFrame() { return previous; }
         private Frame(Environment environment, TraceInfo trace, boolean strict, Frame previous) {
             this.environment=environment; this.trace=trace; this.strict=strict; this.previous=previous;
         }
@@ -21,6 +22,7 @@ public final class PhpPropertyWriteContext {
     }
     public static void leave(Frame frame) {
         if (CURRENT.get() != frame) throw new IllegalStateException("Unbalanced PHP property write context");
+        PhpPrimitiveCellRuntime.leaving(frame);
         if (frame.previous == null) CURRENT.remove(); else CURRENT.set(frame.previous);
     }
     public static Frame current(Environment env) {

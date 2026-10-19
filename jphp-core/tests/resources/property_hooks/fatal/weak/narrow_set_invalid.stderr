@@ -1,0 +1,3 @@
+Fatal error: Type of parameter $v of hook H::$x::set must be compatible with property type in G:\DevLine-QA\jphp-property-hooks-20261013\native-corpus1\php\weak\narrow_set_invalid.php on line 4
+Stack trace:
+#0 {main}

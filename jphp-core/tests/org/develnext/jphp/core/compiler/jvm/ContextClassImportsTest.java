@@ -164,25 +164,27 @@ public class ContextClassImportsTest extends JvmCompilerCase {
         }
     }
 
-    @Test public void testInventoryIncludesCurrentlyUnsupportedConditionalDeclarations() throws Throwable {
-        // Native PHP accepts conditional class declarations. BodyGenerator currently
-        // rejects them; keep this limitation explicit while proving the prepass covers
-        // their forward-reference names before the unsupported syntax is encountered.
-        for (PhpLanguageProfile profile : PhpLanguageProfile.values()) {
+    @Test public void testInventoryIncludesConditionalDeclarationsBeforeExecution() throws Throwable {
+        String execution = "$before = Widget::class; if (true) { class Widget {} } " +
+                "return $before.'|'.Widget::class.'|'.get_class(new Widget);";
+        for (PhpLanguageProfile profile : PhpLanguageProfile.values()) for (boolean dump : new boolean[] {false, true}) {
             Environment env = new Environment(newScope());
             try {
                 SyntaxAnalyzer analyzer = new SyntaxAnalyzer(env,
                         new Tokenizer(context("return 0;", profile, "Vendor\\Widget", "Vendor\\Other")));
                 try {
-                    analyzer.reset(env, new Tokenizer(context("if (true) { class Widget {} } return Widget::class;", profile,
-                            "Vendor\\Widget", "Vendor\\Other")));
-                    fail("Conditional declaration support changed; replace this limitation assertion with native execution parity");
+                    analyzer.reset(env, new Tokenizer(context(execution, profile, "Vendor\\Widget", "Vendor\\Other")));
+                    if (profile == PhpLanguageProfile.JPHP_LEGACY) fail("Legacy conditional syntax changed");
                 } catch (php.runtime.exceptions.support.ErrorException expected) {
+                    if (profile != PhpLanguageProfile.JPHP_LEGACY) throw expected;
                     assertTrue(expected.getMessage(), expected.getMessage().contains("class"));
                 }
                 analyzer.setNamespace(analyzer.newNamespace());
                 assertEquals("Widget", analyzer.getRealName(NameToken.valueOf("Widget")).toName());
                 assertEquals("Vendor\\Other", analyzer.getRealName(NameToken.valueOf("Other")).toName());
+                assertNull("Inventory must not publish the class", env.fetchClass("Widget", false));
+                if (profile == PhpLanguageProfile.PHP_8_5) assertEquals("Widget|Widget|Widget", runContext(env,
+                        context(execution, profile, "Vendor\\Widget", "Vendor\\Other"), dump).toString());
             } finally { env.doFinal(); }
         }
     }

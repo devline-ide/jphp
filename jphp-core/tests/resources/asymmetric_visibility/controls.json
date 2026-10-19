@@ -1,0 +1,632 @@
+[
+  {
+    "id": "weak/write_operations",
+    "resource": "resources/asymmetric_visibility/weak/write_operations",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "05eb3d22e9b40d91440e4b214c04a1a1b3e14004ae5d8e4167679f5e8d83ed25",
+    "stdoutSha256": "e952a8dcb713ddab2780f7775e979d00be7d6eba0a01a916393244f03d7072f8",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/escaped_alias",
+    "resource": "resources/asymmetric_visibility/weak/escaped_alias",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "90d8e65957f414b34973c98725deac7704c221c8e7e0c3dec5024a63143af847",
+    "stdoutSha256": "34caa4fb345837e4c9ee0d364567007144c176fe65bcf91953bb78d6e481578a",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/scopes",
+    "resource": "resources/asymmetric_visibility/weak/scopes",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "0891a8afb7a1a84624926c464ee2cd1bd873b2bca5ed763a5228b6e961703ac8",
+    "stdoutSha256": "1d621e9feb6e4e16cce4e391de399ea9d1726a933e3517a90b9af6a249877f35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/parent_scope_child_property",
+    "resource": "resources/asymmetric_visibility/weak/parent_scope_child_property",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "ede3df284f99f199f498e3899d844f95bdf1cbfee0baff508951266a0398ac37",
+    "stdoutSha256": "999e9918a1a81b25c7da5250f2e33ae39db781f367765bd742d62b7693dfeacc",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/byref_send",
+    "resource": "resources/asymmetric_visibility/weak/byref_send",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "c88e6356a3c3ae1aa16019a1bb1632735c447bea933b773819887bb82ba4f2a5",
+    "stdoutSha256": "2aa4507d57b96134fa3bac0390fbea1d5fc636f3220bf75265bc37826da736d1",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/coalesce",
+    "resource": "resources/asymmetric_visibility/weak/coalesce",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "e1403c0a156701e13c801a4d3502f07d7c7eaa1cbf4d9a97212b43e91cb60072",
+    "stdoutSha256": "40bebc3b8a42d04a727710944f5390ce4c903b2d52ee0a771adb857e89492292",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/magic",
+    "resource": "resources/asymmetric_visibility/weak/magic",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "64f8208d498add284432b15c498641d2fdb49f20a49ce006c313f5252f3649e0",
+    "stdoutSha256": "110d22e35b1b937504fd1d3fceb73d3249b521ad6db9a74a40005e6aae501e16",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/hook_order",
+    "resource": "resources/asymmetric_visibility/weak/hook_order",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "4732ffaffee7d5dc6df6eee41a20daa3146936e3aae12c12cb0ae954e6d1a8ef",
+    "stdoutSha256": "ac8432ab45a9dd33a0d09a18ca036deaf4bfc9bf1ae870c156626cc6f0975ece",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/hook_reference",
+    "resource": "resources/asymmetric_visibility/weak/hook_reference",
+    "nativeExit": 255,
+    "message": "Read-only virtual property H::$x must not specify asymmetric visibility",
+    "sourceSha256": "5f11b06e195cf7c9ce08ad81c400be6003fb2a532e28e106edc208f53b1745f3",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "af12f5f48035ed66afd32e02b76f14c2a8f50d9bbc9ae6fead2dafab67779fce"
+  },
+  {
+    "id": "weak/promotion_reflection",
+    "resource": "resources/asymmetric_visibility/weak/promotion_reflection",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "327f68d9444183c166694d814b934dcb86a74a225fbd1c895a3b5a43d57c14fc",
+    "stdoutSha256": "e849c85fda3f40b4a08b8f5229916ed0cf9cbc9348a633658aa3dd971ac34022",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/readonly",
+    "resource": "resources/asymmetric_visibility/weak/readonly",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "76327b572f015916b4ff85d0dce5cb9c828941f666c61ffea09b35b0f9ccd763",
+    "stdoutSha256": "04a864a5f396c94cc34db243db569ef9206b4f33ab0f85e62817c2420957b5e3",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/closure_scope",
+    "resource": "resources/asymmetric_visibility/weak/closure_scope",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "218752ac64a7c653b0af85c788e366f981c8c50e769ddafe77a961aface33426",
+    "stdoutSha256": "1b1ae2762819fc7c13fa1f8a4f9b2adb674743611388e2c90a8b72b20235f84e",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/redeclare_widen",
+    "resource": "resources/asymmetric_visibility/weak/redeclare_widen",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "7f55a9159ba44ead3d2c1650a600e6abd8d46cd6e85ef472dc779f807bd7ab71",
+    "stdoutSha256": "1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/implicit_public_get",
+    "resource": "resources/asymmetric_visibility/weak/implicit_public_get",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "4d1bfd10430bc36f95b7cccfdd0bf8a74a5540829ad8d6476b55a25e789aa275",
+    "stdoutSha256": "31bd0a60b96d4cd6934338de24d1411595146a39776c4c7e557ef59f0e5d75f1",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/untyped",
+    "resource": "resources/asymmetric_visibility/weak/untyped",
+    "nativeExit": 255,
+    "message": "Property with asymmetric visibility H::$x must have type",
+    "sourceSha256": "93486490e450e1b71c7f22efacb3eeae69ca97c2b1130c5fa448515ebb1741f9",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "24ba546c0a767c75f36c878ad17cdd463c5de333dc4cbc019b97bbe447fd3c70"
+  },
+  {
+    "id": "weak/broader_set",
+    "resource": "resources/asymmetric_visibility/weak/broader_set",
+    "nativeExit": 255,
+    "message": "Visibility of property H::$x must not be weaker than set visibility",
+    "sourceSha256": "069b2907e93868ba7be0e17a0618c519fce4b4f0e46a5e72a6ff23511721c5b9",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "6d295fcc2e0aba1e141fba55b99bad92a3cb838e1b22e2e5ababfdfdf72f9080"
+  },
+  {
+    "id": "weak/duplicate_set",
+    "resource": "resources/asymmetric_visibility/weak/duplicate_set",
+    "nativeExit": 255,
+    "message": "Multiple access type modifiers are not allowed",
+    "sourceSha256": "4af9a4ebd97ea7066f0da4cf42cb744ea99c53038dd74470666aabed723dc82b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "e692766a027e36cbb71da73fc7979f68c93d213db5d863c8c24234bf93e1b8a4"
+  },
+  {
+    "id": "weak/static",
+    "resource": "resources/asymmetric_visibility/weak/static",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "7a830f560f72ea72ee1d7810b28f56904000d4404b0219eaac737eadee781a13",
+    "stdoutSha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/private_set_override",
+    "resource": "resources/asymmetric_visibility/weak/private_set_override",
+    "nativeExit": 255,
+    "message": "Cannot override final property A::$x",
+    "sourceSha256": "3b5616219b6de219515d2981e53ec1cbc7a8bb1a0c9949f55e86d46fb8168b5e",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "99a0602fe2a552a727a1d58d443fb43d2c6c212eac5cd7d0a5d4d3d50da3cde1"
+  },
+  {
+    "id": "weak/redeclare_narrow",
+    "resource": "resources/asymmetric_visibility/weak/redeclare_narrow",
+    "nativeExit": 255,
+    "message": "Set access level of B::$x must be protected(set) (as in class A) or weaker",
+    "sourceSha256": "5a1fa8ab292238b8b4c7a626597f2d310af56dee103d65cc6c5822beec5e9037",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "bffddd064dc2f2a557734a08710248e16159a7e23fbbf1c1eb909c8379f8eff7"
+  },
+  {
+    "id": "weak/interface_private_set",
+    "resource": "resources/asymmetric_visibility/weak/interface_private_set",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "af91939cc9c765c4a90db8807c2bbc21f3f46fcd698a7c90e37e7b51f46c29ae",
+    "stdoutSha256": "be91f7644f03cc4976431d2001387209fb097540e3c994bf3e8ba4a99efa1457",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/readonly_no_type",
+    "resource": "resources/asymmetric_visibility/weak/readonly_no_type",
+    "nativeExit": 255,
+    "message": "Readonly property H::$x must have type",
+    "sourceSha256": "c7bebad7e707443cd2dbb2aeec6f2007ed2dfe260b620ab30863872b3f9738fa",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "6e514b9b3350948e3932dc244fce5d755d69964071283bc6919e26f3aec8c179"
+  },
+  {
+    "id": "strict/write_operations",
+    "resource": "resources/asymmetric_visibility/strict/write_operations",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "acdec49052ee5e1450700e1dc9a02d861aa801016ebab59424ebf017f224dc8e",
+    "stdoutSha256": "e952a8dcb713ddab2780f7775e979d00be7d6eba0a01a916393244f03d7072f8",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/escaped_alias",
+    "resource": "resources/asymmetric_visibility/strict/escaped_alias",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "8d5f7e5501837528d28ceb720378f5b2118f6a594ad27006084ab8d3b5cea16c",
+    "stdoutSha256": "34caa4fb345837e4c9ee0d364567007144c176fe65bcf91953bb78d6e481578a",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/scopes",
+    "resource": "resources/asymmetric_visibility/strict/scopes",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "ad00aead9d57c78bd706e70ddf9587e1b87087e2db8a92882864d54472af307c",
+    "stdoutSha256": "1d621e9feb6e4e16cce4e391de399ea9d1726a933e3517a90b9af6a249877f35",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/parent_scope_child_property",
+    "resource": "resources/asymmetric_visibility/strict/parent_scope_child_property",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "216a094800a29b60630e12c5de5fd5c8d36b9a81eb50564511f2887f91fdff59",
+    "stdoutSha256": "999e9918a1a81b25c7da5250f2e33ae39db781f367765bd742d62b7693dfeacc",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/byref_send",
+    "resource": "resources/asymmetric_visibility/strict/byref_send",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "c68532ea9b2151439100482e7b986562e29965547c662020e71fa830ee33ca0b",
+    "stdoutSha256": "2aa4507d57b96134fa3bac0390fbea1d5fc636f3220bf75265bc37826da736d1",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/coalesce",
+    "resource": "resources/asymmetric_visibility/strict/coalesce",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "1b1acfa829c8846e310973745d901c4459e5c2613be2ad804713519bec5675a9",
+    "stdoutSha256": "40bebc3b8a42d04a727710944f5390ce4c903b2d52ee0a771adb857e89492292",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/magic",
+    "resource": "resources/asymmetric_visibility/strict/magic",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "60b6192b886badb20d4bfee4ecce5f589debb8ad3d9c839f9dc261d46de05dab",
+    "stdoutSha256": "110d22e35b1b937504fd1d3fceb73d3249b521ad6db9a74a40005e6aae501e16",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/hook_order",
+    "resource": "resources/asymmetric_visibility/strict/hook_order",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "f7eb1c7b02c5daa97d4858d6f96972f94aa4cd1045862160009993d3053adc2c",
+    "stdoutSha256": "ac8432ab45a9dd33a0d09a18ca036deaf4bfc9bf1ae870c156626cc6f0975ece",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/hook_reference",
+    "resource": "resources/asymmetric_visibility/strict/hook_reference",
+    "nativeExit": 255,
+    "message": "Read-only virtual property H::$x must not specify asymmetric visibility",
+    "sourceSha256": "eb4cd83fd13cbd91cec794dfd9ff5e83c0d2103afa7d16be2423cbde33334c5d",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "16565fa0041b9e6c5475c24818b73bf822249920a0a695e919fda7131d8a132c"
+  },
+  {
+    "id": "strict/promotion_reflection",
+    "resource": "resources/asymmetric_visibility/strict/promotion_reflection",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "b537a6ed1c2cb79761d85ab5117154708058b9ac53ecb8f78deb371d9a7db4a2",
+    "stdoutSha256": "e849c85fda3f40b4a08b8f5229916ed0cf9cbc9348a633658aa3dd971ac34022",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/readonly",
+    "resource": "resources/asymmetric_visibility/strict/readonly",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "fb465fcbc7f0ebe04cb2b4b167e0120e425cbf378dfb2dd2c0bfdd277da0a669",
+    "stdoutSha256": "04a864a5f396c94cc34db243db569ef9206b4f33ab0f85e62817c2420957b5e3",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/closure_scope",
+    "resource": "resources/asymmetric_visibility/strict/closure_scope",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "a28424d3ad5c50dee1c7d00f2f25de75d8e1410a9773abeb2ba89d4a99051a1f",
+    "stdoutSha256": "1b1ae2762819fc7c13fa1f8a4f9b2adb674743611388e2c90a8b72b20235f84e",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/redeclare_widen",
+    "resource": "resources/asymmetric_visibility/strict/redeclare_widen",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "a8a3c019e535c71a0fa25e130c63b7ca7f5880b12bba339104e1e994d6373ebe",
+    "stdoutSha256": "1121cfccd5913f0a63fec40a6ffd44ea64f9dc135c66634ba001d10bcf4302a2",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/implicit_public_get",
+    "resource": "resources/asymmetric_visibility/strict/implicit_public_get",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "49260c4a94963d0332a94d6af66a64ead233d85db73eef2856a2067cb03ea82b",
+    "stdoutSha256": "31bd0a60b96d4cd6934338de24d1411595146a39776c4c7e557ef59f0e5d75f1",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/untyped",
+    "resource": "resources/asymmetric_visibility/strict/untyped",
+    "nativeExit": 255,
+    "message": "Property with asymmetric visibility H::$x must have type",
+    "sourceSha256": "1814d46a39fadc44753b3c4cf9e9f1ae2388cc1758690726fac2d2e73a04abbd",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "7d48e58ff941c65045d273d67ea46ce167166eef336c35ff3a81147a94619b49"
+  },
+  {
+    "id": "strict/broader_set",
+    "resource": "resources/asymmetric_visibility/strict/broader_set",
+    "nativeExit": 255,
+    "message": "Visibility of property H::$x must not be weaker than set visibility",
+    "sourceSha256": "465f786cbdbf148d9de2fba382027c94b8b2b35e863823143016150d154a2836",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "563e31a32fcf2d57957a152e8a174e48b82e7faa4ce60ebe680dc2f72c5d719e"
+  },
+  {
+    "id": "strict/duplicate_set",
+    "resource": "resources/asymmetric_visibility/strict/duplicate_set",
+    "nativeExit": 255,
+    "message": "Multiple access type modifiers are not allowed",
+    "sourceSha256": "f8a6837abdd16e4396dd8574d7be774793ccd26b46dae43c48bf4aa820356670",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "c92d184f7a5debddfcf2aeb0b33cbe7f0f38797a5815ac1deaff5acab7a5cf16"
+  },
+  {
+    "id": "strict/static",
+    "resource": "resources/asymmetric_visibility/strict/static",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "11fc0459bf14756dfb9ad9508c3390186f1c07ac0349de0470a88f2e7c1c6408",
+    "stdoutSha256": "53c234e5e8472b6ac51c1ae1cab3fe06fad053beb8ebfd8977b010655bfdd3c3",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/private_set_override",
+    "resource": "resources/asymmetric_visibility/strict/private_set_override",
+    "nativeExit": 255,
+    "message": "Cannot override final property A::$x",
+    "sourceSha256": "a8b1f27b2559097bb620cbc387abeb87080621abbec1db79e95d3d6bb22714f8",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "21bcf8a025858254040739a5499b0654bd910bf48c833e74701b342b2928072e"
+  },
+  {
+    "id": "strict/redeclare_narrow",
+    "resource": "resources/asymmetric_visibility/strict/redeclare_narrow",
+    "nativeExit": 255,
+    "message": "Set access level of B::$x must be protected(set) (as in class A) or weaker",
+    "sourceSha256": "f03f73db97007546002936011e0fdc8d9fbc3d8459e56cccbdaf132907c631e4",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "a19df2cc8c0e127315c227a0cb3de04a43d75d2f0e5ffc6539e4e57fbd942213"
+  },
+  {
+    "id": "strict/interface_private_set",
+    "resource": "resources/asymmetric_visibility/strict/interface_private_set",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "a4468540448731fa84704aa5095e3ad03e46d98f1240f49092f968dd08c82e68",
+    "stdoutSha256": "be91f7644f03cc4976431d2001387209fb097540e3c994bf3e8ba4a99efa1457",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/readonly_no_type",
+    "resource": "resources/asymmetric_visibility/strict/readonly_no_type",
+    "nativeExit": 255,
+    "message": "Readonly property H::$x must have type",
+    "sourceSha256": "59bfefbcfeee707457a3653382fe235ee4c5ce42d6a26e8166b8e49a5ba1167b",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "d105c5dda362daf481a4f76aad4a2333d2b59c634f0f3cf16743cd4e1caca78a"
+  },
+  {
+    "id": "weak/backed_hook_reference",
+    "resource": "resources/asymmetric_visibility/weak/backed_hook_reference",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "fe864d245acf32f8985a521669aa041497b4ee29054755823c69492f639870ea",
+    "stdoutSha256": "0fed9a2b0227a0aa4b1312ba7bce70893738c128c146859c723aeb78df6f725b",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/static_write_reference",
+    "resource": "resources/asymmetric_visibility/weak/static_write_reference",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "66eae246cd10b700db0c2a118c78c815df3cf398d2bad1f6bcc9143867e8f40a",
+    "stdoutSha256": "b39521f0090812ff30365bec583fb17cac24d8acdfc59376ef3a197af66b8bbc",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/interface_private_set_fulfilled",
+    "resource": "resources/asymmetric_visibility/weak/interface_private_set_fulfilled",
+    "nativeExit": 255,
+    "message": "Cannot override final property I::$x",
+    "sourceSha256": "16d5f59759a899940badd5d5d76c6b2ddacb7b811fb4c0ee375e70b7e3a65aae",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "10671549bfd691ea5c05690d3e17dc280e2ab3a6a114a68663807b9134b16bbc"
+  },
+  {
+    "id": "weak/interface_set_narrow",
+    "resource": "resources/asymmetric_visibility/weak/interface_set_narrow",
+    "nativeExit": 255,
+    "message": "Set access level of H::$x must be omitted (as in class I)",
+    "sourceSha256": "e10dc446547f8bb5abf17dd1d63df2f33784309ee3ddff70ad61a063fd1cba71",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "b79f69c66c2ed54410e914138f903d42f7733b67780520e963251fbe147e1a2d"
+  },
+  {
+    "id": "weak/hook_reflection",
+    "resource": "resources/asymmetric_visibility/weak/hook_reflection",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "f6bdfd0db9e10b6d93d32f71a2e17155be1a6aa5556257218234f0e4ab6620c7",
+    "stdoutSha256": "6a79e8cb2725206939fc016903e2e03cb2702745bc39ead60d5f7a0c8cabbdcc",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/private_get_private_set_override",
+    "resource": "resources/asymmetric_visibility/weak/private_get_private_set_override",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "c7dd9ed3b1c761755357f4c017f3d792c55fac94a17f1daf42e52171113857c0",
+    "stdoutSha256": "be91f7644f03cc4976431d2001387209fb097540e3c994bf3e8ba4a99efa1457",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/private_get_same_set",
+    "resource": "resources/asymmetric_visibility/weak/private_get_same_set",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "977c3b1a82f5f47f6639fba32c954730b53eb26e0111e88ce1a93edaf3e9dd1f",
+    "stdoutSha256": "bd5ae5ebfaddbbe0d9f6ae1df8199e3f26d6a7ded9d186d645e8dfb212ab83a6",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/same_visibility_untyped",
+    "resource": "resources/asymmetric_visibility/weak/same_visibility_untyped",
+    "nativeExit": 255,
+    "message": "Property with asymmetric visibility H::$x must have type",
+    "sourceSha256": "b70afe9601f6c3abdc3352e981d4abd10a1db33d67dde49b8acbd95d143cba5a",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "dc8b11c5bdce4c72cda97f83190e2cf18351b2243b69fcbff5f08e294aeab446"
+  },
+  {
+    "id": "weak/coalesce_array",
+    "resource": "resources/asymmetric_visibility/weak/coalesce_array",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "4a27325244ca14ea1fea4cc955f6f20b2bdb2fd70c09cbf32a99df5e94265539",
+    "stdoutSha256": "d238307d10c4305fd629a548cbe29a775c2d760b021ef3fe2ba08205e937cb03",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/receiver_rhs_order",
+    "resource": "resources/asymmetric_visibility/weak/receiver_rhs_order",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "69e44129c3d18dd1988b2e4545485b7056fe24ab2b41ef20715b964f93775ee9",
+    "stdoutSha256": "8041582b6b8ed6ddea71639a2b4c142cee2940d1149f1e5401d2bd564cb73252",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/backed_hook_reference",
+    "resource": "resources/asymmetric_visibility/strict/backed_hook_reference",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "acb712af06ca416271b0bf44b659d6d8f10674f5a0dd6fca156cfa17506c2518",
+    "stdoutSha256": "0fed9a2b0227a0aa4b1312ba7bce70893738c128c146859c723aeb78df6f725b",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/static_write_reference",
+    "resource": "resources/asymmetric_visibility/strict/static_write_reference",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "e01c5eeca599e0c3bc3480d13385e819996e291d41962d80f0dabfb956ca60bd",
+    "stdoutSha256": "b39521f0090812ff30365bec583fb17cac24d8acdfc59376ef3a197af66b8bbc",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/interface_private_set_fulfilled",
+    "resource": "resources/asymmetric_visibility/strict/interface_private_set_fulfilled",
+    "nativeExit": 255,
+    "message": "Cannot override final property I::$x",
+    "sourceSha256": "825d09e51c33347b76c33897e42a76d29403a5940b56713886232e0b728c45a4",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "9e457bce6333da891684a2d66f567729aff71150903dbbb0c1038eebfb08ea5d"
+  },
+  {
+    "id": "strict/interface_set_narrow",
+    "resource": "resources/asymmetric_visibility/strict/interface_set_narrow",
+    "nativeExit": 255,
+    "message": "Set access level of H::$x must be omitted (as in class I)",
+    "sourceSha256": "1e64541d125d02ec558d07404ab885cb2a40639193537e513a6b9499269c6c18",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "9aa5193d96eb6755e16f13bd83dccee32c96e099e0d66d9fece11d8496865abf"
+  },
+  {
+    "id": "strict/hook_reflection",
+    "resource": "resources/asymmetric_visibility/strict/hook_reflection",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "8b456b61f0fb5d1cf73a0fde26a60ddd3c5087ffd1089fd638f3001319e89935",
+    "stdoutSha256": "6a79e8cb2725206939fc016903e2e03cb2702745bc39ead60d5f7a0c8cabbdcc",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/private_get_private_set_override",
+    "resource": "resources/asymmetric_visibility/strict/private_get_private_set_override",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "b8cac2fea0118c9273f4e51779959ee5f732894577f43e312aa6053e7017a32d",
+    "stdoutSha256": "be91f7644f03cc4976431d2001387209fb097540e3c994bf3e8ba4a99efa1457",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/private_get_same_set",
+    "resource": "resources/asymmetric_visibility/strict/private_get_same_set",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "8874904902c41abbe90f595aab7c36391130c28a5dad38a0fc1c2a6a2a68c7d9",
+    "stdoutSha256": "bd5ae5ebfaddbbe0d9f6ae1df8199e3f26d6a7ded9d186d645e8dfb212ab83a6",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/same_visibility_untyped",
+    "resource": "resources/asymmetric_visibility/strict/same_visibility_untyped",
+    "nativeExit": 255,
+    "message": "Property with asymmetric visibility H::$x must have type",
+    "sourceSha256": "2db1476749b3af591adf733cf201e2ae3e91c2dac3483453911248ecce8ed070",
+    "stdoutSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "stderrSha256": "f3ac7f0f354099924ea1d2b401e9b119b43df2accad6c430b6beb9e21688200e"
+  },
+  {
+    "id": "strict/coalesce_array",
+    "resource": "resources/asymmetric_visibility/strict/coalesce_array",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "a15fdcba02474c901efd70a2b848f60538ed91e123064cc0cac8faa1c34f25a8",
+    "stdoutSha256": "d238307d10c4305fd629a548cbe29a775c2d760b021ef3fe2ba08205e937cb03",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/receiver_rhs_order",
+    "resource": "resources/asymmetric_visibility/strict/receiver_rhs_order",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "6751e5e2544396a3cf7514dc06a3d8b34c75ba912948a0799a326ca1a568466f",
+    "stdoutSha256": "8041582b6b8ed6ddea71639a2b4c142cee2940d1149f1e5401d2bd564cb73252",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/getter_published_array_cell",
+    "resource": "resources/asymmetric_visibility/weak/getter_published_array_cell",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "868304a58ccdb214a32586ae32deac59186926893328d25736bfd1fbf944de27",
+    "stdoutSha256": "700efef4ee8c96189f93e537d4b3964338a9c4f44106f291fee06fbe88c3a3ff",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/readonly_clone_scope",
+    "resource": "resources/asymmetric_visibility/weak/readonly_clone_scope",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "725b240d7ef980a515220ad3b948f4026e1b9adb77c9790331c2413aa336e9ca",
+    "stdoutSha256": "852a503411850cc822f49735124b5e174b3997d8fba73e8d554836de50cf6500",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "weak/uninitialized_reference",
+    "resource": "resources/asymmetric_visibility/weak/uninitialized_reference",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "f14554715d6e3682e86b29793ca7f67ec6f4a6ef977f65a3c61ec4351485402b",
+    "stdoutSha256": "af413b7c91ffadaad7b066a10013d6e22b81b6ba086a1b9394d86226f4ad2542",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/getter_published_array_cell",
+    "resource": "resources/asymmetric_visibility/strict/getter_published_array_cell",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "6a84556e59e800649959c99392bd51f3dbfa57a97c187a4d5248c9d2ad30dbcd",
+    "stdoutSha256": "700efef4ee8c96189f93e537d4b3964338a9c4f44106f291fee06fbe88c3a3ff",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/readonly_clone_scope",
+    "resource": "resources/asymmetric_visibility/strict/readonly_clone_scope",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "40cd92a3788083205b5c9af73bcb9a8b23ce1794cecec2d381f6a6864975ef2c",
+    "stdoutSha256": "852a503411850cc822f49735124b5e174b3997d8fba73e8d554836de50cf6500",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  {
+    "id": "strict/uninitialized_reference",
+    "resource": "resources/asymmetric_visibility/strict/uninitialized_reference",
+    "nativeExit": 0,
+    "message": null,
+    "sourceSha256": "fc69b9e59050f8445f1830af79d9f2bedfdff7b9129128721a1cc9b487be950e",
+    "stdoutSha256": "af413b7c91ffadaad7b066a10013d6e22b81b6ba086a1b9394d86226f4ad2542",
+    "stderrSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  }
+]

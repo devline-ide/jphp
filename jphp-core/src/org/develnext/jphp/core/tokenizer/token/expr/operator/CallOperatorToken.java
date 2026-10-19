@@ -4,6 +4,7 @@ import org.develnext.jphp.core.tokenizer.TokenMeta;
 import org.develnext.jphp.core.tokenizer.TokenType;
 import org.develnext.jphp.core.tokenizer.token.expr.OperatorExprToken;
 import org.develnext.jphp.core.tokenizer.token.expr.value.CallExprToken;
+import org.develnext.jphp.core.tokenizer.token.expr.value.CallArgument;
 import org.develnext.jphp.core.tokenizer.token.expr.value.CallableExprToken;
 import org.develnext.jphp.core.tokenizer.token.stmt.ExprStmtToken;
 
@@ -11,6 +12,7 @@ import java.util.List;
 
 public class CallOperatorToken extends OperatorExprToken implements CallableExprToken {
     private List<ExprStmtToken> parameters;
+    private List<CallArgument> arguments;
     private boolean firstClassCallable;
 
     protected CallOperatorToken(TokenMeta meta, TokenType type) {
@@ -24,10 +26,15 @@ public class CallOperatorToken extends OperatorExprToken implements CallableExpr
     public CallOperatorToken(CallExprToken call) {
         this(call.getMeta());
         parameters = call.getParameters();
+        arguments = call.getArguments();
         firstClassCallable = call.isFirstClassCallable();
     }
 
     public boolean isFirstClassCallable() {return firstClassCallable;}
+    public List<CallArgument> getArguments() {return arguments;}
+    public boolean hasNamedArguments() {
+        return arguments != null && arguments.stream().anyMatch(argument -> argument.getKind() == CallArgument.Kind.NAMED);
+    }
 
     public List<ExprStmtToken> getParameters() {
         return parameters;
@@ -35,6 +42,7 @@ public class CallOperatorToken extends OperatorExprToken implements CallableExpr
 
     public void setParameters(List<ExprStmtToken> parameters) {
         this.parameters = parameters;
+        this.arguments = null;
     }
 
     @Override

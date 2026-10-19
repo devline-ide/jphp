@@ -1,0 +1,1 @@
+a:6:{i:0;i:3;i:1;b:1;i:2;i:65536;i:3;b:1;i:4;a:2:{i:0;s:5:"Error";i:1;s:36:"Cannot create dynamic property R::$y";}i:5;a:2:{i:0;s:5:"Error";i:1;s:37:"Cannot modify readonly property R::$x";}}

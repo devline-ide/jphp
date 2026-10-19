@@ -1,0 +1,3 @@
+Fatal error: Cannot apply #[\AllowDynamicProperties] to interface ADPInterface in G:\DevLine-QA\jphp-attributes-implementation-20261013\revision14-allow-dynamic\native\negative-interface.php on line 2
+Stack trace:
+#0 {main}

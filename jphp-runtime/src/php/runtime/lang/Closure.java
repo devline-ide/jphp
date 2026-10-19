@@ -60,11 +60,13 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
         declarationScope = this.scope;
 
         this.uses = uses;
+        php.runtime.PhpPrimitiveCellRuntime.closureConstructed(this,uses);
     }
 
     /** A clone owns distinct static slots, preserving only already-exported canonical reference cells. */
     @Override
     protected Closure clone() throws CloneNotSupportedException {
+        php.runtime.PhpPrimitiveCellRuntime.closureOpaque(this,uses);
         if (getOwnershipObject() != null) throw new CloneNotSupportedException("Certified Closure clone requires its explicit holder allocation route");
         Closure copy = (Closure)super.clone();
         if (hasPhp8Binding() && statics != null) {
@@ -75,7 +77,10 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
                 Memory value = slot.isCanonicalReferenceCell() ? slot
                         : raw instanceof ReferenceMemory && ((ReferenceMemory)raw).isCanonicalReferenceCell()
                         ? raw : raw.toImmutable();
-                copy.statics.put(entry.getKey(), new ReferenceMemory(value));
+                value = php.runtime.PhpPrimitiveCellRuntime.cloneStaticValue(this,entry.getKey(),slot,value);
+                ReferenceMemory carrier = new ReferenceMemory(value);
+                php.runtime.PhpPrimitiveCellRuntime.clonedStatic(copy,entry.getKey(),carrier,value);
+                copy.statics.put(entry.getKey(), carrier);
             }
         }
         return copy;
@@ -97,7 +102,20 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
     @Signature
     abstract public Memory __invoke(Environment env, Memory... args) throws Throwable;
 
+    /** Read-only bookkeeping traversal; the capture array/map itself is never exposed. */
+    @Ignore public final void appendMemoryRoots(java.util.Deque<Memory> roots) {
+        if(uses!=null)for(Memory value:uses)if(value!=null)roots.add(value);
+        if(self!=null)roots.add(self);
+        if(statics!=null)roots.addAll(statics.values());
+    }
+
+    /** Invalidate actual captured CELLs before an opaque Java wrapper publishes this Closure. */
+    @Ignore public final void invalidatePrimitiveCaptures() {
+        php.runtime.PhpPrimitiveCellRuntime.closureOpaque(this,uses);
+    }
+
     public Memory[] getUses() {
+        php.runtime.PhpPrimitiveCellRuntime.closureOpaque(this,uses);
         if (getOwnershipObject() != null) {
             ownershipClosure().validate();Memory[] snapshot=uses == null ? new Memory[0] : uses.clone();
             for (int i=0;i<snapshot.length;i++) if (snapshot[i] instanceof ObjectMemory)
@@ -117,7 +135,7 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
                                                         String lexicalScope, boolean staticFlag, boolean readsThis) {
         if (getOwnershipObject() == null || getOwnershipObject().closure() != certificate || uses.length != 0 || !self.isNull() || statics != null || !certificate.consumeInitialization(this))
             throw new IllegalStateException("Closure is not its witnessed empty shell");
-        uses=emptyCaptures;statics=storage;scope=lexicalScope;declarationScope=lexicalScope;calledClass=lexicalScope;
+        uses=emptyCaptures;statics=storage;scope=lexicalScope;declarationScope=lexicalScope;
         staticClosure=staticFlag;usesThis=readsThis;
     }
     @Ignore public final void publishOwnershipCapture(php.runtime.PhpOwnershipClosures.RawStore store) {
@@ -153,7 +171,20 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
         if (statics == null)
             return null;
 
-        return statics.get(name);
+        ReferenceMemory result=statics.get(name);
+        if (getOwnershipObject()==null) php.runtime.PhpPrimitiveCellRuntime.staticExposed(result);
+        return result;
+    }
+
+    /** Capability is held only by the physical CELL runtime; no publication permit is allocated for ordinary static reads. */
+    @Ignore
+    public final Memory readPrimitiveStatic(php.runtime.PhpPrimitiveCellRuntime.ReadAccess access,String key,Memory initial,boolean create) {
+        access.validate();
+        if (getOwnershipObject()!=null) return create ? getOrCreateStatic(key,initial) : getStatic(key);
+        if (statics==null) { if (!create) return null;statics=new HashMap<>(); }
+        ReferenceMemory slot=statics.get(key);
+        if (slot==null && create) {slot=new ReferenceMemory(initial);statics.put(key,slot);}
+        return slot;
     }
 
     public String getScope() {
@@ -222,6 +253,7 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
             statics.put(name, result);
         }
 
+        php.runtime.PhpPrimitiveCellRuntime.staticExposed(result);
         return result;
     }
 
@@ -350,7 +382,7 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
     }
 
     @Signature(@Arg(value = "callable", type = HintType.CALLABLE))
-    public static Memory fromCallable(Environment env, Memory... args) {
+    public static Memory fromCallable(Environment env, Memory... args) throws Throwable {
         if (env.getModuleManager().getPhpLanguageProfile(env.trace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5)
             return php.runtime.invoke.PhpCallableFactory.fromCallable(args[0], env, env.trace());
         Invoker invoker = Invoker.create(env, args[0]);

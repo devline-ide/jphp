@@ -31,13 +31,16 @@ public final class PhpOwnership {
     private final IdentityHashMap<Object,Node> identities=new IdentityHashMap<>();
     private final LinkedHashSet<Node> nodes=new LinkedHashSet<>();
     private final LinkedHashSet<Slot> roots=new LinkedHashSet<>();
-    private final ArrayDeque<Node> zeroes=new ArrayDeque<>();
+    private ZeroQueue zeroes=new ZeroQueue();
+    private long zeroEpoch;
     // Tombstones prevent re-registering disposed identities without retaining them.
     // Weak references only remove bookkeeping; they never trigger PHP destruction.
     private final ReferenceQueue<Object> disposedQueue=new ReferenceQueue<>();
     private final HashSet<IdentityKey> disposed=new HashSet<>();
     private boolean processing;
     private int deferred,composing;
+    private int cycleCandidates;
+    private static final int CYCLE_COLLECTION_THRESHOLD=10_000;
 
     public PhpOwnership() {this(PhpOwnership::javaFailure);}
     public PhpOwnership(FailureComposition composition) {failureComposition=Objects.requireNonNull(composition);}
@@ -79,6 +82,8 @@ public final class PhpOwnership {
 
     public Node find(Object identity) {thread();return identities.get(identity);}
     public int liveNodes() {thread();return nodes.size();}
+    /** Distinct identities released while still owned; cheap scheduling hint, not Zend root statistics. */
+    public boolean shouldCollectCycles() {thread();return !processing && deferred==0 && cycleCandidates>=CYCLE_COLLECTION_THRESHOLD;}
     public Slot root() {thread();Slot slot=new Slot(null);roots.add(slot);return slot;}
     public Slot edge(Node owner) {
         thread();valid(Objects.requireNonNull(owner));Slot slot=new Slot(owner);owner.outgoing.add(slot);return slot;
@@ -141,10 +146,10 @@ public final class PhpOwnership {
     /** Delay destructors until a validated storage/edge mutation has fully committed. This is not a rollback transaction. */
     public void deferDestruction(Work work) throws Throwable {
         thread();Objects.requireNonNull(work);Throwable failure=null;
-        deferred++;
+        long before=zeroEpoch;deferred++;
         try {work.run();} catch (Throwable error) {failure=error;}
         finally {deferred--;}
-        if (deferred == 0) {
+        if (deferred == 0 && zeroEpoch != before) {
             try {drain();} catch (Throwable error) {failure=merge(failure,error);}
         }
         if (failure != null) throw failure;
@@ -154,6 +159,7 @@ public final class PhpOwnership {
     public int collectCycles() throws Throwable {
         thread();if (processing || deferred != 0) return 0;
         processing=true;Throwable failure=null;int collected=0;
+        cycleCandidates=0;for(Node node:nodes)node.cycleCandidate=false;
         try {
             List<Throwable> errors=new ArrayList<>();drainZeroes(errors);
             Set<Node> reachable=reachable();List<Node> candidates=new ArrayList<>();
@@ -184,25 +190,36 @@ public final class PhpOwnership {
     private void destruct(Node node, List<Throwable> errors) {
         if (node.kind != Kind.OBJECT || node.destructorStarted) return;
         node.destructorStarted=true;node.state=State.FINALIZING;
-        try {node.lifecycle.destruct(node);} catch (Throwable failure) {errors.add(failure);}
-        finally {node.state=State.LIVE;}
+        try {callback(node,true,errors);} finally {node.state=State.LIVE;}
     }
 
     private void cleanup(Node node, List<Throwable> errors) {
-        try {node.lifecycle.destroy(node);} catch (Throwable failure) {errors.add(failure);}
+        try {callback(node,false,errors);}
         finally {
+            Node previousTail=zeroes.last;
             for (Slot edge : new ArrayList<>(node.outgoing)) {
                 edge.closed=true;Node old=edge.target;edge.target=null;
                 if (old != null) release(old);
             }
+            if(node.cycleCandidate){node.cycleCandidate=false;cycleCandidates--;}
             node.outgoing.clear();nodes.remove(node);identities.remove(node.identity);
             disposed.add(new IdentityKey(node.identity,disposedQueue));
+            zeroes.prependSuffix(previousTail); // Native container destruction finishes children before its pending sibling.
         }
     }
 
+    /** Nested native releases finish their own callbacks before an outer pending sibling resumes. */
+    private void callback(Node node,boolean destruct,List<Throwable> errors) {
+        if (node.lifecycle == NO_LIFECYCLE) return;
+        ZeroQueue previous=zeroes;zeroes=new ZeroQueue();
+        try {
+            try {if (destruct) node.lifecycle.destruct(node);else node.lifecycle.destroy(node);}
+            catch (Throwable failure) {errors.add(failure);}
+        } finally {try {drainZeroes(errors);} finally {zeroes=previous;}}
+    }
     private void drainZeroes(List<Throwable> errors) {
         while (!zeroes.isEmpty()) {
-            Node node=zeroes.remove();node.queued=false;
+            Node node=zeroes.removeFirst();
             if (node.state != State.LIVE || node.incoming != 0) continue;
             destruct(node,errors);
             if (node.incoming != 0) continue; // __destruct resurrected a real owner.
@@ -219,14 +236,16 @@ public final class PhpOwnership {
     private void retain(Node node) {
         if (node != null) {
             if (node.incoming == Long.MAX_VALUE) throw new IllegalStateException("Ownership count overflow");
+            if (node.zeroQueue != null) node.zeroQueue.remove(node);
             node.incoming++;
         }
     }
     private void release(Node node) {
         if (node.incoming <= 0) throw new IllegalStateException("Ownership count underflow");
         node.incoming--;
-        if (node.incoming == 0 && node.state != State.DISPOSED && !node.queued) {
-            node.queued=true;zeroes.add(node);
+        if(node.incoming>0 && node.state==State.LIVE && !node.cycleCandidate){node.cycleCandidate=true;cycleCandidates++;}
+        if (node.incoming == 0 && node.state == State.LIVE) {
+            zeroEpoch++;zeroes.add(node);
         }
     }
     private void valid(Node node) {
@@ -238,8 +257,29 @@ public final class PhpOwnership {
         checkExecutionAccess();
         if (activePublication != null) throw new IllegalStateException("Ownership mutation is barred during raw publication");
     }
-    private void prequeue(Node node) {
-        if (node != null && !node.queued) {zeroes.add(node);node.queued=true;}
+    /** Intrusive links reserve zero-release storage in the node, before any raw publication. */
+    private static final class ZeroQueue {
+        private Node first,last;
+        boolean isEmpty() {return first == null;}
+        void add(Node node) {
+            if (node.zeroQueue != null) throw new IllegalStateException("Ownership zero was already queued");
+            node.zeroQueue=this;node.zeroPrevious=last;node.zeroNext=null;
+            if (last == null) first=node;else last.zeroNext=node;last=node;
+        }
+        Node removeFirst() {Node node=first;remove(node);return node;}
+        void prependSuffix(Node previousTail) {
+            if (previousTail == null || previousTail.zeroNext == null) return;
+            Node suffix=previousTail.zeroNext,oldFirst=first,suffixLast=last;
+            previousTail.zeroNext=null;suffix.zeroPrevious=null;
+            suffixLast.zeroNext=oldFirst;oldFirst.zeroPrevious=suffixLast;
+            first=suffix;last=previousTail;
+        }
+        void remove(Node node) {
+            if (node.zeroQueue != this) throw new IllegalStateException("Ownership zero belongs to another queue");
+            if (node.zeroPrevious == null) first=node.zeroNext;else node.zeroPrevious.zeroNext=node.zeroNext;
+            if (node.zeroNext == null) last=node.zeroPrevious;else node.zeroNext.zeroPrevious=node.zeroPrevious;
+            node.zeroQueue=null;node.zeroPrevious=null;node.zeroNext=null;
+        }
     }
     private void reapTombstones() {Object key;while ((key=disposedQueue.poll()) != null) disposed.remove(key);}
     private Throwable merge(Throwable first,Throwable next) {return composeFailure(first,next);}
@@ -256,7 +296,9 @@ public final class PhpOwnership {
         private final LinkedHashSet<Slot> outgoing=new LinkedHashSet<>();
         private long incoming;
         private State state=State.LIVE;
-        private boolean destructorStarted,queued;
+        private boolean destructorStarted,cycleCandidate;
+        private ZeroQueue zeroQueue;
+        private Node zeroPrevious,zeroNext;
         private Node(Kind kind,Object identity,Lifecycle lifecycle) {this.kind=kind;this.identity=identity;this.lifecycle=lifecycle;}
         public PhpOwnership graph() {return PhpOwnership.this;}
         public Kind kind() {return kind;}
@@ -303,7 +345,8 @@ public final class PhpOwnership {
         }
         public void replace(Node value) throws Throwable {
             writable();valid(value);if (target == value) return;
-            retain(value);Node old=target;target=value;if (old != null) release(old);drain();
+            long before=zeroEpoch;retain(value);Node old=target;target=value;if (old != null) release(old);
+            if (zeroEpoch != before) drain();
         }
         /** No ownership mutation from this operation precedes validation. Validation's own side effects remain. */
         public void replaceChecked(Node value, Work validation) throws Throwable {
@@ -315,15 +358,16 @@ public final class PhpOwnership {
             if (destination.graph() != graph()) throw new IllegalArgumentException("Ownership slots belong to different graphs");
             if (destination == this) return;
             valid(target);Node moving=target,old=destination.target;
-            retain(moving);destination.target=moving;target=null;
-            if (old != null) release(old);if (moving != null) release(moving);drain();
+            long before=zeroEpoch;retain(moving);destination.target=moving;target=null;
+            if (old != null) release(old);if (moving != null) release(moving);
+            if (zeroEpoch != before) drain();
         }
         private PhpOwnership graph() {return PhpOwnership.this;}
         public void close() throws Throwable {
             thread();if (closed) return;closed=true;
-            Node old=target;target=null;
+            long before=zeroEpoch;Node old=target;target=null;
             if (owner == null) roots.remove(this);else owner.outgoing.remove(this);
-            if (old != null) release(old);drain();
+            if (old != null) release(old);if (zeroEpoch != before) drain();
         }
     }
 
@@ -332,13 +376,14 @@ public final class PhpOwnership {
         private final Slot destination,source;
         private final Node value,old;
         private boolean finished,committed,retiring;
+        private long before;
         private Publication(Slot destination,Slot source,Node value) {
             this.destination=destination;this.source=source;this.value=value;old=destination.target;
         }
         private void begin() {
-            // Validation/allocation, including possible zero-queue growth, precedes the raw section.
+            // Zero queue links live in preallocated nodes; raw commit cannot grow a collection.
             if (deferred == Integer.MAX_VALUE) throw new IllegalStateException("Ownership defer depth overflow");
-            prequeue(old);prequeue(value);retain(value);deferred++;activePublication=this;
+            before=zeroEpoch;retain(value);deferred++;activePublication=this;
         }
         public boolean isCommitted() {return committed;}
         public boolean isClosed() {return finished;}
@@ -356,7 +401,7 @@ public final class PhpOwnership {
         }
         private void finish() throws Throwable {
             finished=true;activePublication=null;deferred--;
-            if (deferred == 0) drain();
+            if (deferred == 0 && zeroEpoch != before) drain();
         }
         @Override public void close() throws Exception {
             checkExecutionAccess();if (finished) return;

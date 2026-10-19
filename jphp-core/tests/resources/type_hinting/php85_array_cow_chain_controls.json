@@ -1,0 +1,517 @@
+{
+  "cases": [
+    {
+      "id": "list_append_012",
+      "code": "$a=[1];$b=$a;$c=$b;$a[]=7;$b[]=8;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_replace_012",
+      "code": "$a=[1];$b=$a;$c=$b;$a[0]=7;$b[0]=8;$c[0]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "list_unset_middle_012",
+      "code": "$a=[1];$b=$a;$c=$b;unset($b);$b=$c;$a[]=7;$b[]=8;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_append_021",
+      "code": "$a=[1];$b=$a;$c=$b;$a[]=7;$c[]=9;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_replace_021",
+      "code": "$a=[1];$b=$a;$c=$b;$a[0]=7;$c[0]=9;$b[0]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "list_unset_middle_021",
+      "code": "$a=[1];$b=$a;$c=$b;unset($b);$b=$c;$a[]=7;$c[]=9;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_append_102",
+      "code": "$a=[1];$b=$a;$c=$b;$b[]=8;$a[]=7;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_replace_102",
+      "code": "$a=[1];$b=$a;$c=$b;$b[0]=8;$a[0]=7;$c[0]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "list_unset_middle_102",
+      "code": "$a=[1];$b=$a;$c=$b;unset($b);$b=$c;$b[]=8;$a[]=7;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_append_120",
+      "code": "$a=[1];$b=$a;$c=$b;$b[]=8;$c[]=9;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_replace_120",
+      "code": "$a=[1];$b=$a;$c=$b;$b[0]=8;$c[0]=9;$a[0]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "list_unset_middle_120",
+      "code": "$a=[1];$b=$a;$c=$b;unset($b);$b=$c;$b[]=8;$c[]=9;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_append_201",
+      "code": "$a=[1];$b=$a;$c=$b;$c[]=9;$a[]=7;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_replace_201",
+      "code": "$a=[1];$b=$a;$c=$b;$c[0]=9;$a[0]=7;$b[0]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "list_unset_middle_201",
+      "code": "$a=[1];$b=$a;$c=$b;unset($b);$b=$c;$c[]=9;$a[]=7;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_append_210",
+      "code": "$a=[1];$b=$a;$c=$b;$c[]=9;$b[]=8;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "list_replace_210",
+      "code": "$a=[1];$b=$a;$c=$b;$c[0]=9;$b[0]=8;$a[0]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "list_unset_middle_210",
+      "code": "$a=[1];$b=$a;$c=$b;unset($b);$b=$c;$c[]=9;$b[]=8;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:7;}i:1;a:2:{i:0;i:1;i:1;i:8;}i:2;a:2:{i:0;i:1;i:1;i:9;}}"
+    },
+    {
+      "id": "map_append_012",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$a[]=7;$b[]=8;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_replace_012",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$a[0]=7;$b[0]=8;$c[0]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_unset_middle_012",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;unset($b);$b=$c;$a[]=7;$b[]=8;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_append_021",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$a[]=7;$c[]=9;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_replace_021",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$a[0]=7;$c[0]=9;$b[0]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_unset_middle_021",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;unset($b);$b=$c;$a[]=7;$c[]=9;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_append_102",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$b[]=8;$a[]=7;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_replace_102",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$b[0]=8;$a[0]=7;$c[0]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_unset_middle_102",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;unset($b);$b=$c;$b[]=8;$a[]=7;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_append_120",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$b[]=8;$c[]=9;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_replace_120",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$b[0]=8;$c[0]=9;$a[0]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_unset_middle_120",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;unset($b);$b=$c;$b[]=8;$c[]=9;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_append_201",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$c[]=9;$a[]=7;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_replace_201",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$c[0]=9;$a[0]=7;$b[0]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_unset_middle_201",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;unset($b);$b=$c;$c[]=9;$a[]=7;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_append_210",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$c[]=9;$b[]=8;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_replace_210",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;$c[0]=9;$b[0]=8;$a[0]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "map_unset_middle_210",
+      "code": "$a=[\"x\"=>1];$b=$a;$c=$b;unset($b);$b=$c;$c[]=9;$b[]=8;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{s:1:\"x\";i:1;i:0;i:7;}i:1;a:2:{s:1:\"x\";i:1;i:0;i:8;}i:2;a:2:{s:1:\"x\";i:1;i:0;i:9;}}"
+    },
+    {
+      "id": "nested_append_012",
+      "code": "$a=[[1]];$b=$a;$c=$b;$a[]=7;$b[]=8;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_replace_012",
+      "code": "$a=[[1]];$b=$a;$c=$b;$a[0]=7;$b[0]=8;$c[0]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "nested_unset_middle_012",
+      "code": "$a=[[1]];$b=$a;$c=$b;unset($b);$b=$c;$a[]=7;$b[]=8;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_append_021",
+      "code": "$a=[[1]];$b=$a;$c=$b;$a[]=7;$c[]=9;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_replace_021",
+      "code": "$a=[[1]];$b=$a;$c=$b;$a[0]=7;$c[0]=9;$b[0]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "nested_unset_middle_021",
+      "code": "$a=[[1]];$b=$a;$c=$b;unset($b);$b=$c;$a[]=7;$c[]=9;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_append_102",
+      "code": "$a=[[1]];$b=$a;$c=$b;$b[]=8;$a[]=7;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_replace_102",
+      "code": "$a=[[1]];$b=$a;$c=$b;$b[0]=8;$a[0]=7;$c[0]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "nested_unset_middle_102",
+      "code": "$a=[[1]];$b=$a;$c=$b;unset($b);$b=$c;$b[]=8;$a[]=7;$c[]=9;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_append_120",
+      "code": "$a=[[1]];$b=$a;$c=$b;$b[]=8;$c[]=9;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_replace_120",
+      "code": "$a=[[1]];$b=$a;$c=$b;$b[0]=8;$c[0]=9;$a[0]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "nested_unset_middle_120",
+      "code": "$a=[[1]];$b=$a;$c=$b;unset($b);$b=$c;$b[]=8;$c[]=9;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_append_201",
+      "code": "$a=[[1]];$b=$a;$c=$b;$c[]=9;$a[]=7;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_replace_201",
+      "code": "$a=[[1]];$b=$a;$c=$b;$c[0]=9;$a[0]=7;$b[0]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "nested_unset_middle_201",
+      "code": "$a=[[1]];$b=$a;$c=$b;unset($b);$b=$c;$c[]=9;$a[]=7;$b[]=8;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_append_210",
+      "code": "$a=[[1]];$b=$a;$c=$b;$c[]=9;$b[]=8;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "nested_replace_210",
+      "code": "$a=[[1]];$b=$a;$c=$b;$c[0]=9;$b[0]=8;$a[0]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:1:{i:0;i:7;}i:1;a:1:{i:0;i:8;}i:2;a:1:{i:0;i:9;}}"
+    },
+    {
+      "id": "nested_unset_middle_210",
+      "code": "$a=[[1]];$b=$a;$c=$b;unset($b);$b=$c;$c[]=9;$b[]=8;$a[]=7;echo serialize([$a,$b,$c]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:7;}i:1;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:8;}i:2;a:2:{i:0;a:1:{i:0;i:1;}i:1;i:9;}}"
+    },
+    {
+      "id": "chain_3",
+      "code": "$v0=[1];$v1=$v0;$v2=$v1;$v0[]=10;$v1[]=11;$v2[]=12;echo serialize([$v0,$v1,$v2]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:10;}i:1;a:2:{i:0;i:1;i:1;i:11;}i:2;a:2:{i:0;i:1;i:1;i:12;}}",
+      "stdout_strict": "a:3:{i:0;a:2:{i:0;i:1;i:1;i:10;}i:1;a:2:{i:0;i:1;i:1;i:11;}i:2;a:2:{i:0;i:1;i:1;i:12;}}"
+    },
+    {
+      "id": "chain_5",
+      "code": "$v0=[1];$v1=$v0;$v2=$v1;$v3=$v2;$v4=$v3;$v0[]=10;$v1[]=11;$v2[]=12;$v3[]=13;$v4[]=14;echo serialize([$v0,$v1,$v2,$v3,$v4]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:5:{i:0;a:2:{i:0;i:1;i:1;i:10;}i:1;a:2:{i:0;i:1;i:1;i:11;}i:2;a:2:{i:0;i:1;i:1;i:12;}i:3;a:2:{i:0;i:1;i:1;i:13;}i:4;a:2:{i:0;i:1;i:1;i:14;}}",
+      "stdout_strict": "a:5:{i:0;a:2:{i:0;i:1;i:1;i:10;}i:1;a:2:{i:0;i:1;i:1;i:11;}i:2;a:2:{i:0;i:1;i:1;i:12;}i:3;a:2:{i:0;i:1;i:1;i:13;}i:4;a:2:{i:0;i:1;i:1;i:14;}}"
+    },
+    {
+      "id": "chain_8",
+      "code": "$v0=[1];$v1=$v0;$v2=$v1;$v3=$v2;$v4=$v3;$v5=$v4;$v6=$v5;$v7=$v6;$v0[]=10;$v1[]=11;$v2[]=12;$v3[]=13;$v4[]=14;$v5[]=15;$v6[]=16;$v7[]=17;echo serialize([$v0,$v1,$v2,$v3,$v4,$v5,$v6,$v7]);",
+      "negative": false,
+      "exit": 0,
+      "exit_strict": 0,
+      "stdout": "a:8:{i:0;a:2:{i:0;i:1;i:1;i:10;}i:1;a:2:{i:0;i:1;i:1;i:11;}i:2;a:2:{i:0;i:1;i:1;i:12;}i:3;a:2:{i:0;i:1;i:1;i:13;}i:4;a:2:{i:0;i:1;i:1;i:14;}i:5;a:2:{i:0;i:1;i:1;i:15;}i:6;a:2:{i:0;i:1;i:1;i:16;}i:7;a:2:{i:0;i:1;i:1;i:17;}}",
+      "stdout_strict": "a:8:{i:0;a:2:{i:0;i:1;i:1;i:10;}i:1;a:2:{i:0;i:1;i:1;i:11;}i:2;a:2:{i:0;i:1;i:1;i:12;}i:3;a:2:{i:0;i:1;i:1;i:13;}i:4;a:2:{i:0;i:1;i:1;i:14;}i:5;a:2:{i:0;i:1;i:1;i:15;}i:6;a:2:{i:0;i:1;i:1;i:16;}i:7;a:2:{i:0;i:1;i:1;i:17;}}"
+    }
+  ]
+}

@@ -12,12 +12,17 @@ public class FulledNameToken extends NameToken {
     private List<NameToken> names;
     private boolean absolutely;
     private boolean processed;
+    private boolean constantFallback;
+
+    public boolean isConstantFallback() { return constantFallback; }
+    public void setConstantFallback(boolean fallback) { constantFallback = fallback; }
     private Set<NamespaceUseStmtToken.UseType> useProcessed = new HashSet<>();
 
     public FulledNameToken(FulledNameToken token) {
         this(token.meta, Information.NAMESPACE_SEP_CHAR);
         names = token.names;
         absolutely = token.absolutely;
+        constantFallback = token.constantFallback;
     }
 
     public FulledNameToken(TokenMeta meta) {

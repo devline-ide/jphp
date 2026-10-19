@@ -19,7 +19,7 @@ public class CompileFunction {
 
     public Method[] methods;
 
-    private Method methodVarArgs;
+    protected Method methodVarArgs;
     private int methodVarArgsCount;
 
     private int minArgs = Integer.MAX_VALUE;
@@ -76,7 +76,7 @@ public class CompileFunction {
         if (method.isVarArgs()){
             if (methodVarArgs != null)
                 throw new IllegalArgumentException("Cannot add two var-args methods");
-            methodVarArgs = new Method(method, 0, asImmutable);
+            // Publish the same factory-created method for fixed-slot and variadic selection.
             int count = 0;
             Class<?>[] types = method.getParameterTypes();
             for(int i = 0; i < types.length; i++){
@@ -143,7 +143,10 @@ public class CompileFunction {
         if (methods[count] != null)
             throw new IllegalArgumentException("Method " + name + " with " + count + " args already exists");
 
-        return methods[count] = createMethod(method, count, asImmutable);
+        Method result = createMethod(method, count, asImmutable);
+        methods[count] = result;
+        if (method.isVarArgs()) methodVarArgs = result;
+        return result;
     }
 
     @Override
@@ -199,6 +202,33 @@ public class CompileFunction {
         }
 
         return method;
+    }
+
+    /** Resolve only an exact, hidden sibling with the same PHP declaration and Java transport descriptor. */
+    public Method findDirect(int paramCount) {
+        Method ordinary = find(paramCount);
+        if (ordinary == null || ordinary.argsCount != paramCount || ordinary.isVarArg()) return ordinary;
+        var bridge = ordinary.method.getAnnotation(Runtime.DirectCall.class);
+        if (bridge == null) return ordinary;
+        var declaration = ordinary.method.getAnnotation(php.runtime.annotation.Reflection.Signature.class);
+        if (declaration == null || ordinary.isImmutable || bridge.value().isEmpty())
+            throw new IllegalArgumentException("Native direct entry lacks its concrete PHP declaration");
+        java.lang.reflect.Method physical;
+        try {
+            physical = ordinary.method.getDeclaringClass().getDeclaredMethod(bridge.value(), ordinary.parameterTypes);
+        } catch (NoSuchMethodException missing) {
+            throw new IllegalArgumentException("Native direct entry has no exact physical descriptor", missing);
+        }
+        int modifiers = physical.getModifiers();
+        if (physical.equals(ordinary.method) || !java.lang.reflect.Modifier.isPublic(modifiers)
+                || !java.lang.reflect.Modifier.isStatic(modifiers) || physical.isVarArgs()
+                || physical.getReturnType() != ordinary.resultType
+                || physical.getAnnotation(php.runtime.annotation.Reflection.Ignore.class) == null
+                || !declaration.equals(physical.getAnnotation(php.runtime.annotation.Reflection.Signature.class)))
+            throw new IllegalArgumentException("Native direct entry conflicts with its published declaration");
+        Method direct = createMethod(physical, paramCount, false);
+        if (direct.isImmutable) throw new IllegalArgumentException("Native direct entry cannot fold callback-sensitive arguments");
+        return direct;
     }
 
     protected Method createMethod(java.lang.reflect.Method method, int count, boolean asImmutable) {

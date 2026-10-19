@@ -47,7 +47,8 @@ public class PhpOwnershipRemovalTest extends JvmCompilerCase {
                 // Keep only the allocation root while using its real VALUE publisher as a borrowed address.
                 var holder=arrays.allocateCell(allocation.binding());allocation.close();
                 try(holder;var write=arrays.prepareWrite(holder.value(),holder.value().current())){
-                    var old=write.entry(Memory.CONST_INT_1);remove(write.prepareUnset(Memory.CONST_INT_0));
+                    var old=write.entry(Memory.CONST_INT_1);var staleAddress=old.current();remove(write.prepareUnset(Memory.CONST_INT_0));
+                    assertThrows(IllegalArgumentException.class,()->old.prepare(staleAddress,scalar(d,new LongMemory(6))));
                     assertFalse(write.array().isList());assertNull(write.array().getByScalar(Memory.CONST_INT_0));
                     assertEquals(2,write.array().getByScalar(Memory.CONST_INT_1).toLong());
                     assertSame(cell.cell(),write.array().getByScalar(Memory.CONST_INT_1).getRawValue());
@@ -66,6 +67,7 @@ public class PhpOwnershipRemovalTest extends JvmCompilerCase {
             var arrays=new PhpOwnershipArrays(d.heap());var allocation=arrays.allocate(true);var entry=allocation.insertBucket("x",scalar(d,Memory.CONST_INT_1));
             try(var holder=arrays.allocateCell(allocation.binding())){
                 allocation.close();try(var write=arrays.prepareWrite(holder.value(),holder.value().current())){
+                    assertThrows(IllegalArgumentException.class,()->write.prepareUnset(new Object()));
                     var retained=write.array().keySet();var before=entry.current();try(var token=write.prepareUnset("x")){assertTrue(token.existed());}
                     assertSame(before,entry.current());var stale=write.prepareUnset("x");entry.assign(scalar(d,new LongMemory(2)));
                     assertThrows(IllegalArgumentException.class,stale::store);stale.close();
@@ -102,6 +104,10 @@ public class PhpOwnershipRemovalTest extends JvmCompilerCase {
             PhpOwnershipValues.Binding cell;try(var promotion=slot.preparePromotion(slot.ownerPublisher().current())){cell=promotion.binding();promotion.store();promotion.commit();}
             try(var alias=cell.host()){
                 var canonical=(ReferenceMemory)cell.rawValue();assertTrue(canonical.hasPropertySources());
+                try(var stale=cert.prepareUnset("v")) {
+                    var late=new ReferenceMemory(canonical);late.attachPropertySource(f.env,a.object().getReflection().findProperty("w"));
+                    assertThrows(IllegalArgumentException.class,stale::store);late.detachPropertySource();assertSame(carrier,table.getByScalar("v"));
+                }
                 remove(cert.prepareUnset("v"));assertNull(table.getByScalar("v"));assertTrue(table.isExplicitlyUnset("v"));
                 assertFalse(canonical.hasPropertySources());((PhpOwnershipArrays.Entry)f.arrays.certificate(canonical).value()).assign(scalar(f.domain,new StringMemory("free")));assertEquals("free",canonical.toString());
                 try(var missing=cert.prepareUnset("v")){assertFalse(missing.existed());missing.store();missing.commit();}
@@ -195,6 +201,37 @@ public class PhpOwnershipRemovalTest extends JvmCompilerCase {
                 token.store();try{token.commit();fail("declared dtor failure lost");}catch(php.runtime.lang.BaseException expected){assertEquals("declared-dtor",expected.getMessage(f.env).toString());}assertTrue(token.isCommitted());
             }
             assertEquals(PhpOwnership.State.DISPOSED,node.state());assertEquals(8,table.getByScalar("x").toLong());assertEquals(Arrays.asList("x","y"),new ArrayList<>(table.keySet()));assertEquals(2,cert.node().outgoing().size());cert.validateAll();
+        }
+    }
+    @Test public void survivorRevisionAndWritableOwnerRebindingRejectBeforeLayoutOrEdgesChange() throws Throwable {
+        var d=new PhpOwnershipDomain();var participant=d.participant("test");
+        try(var execution=participant.enter()){
+            var arrays=new PhpOwnershipArrays(d.heap());var allocation=arrays.allocate(false);allocation.append(scalar(d,Memory.CONST_INT_1));allocation.append(scalar(d,new LongMemory(2)));
+            try(var holder=arrays.allocateCell(allocation.binding());var extra=allocation.binding().host()){
+                allocation.close();try(var write=arrays.prepareWrite(holder.value(),holder.value().current())){
+                    assertTrue(write.separated());var carrier=holder.cell();try(var p=(PhpOwnershipArrays.RawPublication)write.preparePublication()){carrier.publishOwnershipRaw(p);p.commit();}
+                    var token=write.prepareUnset(Memory.CONST_INT_0);write.entry(Memory.CONST_INT_1).assign(scalar(d,new LongMemory(4)));
+                    assertThrows(IllegalArgumentException.class,token::store);token.close();assertTrue(write.array().isList());assertEquals(2,write.array().size());assertEquals(4,write.array().getByScalar(Memory.CONST_INT_1).toLong());
+                    try(var retain=write.binding().host();var stale=write.prepareUnset(Memory.CONST_INT_0)){
+                        holder.value().assign(scalar(d,Memory.NULL));assertThrows(IllegalArgumentException.class,stale::store);assertEquals(2,write.array().size());arrays.certificate(write.array());
+                    }
+                }
+            }
+        }finally{participant.close();}
+        assertEquals(0,d.graph().liveNodes());
+    }
+    @Test public void preparedRevivedReferenceRejectsLateInPlaceTargetSourceWithoutDroppingConstraint() throws Throwable {
+        for(boolean dump:new boolean[]{false,true})try(var f=new Fixture("class HRemoveLateSource {public int $v=3;public int $w=4;public int $n=5;}",dump);var a=f.object("HRemoveLateSource")){
+            var cert=a.certificate().properties();var table=cert.table();var v=cert.entry(table.getByScalar("v"));var w=cert.entry(table.getByScalar("w"));PhpOwnershipValues.Binding target;
+            try(var p=w.preparePromotion(w.ownerPublisher().current())){target=p.binding();p.store();p.commit();}
+            remove(cert.prepareUnset("v"));var original=v.ownerPublisher().current();var canonical=(ReferenceMemory)target.rawValue();
+            try(var p=v.prepareRebind(original,target)){
+                var late=new ReferenceMemory(canonical);late.attachPropertySource(f.env,a.object().getReflection().findProperty("n"));
+                try{assertThrows(IllegalArgumentException.class,p::store);assertSame(original,v.ownerPublisher().current());assertNull(table.getByScalar("v"));assertEquals(4,canonical.toLong());assertTrue(canonical.hasPropertySources());}
+                finally{late.detachPropertySource();}
+            }
+            cert.validateAll();var payload=(PhpOwnershipArrays.Entry)f.arrays.certificate(canonical).value();
+            var error=assertThrows(php.runtime.lang.exception.BaseTypeError.class,()->payload.assign(scalar(f.domain,new StringMemory("bad"))));assertTrue(error.getMessage(f.env).toString().contains("HRemoveLateSource::$w"));
         }
     }
     public static Memory callback(Environment env,Memory[] args){env.getUserValue("removeObserver",Runnable.class).run();return Memory.NULL;}

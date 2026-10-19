@@ -8,8 +8,6 @@ import php.runtime.env.TraceInfo;
 import php.runtime.ext.support.compile.FunctionsContainer;
 import php.runtime.invoke.Invoker;
 import php.runtime.lang.ForeachIterator;
-import php.runtime.lang.IObject;
-import php.runtime.lang.spl.Countable;
 import php.runtime.lang.spl.Traversable;
 import php.runtime.memory.ArrayMemory;
 import php.runtime.memory.LongMemory;
@@ -52,16 +50,17 @@ public class SPLFunctions extends FunctionsContainer {
     }
 
     public static long iterator_count(Environment env, TraceInfo trace, Memory object) {
+        if (object.isArray() && env.getModuleManager().getPhpLanguageProfile(trace)
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5)
+            return object.toValue(ArrayMemory.class).size();
         if (expectingImplement(env, trace, 1, object, Traversable.class)){
-            IObject tmp = object.toValue(ObjectMemory.class).value;
-            if (tmp instanceof Countable){
-                return ((Countable)tmp).count(env).toLong();
-            } else {
-                ForeachIterator iterator = object.getNewIterator(env, true, false);
-                int i = 0;
-                while (iterator.next()) i++;
-                return i;
+            ForeachIterator iterator = object.getNewIterator(env, false, false);
+            long i = 0;
+            while (iterator.next(false)) {
+                if (i == Long.MAX_VALUE) break;
+                i++;
             }
+            return i;
         } else
             return 0;
     }

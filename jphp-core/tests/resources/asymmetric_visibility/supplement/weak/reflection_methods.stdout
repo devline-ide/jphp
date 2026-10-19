@@ -1,0 +1,10 @@
+constants:1,2,4,16,32,64
+pub:1:0:1:0:0
+pro:18:1:0:1:0
+pri:4:0:0:0:1
+fin:33:0:1:0:0
+abs:66:0:0:1:0
+hook-get:1:0:1
+hook-set:1:0:1
+invoke-get:2
+invoke-set:7
