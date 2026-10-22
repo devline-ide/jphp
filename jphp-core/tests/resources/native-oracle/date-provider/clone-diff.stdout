@@ -1,0 +1,8 @@
+["uninitialized-clone-object",["EmptySource",["cloned"]]]
+["uninitialized-clone-value",["DateObjectError","Object of type EmptySource (inheriting DateTime) has not been correctly initialized by calling parent::__construct() in its constructor"]]
+["copy-after-source-mutation",["2024-01-02","2024-01-02"]]
+["month-end",["+00 00 30 00 00 00 000000 30",0,30,0]]
+["reverse-month-end",["-00 01 01 00 00 00 000000 30",1,30,0]]
+["mixed-zones",["+00 00 01 22 00 00 000000 1",0,1,0]]
+["dst-civil",["+00 00 01 23 00 00 000000 1",0,1,0]]
+["negative-micros",["-00 00 00 00 00 00 800000 0",1,0,0.8]]

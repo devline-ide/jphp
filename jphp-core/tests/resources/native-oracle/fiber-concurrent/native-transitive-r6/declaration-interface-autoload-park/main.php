@@ -1,0 +1,2 @@
+<?php
+$e=[];spl_autoload_register(function($name)use(&$e){$e[]='load:'.$name;if($name==='NeededParkInterface'){Fiber::suspend('park');eval('interface '.$name.' {}');}else eval('class '.$name.' {}');});$f=new Fiber(function(){class DeferredParkImplementation implements NeededParkInterface {} return DeferredParkImplementation::class;});$e[]=$f->start();$e[]='main:'.get_class(new OtherDeclarationClass);$f->resume();$e[]='ret:'.$f->getReturn();echo json_encode($e);

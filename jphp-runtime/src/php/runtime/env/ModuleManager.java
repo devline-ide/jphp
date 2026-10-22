@@ -23,6 +23,7 @@ public class ModuleManager {
     protected final Map<String, ModuleEntity> modules = new LinkedHashMap<String, ModuleEntity>();
     private final Map<ModuleCacheKey, ModuleEntity> cachedModules = new LinkedHashMap<>();
     private final Set<String> includedPaths = new LinkedHashSet<>();
+    private final Set<ModuleCacheKey> pendingFetches = new LinkedHashSet<>();
     private Function<String, Collection<String>> implicitClassImportsResolver;
     private boolean implicitClassImportsResolverFrozen;
     private Function<String, PhpLanguageProfile> sourceLanguageProfileResolver;
@@ -33,13 +34,15 @@ public class ModuleManager {
     }
 
     public void apply(ModuleManager parent) {
-        this.modules.putAll(parent.modules);
-        this.cachedModules.putAll(parent.cachedModules);
-        this.includedPaths.addAll(parent.includedPaths);
-        this.implicitClassImportsResolver = parent.implicitClassImportsResolver;
-        this.implicitClassImportsResolverFrozen = parent.implicitClassImportsResolverFrozen;
-        this.sourceLanguageProfileResolver = parent.sourceLanguageProfileResolver;
-        this.sourceLanguageProfileResolverFrozen = parent.sourceLanguageProfileResolverFrozen;
+        synchronized(parent) {
+            this.modules.putAll(parent.modules);
+            this.cachedModules.putAll(parent.cachedModules);
+            this.includedPaths.addAll(parent.includedPaths);
+            this.implicitClassImportsResolver = parent.implicitClassImportsResolver;
+            this.implicitClassImportsResolverFrozen = parent.implicitClassImportsResolverFrozen;
+            this.sourceLanguageProfileResolver = parent.sourceLanguageProfileResolver;
+            this.sourceLanguageProfileResolverFrozen = parent.sourceLanguageProfileResolverFrozen;
+        }
     }
 
     /**
@@ -48,10 +51,12 @@ public class ModuleManager {
      * Return null/empty for sources outside the application. Dumps never call it.
      */
     public void setImplicitClassImportsResolver(Function<String, Collection<String>> resolver) {
-        if (implicitClassImportsResolverFrozen && implicitClassImportsResolver != resolver) {
-            throw new IllegalStateException("Implicit class import resolver is frozen after the first fetch");
+        synchronized(this) {
+            if (implicitClassImportsResolverFrozen && implicitClassImportsResolver != resolver) {
+                throw new IllegalStateException("Implicit class import resolver is frozen after the first fetch");
+            }
+            implicitClassImportsResolver = resolver;
         }
-        implicitClassImportsResolver = resolver;
     }
 
     /**
@@ -61,30 +66,27 @@ public class ModuleManager {
      * Compiled modules never call the resolver and retain their stored language profile.
      */
     public void setSourceLanguageProfileResolver(Function<String, PhpLanguageProfile> resolver) {
-        if (sourceLanguageProfileResolverFrozen && sourceLanguageProfileResolver != resolver) {
-            throw new IllegalStateException("Source language profile resolver is frozen after the first fetch");
+        synchronized(this) {
+            if (sourceLanguageProfileResolverFrozen && sourceLanguageProfileResolver != resolver) {
+                throw new IllegalStateException("Source language profile resolver is frozen after the first fetch");
+            }
+            sourceLanguageProfileResolver = resolver;
         }
-        sourceLanguageProfileResolver = resolver;
     }
 
     private PhpLanguageProfile resolveSourceLanguageProfile(String path, boolean compiled, PhpLanguageProfile profile) {
-        sourceLanguageProfileResolverFrozen = true;
-        if (!compiled && sourceLanguageProfileResolver != null) {
-            PhpLanguageProfile selected = sourceLanguageProfileResolver.apply(ModuleCacheKey.normalize(path));
-            if (selected != null) return selected;
-        }
+        Function<String,PhpLanguageProfile> resolver;
+        synchronized(this){sourceLanguageProfileResolverFrozen=true;resolver=sourceLanguageProfileResolver;}
+        if(!compiled && resolver!=null){PhpLanguageProfile selected=resolver.apply(ModuleCacheKey.normalize(path));if(selected!=null)return selected;}
         return profile;
     }
 
     private Context resolveImplicitClassImports(String path, boolean compiled) {
-        implicitClassImportsResolverFrozen = true;
-        Context options = new Context("");
-        if (!compiled && implicitClassImportsResolver != null) {
-            Collection<String> imports = implicitClassImportsResolver.apply(ModuleCacheKey.normalize(path));
-            options.setImplicitClassImports(imports == null ? Collections.emptyList() : imports);
-        }
-        options.freezeImplicitClassImports();
-        return options;
+        Function<String,Collection<String>> resolver;
+        synchronized(this){implicitClassImportsResolverFrozen=true;resolver=implicitClassImportsResolver;}
+        Context options=new Context("");
+        if(!compiled && resolver!=null){Collection<String> imports=resolver.apply(ModuleCacheKey.normalize(path));options.setImplicitClassImports(imports==null?Collections.emptyList():imports);}
+        options.freezeImplicitClassImports();return options;
     }
 
     public ModuleEntity fetchModule(String path) throws Throwable {
@@ -96,31 +98,21 @@ public class ModuleManager {
     }
 
     public ModuleEntity fetchModule(String path, boolean compiled, PhpLanguageProfile profile) throws Throwable {
-        String resourcePath = resolveResourceBytecode(path);
-        if (!resourcePath.equals(path)) return fetchModule(resourcePath, compiled || path.endsWith(".php") && resourcePath.endsWith(".phb"), profile);
-        profile = resolveSourceLanguageProfile(path, compiled, profile);
-        Context imports = resolveImplicitClassImports(path, compiled);
-        ModuleCacheKey key = new ModuleCacheKey(path, compiled, profile, imports.getImplicitClassImportsFingerprint());
-        ModuleEntity moduleEntity = cachedModules.get(key);
-
-        if (moduleEntity != null &&
-                (moduleEntity.getContext().getLastModified() == 0
-                        || moduleEntity.getContext().getLastModified() == new File(key.getPath()).lastModified())) {
-
-            return moduleEntity;
-        } else {
-            cachedModules.remove(key);
-            if (moduleEntity != null) modules.remove(key.getPath(), moduleEntity);
-            moduleEntity = fetchTemporaryModule(path, compiled, profile, imports.getImplicitClassImports());
-
-            if (moduleEntity == null) {
-                return null;
-            }
-
-            cachedModules.put(key, moduleEntity);
-            modules.put(key.getPath(), moduleEntity);
-
-            return moduleEntity;
+        try(var admission=env.enterCallbackDomain()) {
+            String resourcePath=resolveResourceBytecode(path);
+            if(!resourcePath.equals(path))return fetchModule(resourcePath,compiled || path.endsWith(".php") && resourcePath.endsWith(".phb"),profile);
+            ModuleCacheKey pending=new ModuleCacheKey(path,compiled,profile,"");
+            synchronized(this){if(!pendingFetches.add(pending))throw new IllegalStateException("Recursive source resolution before module publication");}
+            try {
+                profile=resolveSourceLanguageProfile(path,compiled,profile);Context imports=resolveImplicitClassImports(path,compiled);
+                ModuleCacheKey key=new ModuleCacheKey(path,compiled,profile,imports.getImplicitClassImportsFingerprint());ModuleEntity module;
+                synchronized(this){module=cachedModules.get(key);}
+                if(module!=null && (module.getContext().getLastModified()==0 || module.getContext().getLastModified()==new File(key.getPath()).lastModified()))return module;
+                synchronized(this){cachedModules.remove(key);if(module!=null)modules.remove(key.getPath(),module);}
+                module=fetchTemporaryModule(path,compiled,profile,imports.getImplicitClassImports());
+                if(module!=null)synchronized(this){cachedModules.put(key,module);modules.put(key.getPath(),module);}
+                return module;
+            }finally{synchronized(this){pendingFetches.remove(pending);}}
         }
     }
 
@@ -129,14 +121,16 @@ public class ModuleManager {
     }
 
     public ModuleEntity fetchTemporaryModule(String path, boolean compiled, PhpLanguageProfile profile) throws Throwable {
-        String resourcePath = resolveResourceBytecode(path);
-        if (!resourcePath.equals(path)) {
-            compiled = compiled || path.endsWith(".php") && resourcePath.endsWith(".phb");
-            path = resourcePath;
+        try(var admission=env.enterCallbackDomain()) {
+            String resourcePath=resolveResourceBytecode(path);
+            if(!resourcePath.equals(path)){compiled=compiled || path.endsWith(".php") && resourcePath.endsWith(".phb");path=resourcePath;}
+            ModuleCacheKey pending=new ModuleCacheKey(path,compiled,profile,"");
+            synchronized(this){if(!pendingFetches.add(pending))throw new IllegalStateException("Recursive source resolution before module publication");}
+            try {
+                profile=resolveSourceLanguageProfile(path,compiled,profile);Context imports=resolveImplicitClassImports(path,compiled);
+                return fetchTemporaryModule(path,compiled,profile,imports.getImplicitClassImports());
+            }finally{synchronized(this){pendingFetches.remove(pending);}}
         }
-        profile = resolveSourceLanguageProfile(path, compiled, profile);
-        Context imports = resolveImplicitClassImports(path, compiled);
-        return fetchTemporaryModule(path, compiled, profile, imports.getImplicitClassImports());
     }
 
     private ModuleEntity fetchTemporaryModule(String path, boolean compiled, PhpLanguageProfile profile,
@@ -202,14 +196,12 @@ public class ModuleManager {
     }
 
     public ModuleEntity findModule(String path) {
-        return modules.get(ModuleCacheKey.normalize(resolveResourceBytecode(path)));
+        String key=ModuleCacheKey.normalize(resolveResourceBytecode(path));synchronized(this){return modules.get(key);}
     }
 
     public void addModule(String path, ModuleEntity module) {
-        ModuleCacheKey key = new ModuleCacheKey(path, module.isCompiledArtifact(), module.getPhpLanguageProfile(),
-                module.getContext().getImplicitClassImportsFingerprint());
-        modules.put(key.getPath(), module);
-        cachedModules.put(key, module);
+        ModuleCacheKey key=new ModuleCacheKey(path,module.isCompiledArtifact(),module.getPhpLanguageProfile(),module.getContext().getImplicitClassImportsFingerprint());
+        synchronized(this){modules.put(key.getPath(),module);cachedModules.put(key,module);}
     }
 
     public ModuleEntity findModule(TraceInfo traceInfo) {
@@ -226,14 +218,16 @@ public class ModuleManager {
 
         String path = ModuleCacheKey.normalize(traceInfo.getFileName());
         PhpLanguageProfile profile = traceInfo.getPhpLanguageProfile(env.getScope());
-        for (Map.Entry<ModuleCacheKey, ModuleEntity> entry : cachedModules.entrySet()) {
+        Map<ModuleCacheKey,ModuleEntity> snapshot;
+        synchronized(this){snapshot=new LinkedHashMap<>(cachedModules);}
+        for (Map.Entry<ModuleCacheKey, ModuleEntity> entry : snapshot.entrySet()) {
             if (entry.getKey().getPath().equals(path) && entry.getValue().getPhpLanguageProfile() == profile) return entry.getValue();
         }
         return null;
     }
 
     public boolean hasModule(String path) {
-        return modules.containsKey(ModuleCacheKey.normalize(resolveResourceBytecode(path)));
+        String key=ModuleCacheKey.normalize(resolveResourceBytecode(path));synchronized(this){return modules.containsKey(key);}
     }
 
     // Packaged bytecode replaces a missing PHP resource; an existing source always wins.
@@ -250,13 +244,17 @@ public class ModuleManager {
         return loader.getResource(bytecode) == null ? normalized : "res://" + bytecode;
     }
 
-    public boolean isIncluded(String path) { return includedPaths.contains(ModuleCacheKey.normalize(resolveResourceBytecode(path))); }
-
-    public void markIncluded(String path) {
-        if (path != null) includedPaths.add(ModuleCacheKey.normalize(resolveResourceBytecode(path)));
+    public boolean isIncluded(String path) {
+        String key=ModuleCacheKey.normalize(resolveResourceBytecode(path));synchronized(this){return includedPaths.contains(key);}
     }
 
-    public Collection<String> getIncludedPaths() { return new ArrayList<>(includedPaths); }
+    public void markIncluded(String path) {
+        if(path!=null){String key=ModuleCacheKey.normalize(resolveResourceBytecode(path));synchronized(this){includedPaths.add(key);}}
+    }
+
+    public Collection<String> getIncludedPaths() {
+        synchronized(this){return new ArrayList<>(includedPaths);}
+    }
 
     public PhpLanguageProfile getPhpLanguageProfile(TraceInfo trace) {
         ModuleEntity module = findModule(trace);
@@ -265,6 +263,6 @@ public class ModuleManager {
     }
 
     public Collection<String> getCachedPaths() {
-        return modules.keySet();
+        synchronized(this){return new ArrayList<>(modules.keySet());}
     }
 }

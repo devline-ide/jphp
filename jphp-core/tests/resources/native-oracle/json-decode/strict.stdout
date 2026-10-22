@@ -1,0 +1,8 @@
+["strict-int-json","Tjs=",4,"Syntax error",[],["TypeError","json_decode(): Argument #1 ($json) must be of type string, int given",0]]
+["strict-null-json","Tjs=",4,"Syntax error",[],["TypeError","json_decode(): Argument #1 ($json) must be of type string, null given",0]]
+["strict-bool-assoc","Tjs=",4,"Syntax error",[],["TypeError","json_decode(): Argument #2 ($associative) must be of type ?bool, int given",0]]
+["strict-null-assoc","Tzo4OiJzdGRDbGFzcyI6MDp7fQ==",0,"No error",[],null]
+["strict-float-depth","Tjs=",4,"Syntax error",[],["TypeError","json_decode(): Argument #3 ($depth) must be of type int, float given",0]]
+["strict-string-flags","Tjs=",4,"Syntax error",[],["TypeError","json_decode(): Argument #4 ($flags) must be of type int, string given",0]]
+["strict-array-flags","Tjs=",4,"Syntax error",[],["TypeError","json_decode(): Argument #4 ($flags) must be of type int, array given",0]]
+["strict-valid-four","czoxOToiOTIyMzM3MjAzNjg1NDc3NTgwOCI7",0,"No error",[],null]

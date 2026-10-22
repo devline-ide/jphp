@@ -40,12 +40,18 @@ public abstract class Generator<T> implements Iterable<T> {
      */
     protected abstract void run(YieldAdapterIterator<T> yieldAdapter);
 
+    protected Collector.ExecutionContext executionContext() { return null; }
+
     @Override
     public final YieldAdapterIterator<T> iterator() {
         final ThreadedYieldAdapter<T> yieldAdapter = new ThreadedYieldAdapter<T>();
         Collector<T> collector = new Collector<T>() {
 
             protected YieldAdapterIterator iterator;
+
+            @Override public ExecutionContext executionContext() {
+                return Generator.this.executionContext();
+            }
 
             @Override
             public void collect(final ResultHandler<T> handler) throws CollectionAbortedException {

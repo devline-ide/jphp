@@ -1894,7 +1894,9 @@ public class SimpleExprGenerator extends Generator<ExprStmtToken> {
                             || previous instanceof VariableExprToken
                             || previous instanceof ClosureStmtToken
                             || previous instanceof ArrayGetExprToken
-                            || previous instanceof CallExprToken)
+                            || previous instanceof CallExprToken
+                            || previous instanceof CallOperatorToken && analyzer.getPhpLanguageProfile()
+                                == php.runtime.common.PhpLanguageProfile.PHP_8_5)
                         isFunc = true;
                     else if (previous instanceof StaticAccessExprToken){
                         isFunc = true; // !((StaticAccessExprToken)previous).isGetStaticField(); TODO check it!

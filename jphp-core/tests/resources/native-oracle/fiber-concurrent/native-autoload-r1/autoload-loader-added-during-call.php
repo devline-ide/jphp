@@ -1,0 +1,2 @@
+<?php
+$e=[];$b=function($name)use(&$e){$e[]='b';eval('class '.$name.' {}');};spl_autoload_register(function($name)use(&$e,$b){$e[]='a';spl_autoload_register($b);});$e[]=class_exists('AddedLoaderClass')?'yes':'no';echo json_encode($e);

@@ -55,16 +55,28 @@ public class JsonFunctions extends FunctionsContainer {
     }
 
     public static Memory json_last_error_msg(Environment env) {
-        switch (json_last_error(env)) {
-            case JsonConstants.JSON_ERROR_NONE: return Memory.NULL;
-            case JsonConstants.JSON_ERROR_DEPTH: return new StringMemory("Maximum stack depth exceeded");
-            case JsonConstants.JSON_ERROR_STATE_MISMATCH: return new StringMemory("Underflow or the modes mismatch");
-            case JsonConstants.JSON_ERROR_SYNTAX: return new StringMemory("Syntax error, malformed JSON");
-            case JsonConstants.JSON_ERROR_UTF8: return new StringMemory("Malformed UTF-8 characters, possibly incorrectly encoded");
-            case JsonConstants.JSON_ERROR_NON_BACKED_ENUM: return new StringMemory("Non-backed enums have no default serialization");
-            case JsonConstants.JSON_ERROR_CTRL_CHAR: return new StringMemory("Unexpected control character found");
-            default:
-                return Memory.NULL;
+        return StringMemory.valueOf(errorMessage(json_last_error(env)));
+    }
+
+    static void setError(Environment env,int code) {
+        env.setUserValue(JsonFunctions.class.getName()+"#error",code==JsonConstants.JSON_ERROR_NONE?null:code);
+    }
+
+    static String errorMessage(int code) {
+        switch(code) {
+            case JsonConstants.JSON_ERROR_NONE: return "No error";
+            case JsonConstants.JSON_ERROR_DEPTH: return "Maximum stack depth exceeded";
+            case JsonConstants.JSON_ERROR_STATE_MISMATCH: return "State mismatch (invalid or malformed JSON)";
+            case JsonConstants.JSON_ERROR_CTRL_CHAR: return "Control character error, possibly incorrectly encoded";
+            case JsonConstants.JSON_ERROR_SYNTAX: return "Syntax error";
+            case JsonConstants.JSON_ERROR_UTF8: return "Malformed UTF-8 characters, possibly incorrectly encoded";
+            case JsonConstants.JSON_ERROR_RECURSION: return "Recursion detected";
+            case JsonConstants.JSON_ERROR_INF_OR_NAN: return "Inf and NaN cannot be JSON encoded";
+            case JsonConstants.JSON_ERROR_UNSUPPORTED_TYPE: return "Type is not supported";
+            case JsonConstants.JSON_ERROR_INVALID_PROPERTY_NAME: return "The decoded property name is invalid";
+            case JsonConstants.JSON_ERROR_UTF16: return "Single unpaired UTF-16 surrogate in unicode escape";
+            case JsonConstants.JSON_ERROR_NON_BACKED_ENUM: return "Non-backed enums have no default serialization";
+            default: return "Unknown error";
         }
     }
 

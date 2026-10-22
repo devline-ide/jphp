@@ -1051,9 +1051,12 @@ public class ArrayMemoryMap extends AbstractMap<Object, Memory>
     }
     protected void removeMapping(ArrayMapEntryMemory entry, int hashIndex, ArrayMapEntryMemory previous) {
         rejectCertifiedUnlink(entry);
+        var syntheticOrigin = entry.getSyntheticGlobalsOrigin();
+        if (syntheticOrigin != null) syntheticOrigin.validateCarrier(entry);
         modCount++;
         removeEntry(entry, hashIndex, previous);
         size--;
+        if (syntheticOrigin != null) entry.retireSyntheticGlobalsOrigin();
         destroyEntry(entry);
     }
 

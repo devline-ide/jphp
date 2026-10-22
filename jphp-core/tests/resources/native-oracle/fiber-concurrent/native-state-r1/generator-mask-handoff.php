@@ -1,0 +1,2 @@
+<?php
+$e=[];error_reporting(1);$g=(function()use(&$e){$e[]='g0:'.error_reporting();error_reporting(2);Fiber::suspend('park');$e[]='g1:'.error_reporting();yield 1;error_reporting(8);})();$f=new Fiber(function()use($g,&$e){error_reporting(4);foreach($g as$v){$e[]='consume:'.error_reporting();}$e[]='fiber-end:'.error_reporting();});$e[]=$f->start();$e[]='main0:'.error_reporting();error_reporting(16);$f->resume();$e[]='main1:'.error_reporting();echo json_encode($e);

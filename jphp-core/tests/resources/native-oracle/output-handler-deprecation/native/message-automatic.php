@@ -1,0 +1,2 @@
+<?php
+$messages=[];set_error_handler(function($code,$message)use(&$messages){$messages[]=$message;return true;});function obh($s){echo 'B';return '['.$s.']';}ob_start('obh',1);echo 'A';ob_end_flush(); restore_error_handler();echo '|'.implode(';',$messages).'|';

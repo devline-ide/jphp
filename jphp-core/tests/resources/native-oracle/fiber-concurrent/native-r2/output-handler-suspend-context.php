@@ -1,0 +1,2 @@
+<?php
+$e=[];$f=new Fiber(function()use(&$e){ob_start(function($s)use(&$e){$e[]='handler';Fiber::suspend('park');$e[]='handler-resume';return $s;});echo 'F';ob_end_flush();});ob_start();$e[]=$f->start();$e[]='main';$f->resume();$e[]='done:'.($f->isTerminated()?1:0);$e[]='out:'.ob_get_clean();echo json_encode($e);

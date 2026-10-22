@@ -25,9 +25,19 @@ public final class PhpConstantExpression {
             UnarMinusExprToken.class, UnaryNumericExprToken.class, KeyValueExprToken.class,
             IntCastExprToken.class, DoubleCastExprToken.class, StringCastExprToken.class, BinaryCastExprToken.class,
             BooleanCastExprToken.class, ArrayCastExprToken.class);
-    private record Result(Token at, String error, int start, boolean foldable) {
-        static Result valid(int start, boolean foldable) { return new Result(null, null, start, foldable); }
-        static Result invalid(Token at, String error, int start) { return new Result(at, error, start, false); }
+    private record Result(Token at, String error, int start, boolean foldable, boolean constantOnly) {
+        static Result valid(int start, boolean foldable) { return new Result(null, null, start, foldable, true); }
+        static Result invalid(Token at, String error, int start) { return new Result(at, error, start, false, false); }
+    }
+    public record ParameterDefault(Memory value, boolean constantOnly) {}
+    public static ParameterDefault analyzeParameter(ExprStmtToken expression, ExpressionStmtCompiler calculator) {
+        PhpConstantExpression validator = new PhpConstantExpression(calculator);
+        validator.parameterDefault = true;
+        Result result = validator.expression(expression);
+        if (result.error != null) calculator.getCompiler().getEnvironment().error(
+                result.at.toTraceInfo(calculator.getCompiler().getContext()), ErrorType.E_COMPILE_ERROR, result.error);
+        return new ParameterDefault(validator.known(expression.getAsmExpr().getTokens(), result,
+                expression.getAsmExpr().getTokens().size()), result.constantOnly);
     }
     private record Literal(Token token, int baseStart) {}
     private final Map<Token, Literal> literals = new IdentityHashMap<>();
@@ -106,14 +116,14 @@ public final class PhpConstantExpression {
     private Result value(Token token, int index) {
         if (token instanceof CallExprToken call && call.isFirstClassCallable()) {
             Token name=call.getName();
-            if (name instanceof NameToken) return Result.valid(index,false);
+            if (name instanceof NameToken) return new Result(null,null,index,false,false);
             if (name instanceof StaticAccessExprToken access) {
                 if (!(access.getClazz() instanceof NameToken || access.getClazz() instanceof SelfExprToken
                         || access.getClazz() instanceof ParentExprToken))
                     return Result.invalid(token,"Cannot use dynamic class name in constant expression",index);
                 if (!(access.getField() instanceof NameToken) || access.getFieldExpr() != null)
                     return Result.invalid(token,"Cannot use dynamic method name in constant expression",index);
-                return Result.valid(index,false);
+                return new Result(null,null,index,false,false);
             }
             return Result.invalid(token,"Cannot use dynamic function name in constant expression",index);
         }
@@ -121,12 +131,12 @@ public final class PhpConstantExpression {
             if (closure.getFunction().isAutoUses()) return Result.invalid(token, INVALID, index);
             if (!closure.isStaticClosure()) return Result.invalid(token, "Closures in constant expressions must be static", index);
             if (!closure.getFunction().getUses().isEmpty()) return Result.invalid(token, "Cannot use(...) variables in constant expression", index);
-            return Result.valid(index, false);
+            return new Result(null,null,index,false,false);
         }
         if (token instanceof ArrayExprToken array) {
             Result result = Result.valid(index, true);
             for (ExprStmtToken item : array.getParameters()) result = combine(result, expression(item));
-            return new Result(result.at, result.error, index, result.foldable);
+            return new Result(result.at, result.error, index, result.foldable, result.constantOnly);
         }
         if (token instanceof StaticAccessExprToken access) return access(access, index, null);
         if (token instanceof NewExprToken creation) {
@@ -139,7 +149,7 @@ public final class PhpConstantExpression {
                     return Result.invalid(token,"Argument unpacking in constant expressions is not supported",index);
                 Result value=expression(argument);if (value.error != null) return value;
             }
-            return Result.valid(index,false);
+            return new Result(null,null,index,false,false);
         }
         if (token instanceof IntegerExprToken || token instanceof DoubleExprToken
                 || token instanceof BooleanExprToken || token instanceof NullExprToken) return Result.valid(index, true);
@@ -147,7 +157,9 @@ public final class PhpConstantExpression {
         if (token instanceof MacroToken) return Result.valid(index, !(token instanceof ClassMacroToken
                 && calculator.getMethod().clazz.getEntity().isTrait()));
         if (token instanceof NameToken name) return Result.valid(index,
-                calculator.getCompiler().getScope().findCompileConstant(name.getName()) != null);
+                calculator.getCompiler().getScope().findCompileConstant(name.getName()) != null
+                        && !(calculator.getCompiler().getModule().getPhpLanguageProfile()
+                            == php.runtime.common.PhpLanguageProfile.PHP_8_5 && "E_STRICT".equals(name.getName())));
         return Result.invalid(token, INVALID, index);
     }
 
@@ -162,7 +174,7 @@ public final class PhpConstantExpression {
             return Result.invalid(access, "Dynamic class names are not allowed in compile-time class constant references", index);
         if (access.getFieldExpr() != null) {
             Result field = expression(access.getFieldExpr());
-            return new Result(field.at, field.error, index, false);
+            return new Result(field.at, field.error, index, false, field.constantOnly);
         }
         Memory value = constantValue(access, calculator, dynamicClass);
         Token literal = value == null ? null : literal(value, access);
@@ -218,8 +230,8 @@ public final class PhpConstantExpression {
 
     private static Result combine(Result left, Result right) {
         Result error = left.error != null ? left : right.error != null ? right : null;
-        return error != null ? new Result(error.at, error.error, left.start, false)
-                : Result.valid(left.start, left.foldable && right.foldable);
+        return error != null ? new Result(error.at, error.error, left.start, false, false)
+                : new Result(null, null, left.start, left.foldable && right.foldable, left.constantOnly && right.constantOnly);
     }
 
     private Memory known(List<Token> tokens, Result result, int end) {

@@ -67,6 +67,37 @@ public final class PhpSerialization {
         finally { php.runtime.PhpPropertyWriteContext.leave(context); }
     }
 
+    /** Ordinary SPL wire keeps one reference-id space across its flags, storage and own properties. */
+    public static Memory serializeSplArrayObject(Environment env,TraceInfo trace,Memory flags,Memory storage,Memory properties) throws Throwable {
+        requireOrdinarySpl(env);Writer writer=new Writer(env,trace);writer.text("x:");
+        writer.value(flags);while(!writer.actions.isEmpty())writer.actions.pop().run();
+        if(storage!=null){writer.value(storage.toValue());while(!writer.actions.isEmpty())writer.actions.pop().run();writer.text(";");}
+        writer.text("m:");writer.value(properties.toValue());while(!writer.actions.isEmpty())writer.actions.pop().run();
+        return new PhpByteStringMemory(writer.output.toByteArray());
+    }
+    private static void requireOrdinarySpl(Environment env) {
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null || php.runtime.PhpRuntimeOwnership.current(env)!=null)
+            throw new IllegalArgumentException("SPL wire requires its ordinary invocation");
+    }
+    /** One actual byte Reader also retains cross-segment CELL and OBJECT identities. */
+    public record PrefixRead(Memory value,int nextOffset) {}
+    public static final class SplPrefixReader {
+        private final Reader reader;
+        public SplPrefixReader(Environment env,TraceInfo trace,byte[] bytes) {
+            requireOrdinarySpl(env);reader=new Reader(env,trace,bytes,new ArrayMemory());reader.prefix=true;
+        }
+        public PrefixRead read(int offset) throws Throwable {
+            requireOrdinarySpl(reader.env);
+            if(offset<0 || offset>=reader.bytes.length)throw new IllegalArgumentException(Integer.toString(offset));
+            var context=php.runtime.PhpPropertyWriteContext.enter(reader.env,reader.trace,true);
+            try {
+                reader.pos=offset;Memory result=reader.read();
+                if(reader.prefixFailed)throw new IllegalArgumentException(Integer.toString(reader.pos));
+                return new PrefixRead(result,reader.pos);
+            } finally {php.runtime.PhpPropertyWriteContext.leave(context);}
+        }
+    }
+
     /** Keep the legacy character-count wire while honoring a modern class's storage contract. */
     static boolean restoreLegacyObjectProperties(Environment env, TraceInfo trace, IObject object, ArrayMemory payload) throws Throwable {
         ClassEntity clazz = object.getReflection();
@@ -271,13 +302,13 @@ public final class PhpSerialization {
         }
 
         void object(ObjectMemory memory) throws Throwable {
-            IObject object = memory.value;
+            IObject object = php.runtime.PhpLazyObjects.observe(env,memory.value,php.runtime.PhpLazyObjects.Observation.SERIALIZE);
             ClassEntity clazz = object.getReflection();
             if(object instanceof php.runtime.lang.BaseEnum actual) {
                 byte[] name=(clazz.getName()+":"+actual.enumCaseName()).getBytes(StandardCharsets.UTF_8);
                 text("E:"+name.length+":\"");output.writeBytes(name);text("\";");return;
             }
-            if (clazz.isAnonymous() || object instanceof Closure || object instanceof Generator || object instanceof php.runtime.lang.PhpWeakReference) {
+            if (clazz.isAnonymous() || object instanceof Closure || object instanceof Generator || object instanceof php.runtime.lang.PhpWeakReference || object instanceof php.runtime.lang.PhpFiber) {
                 env.exception(trace, BaseException.class, "Serialization of '%s' is not allowed", clazz.getName());
             }
             MethodEntity modern = clazz.findMethod("__serialize");
@@ -430,6 +461,7 @@ public final class PhpSerialization {
         int cleanupIndex;
         Slot resultSlot;
         int pos;
+        boolean prefix,prefixFailed;
 
         Reader(Environment env, TraceInfo trace, byte[] bytes, ArrayMemory options) {
             this.env = env; this.trace = trace; this.bytes = bytes;
@@ -538,7 +570,7 @@ public final class PhpSerialization {
                         else validation.complete();
                     }
                 }
-                if (pos != bytes.length) env.error(trace, ErrorType.E_WARNING, "unserialize(): Extra data starting at offset %s of %s bytes", pos, bytes.length);
+                if (!prefix && pos != bytes.length) env.error(trace, ErrorType.E_WARNING, "unserialize(): Extra data starting at offset %s of %s bytes", pos, bytes.length);
                 drainCallbacks();
                 if (nativeArena != null) return root.nativeProducer.publishResult();
                 if (ownership != null && root.reference != null)
@@ -546,7 +578,8 @@ public final class PhpSerialization {
                 return root.value.toImmutable();
             } catch (InvalidData invalid) {
                 abortPending();
-                env.error(trace, ErrorType.E_WARNING, "unserialize(): Error at offset %s of %s bytes", pos, bytes.length);
+                prefixFailed=true;
+                if(!prefix) env.error(trace, ErrorType.E_WARNING, "unserialize(): Error at offset %s of %s bytes", pos, bytes.length);
                 // The failed return subtree is released before VAR_DTOR; completed hooks have their own queue owners.
                 if (ownership != null || nativeArena != null) { suppressUnfinishedRestorations(); releaseFailedResult(); }
                 drainCallbacks();
@@ -905,7 +938,7 @@ public final class PhpSerialization {
                 if(custom)env.error(trace,ErrorType.E_WARNING,"Class %s has no unserializer",clazz.getName());
                 env.exception(trace,BaseError.class,"Cannot instantiate enum %s",clazz.getName());
             }
-            if (clazz.getNativeClass() == php.runtime.lang.PhpWeakReference.class)
+            if ((clazz.getNativeClass() == php.runtime.lang.PhpWeakReference.class || clazz.getNativeClass() == php.runtime.lang.PhpFiber.class))
                 env.exception(trace, BaseException.class, "Unserialization of '%s' is not allowed", name);
             MethodEntity modern = custom || incomplete ? null : clazz.findMethod("__unserialize");
             if (ownership != null && !custom && !incomplete) {

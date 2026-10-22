@@ -210,7 +210,7 @@ public final class PhpPrimitiveCellPlan {
                         }
                     }
                 } else if(!pureCall(target,helper,type)||discardedCall(target,helper,type)&&invoke.opcode()!=Opcode.INVOKEVIRTUAL) {
-                    if(!emptyClosureConstructor(owner,instructions,at,invoke)&&!emptyClosureFlag(owner,instructions,at,invoke)&&!capturedFactoryCall(owner,method,code,instructions,at,sites)&&!guardedCaptureAllocation(owner,method,code,instructions,at,sites)&&!localTableInitialization(method,code,instructions,at,invoke))closed=false;
+                    if(!emptyClosureConstructor(owner,instructions,at,invoke)&&!emptyClosureFlag(owner,instructions,at,invoke)&&!capturedFactoryCall(owner,method,code,instructions,at,sites)&&!guardedCaptureAllocation(owner,method,code,instructions,at,sites)&&!localTableInitialization(method,code,instructions,at,invoke)&&!guardedSessionCvUnset(method,code,instructions,at,sites,-1,model.thisClass().asInternalName()))closed=false;
                 }
             }
             if(!seen.equals(sites.keySet()))throw new IOException("CELL row omits/repeats its physical publisher");
@@ -219,6 +219,49 @@ public final class PhpPrimitiveCellPlan {
             result.put(name+descriptor,new Member(owner,name,descriptor,closed,reference,sites,locals,statics,arguments,captures,factories));
         }
         return Map.copyOf(result);
+    }
+    /** Data-only bridge: exact defined bytes, existing CELL rows, and the guarded active/ordinary unset pair. */
+    static boolean hasSessionCvUnset(Class<?> owner,byte[] bytes,String name,String descriptor,int local)throws IOException {
+        Member member=read(owner,bytes).get(name+descriptor);if(member==null)return false;
+        var model=ClassFile.of().parse(bytes);
+        for(var method:model.methods())if(method.methodName().equalsString(name)&&method.methodType().equalsString(descriptor)) {
+            if(method.code().isEmpty())return false;var code=method.code().orElseThrow();
+            var ops=code.elementList().stream().filter(Instruction.class::isInstance).map(Instruction.class::cast).toList();
+            for(int at=0;at<ops.size();at++)if(guardedSessionCvUnset(method,code,ops,at,member.sites,local,model.thisClass().asInternalName()))return true;
+        }
+        return false;
+    }
+    /** Recognition is not a pure-call allowance: the exact old physical unset site must remain in the fallback. */
+    private static boolean guardedSessionCvUnset(MethodModel method,CodeModel code,List<Instruction> ops,int at,Map<Integer,Site> sites,int expected,String generatedOwner) {
+        if(at<5 || at+11>=ops.size() || !invoke(ops.get(at),Opcode.INVOKEVIRTUAL,"php/runtime/PhpOwnershipExecution$Entry","unsetLocal","(ILphp/runtime/Memory;)V"))return false;
+        if(!(ops.get(at-5) instanceof LoadInstruction entry) || entry.typeKind()!=TypeKind.REFERENCE
+                || !(ops.get(at-2) instanceof ConstantInstruction id) || !(id.constantValue() instanceof Integer local)
+                || expected>=0 && local!=expected || !load(ops.get(at-3),entry.slot()) || !load(ops.get(at-1),local))return false;
+        var labels=labels(code);
+        int end=at+11;
+        // The sparse typed observer is admitted by its complete independent NEW/CV/reference/unset proof.
+        if(at+18<ops.size() && invoke(ops.get(at+18),Opcode.INVOKESTATIC,PhpTypedSourcePlan.RUNTIME,"released",PhpTypedSourcePlan.OBSERVER)) {
+            int releasedBci=0;for(int i=0;i<at+18;i++)releasedBci+=ops.get(i).sizeInBytes();
+            final int actualBci=releasedBci;
+            if(PhpTypedSourcePlan.inspect(method).values().stream().noneMatch(proof->proof.local()==local&&proof.releasedBci()==actualBci))return false;
+            end=at+19;
+        }
+        if(!branch(ops.get(at-4),Opcode.IFNULL,labels,at+2) || !branch(ops.get(at+1),Opcode.GOTO,labels,end)
+                || !(ops.get(at+2) instanceof LoadInstruction frame) || frame.typeKind()!=TypeKind.REFERENCE
+                || !constant(ops.get(at+3),local) || !load(ops.get(at+4),local)
+                || !method.methodType().stringValue().startsWith("(Lphp/runtime/env/Environment;")
+                || !load(ops.get(at+5),(method.flags().flagsMask()&8)==0?1:0)
+                || !(ops.get(at+6) instanceof ConstantInstruction owner) || !owner.constantValue().equals(ClassDesc.ofInternalName(generatedOwner))
+                || !constant(ops.get(at+7),method.methodName().stringValue()) || !constant(ops.get(at+8),method.methodType().stringValue())
+                || !(ops.get(at+9) instanceof ConstantInstruction index) || !(index.constantValue() instanceof Integer site)
+                || !invoke(ops.get(at+10),Opcode.INVOKESTATIC,RUNTIME,"unset","(Lphp/runtime/PhpRuntimeOwnership$Frame;ILphp/runtime/Memory;Lphp/runtime/env/Environment;Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;I)V"))return false;
+        Site row=sites.get(site);if(row==null || !row.helper().equals("unset") || row.local()!=local)return false;
+        // Neither branch nor handler may enter an interior instruction of this exact paired publication.
+        for(int pos=0;pos<ops.size();pos++)if(ops.get(pos) instanceof BranchInstruction jump) {
+            Integer target=labels.get(jump.target());if(target==null || target>at-5 && target<end && pos!=at-4)return false;
+        }
+        for(var element:code.elementList())if(element instanceof ExceptionCatch handler) {Integer target=labels.get(handler.handler());if(target==null||target>at-5&&target<end)return false;}
+        return true;
     }
     private static boolean argumentPublisher(MethodModel method,List<Instruction> ops,int at,int local,PhpOwnershipExecution.Local argument){
         int role=argument.importMode()==PhpOwnershipExecution.Mode.CELL?1:0;

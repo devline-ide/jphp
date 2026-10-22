@@ -1,0 +1,1 @@
+<?php ob_start(function($s){return '['.$s.']';});echo 'A';ob_end_flush();echo 'B';

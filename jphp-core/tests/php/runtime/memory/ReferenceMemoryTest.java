@@ -76,4 +76,46 @@ public class ReferenceMemoryTest {
         Assert.assertEquals(12, memory.toLong());
         Assert.assertEquals(12, ref.toLong());
     }
+
+    @Test public void testLegacyCopyPreservesActualVirtualConversionAndInheritedArrayReset() {
+        var sentinel=new StringMemory("converted");var calls=new int[1];
+        ReferenceMemory custom=new ReferenceMemory(Memory.NULL) {
+            @Override public Memory toImmutable(){calls[0]++;return sentinel;}
+            @Override public Memory getValue(){throw new AssertionError("Custom immutable conversion must run before payload reads");}
+        };
+        Assert.assertSame(sentinel,custom.toImmutableForLegacy());Assert.assertEquals(1,calls[0]);
+        Assert.assertSame(sentinel,custom.toImmutableForLegacy());Assert.assertEquals(2,calls[0]);
+        Assert.assertSame(sentinel,custom.toImmutable());Assert.assertEquals(3,calls[0]);
+
+        var pair=new KeyValueMemory(new StringMemory("named"),LongMemory.valueOf(7));
+        Assert.assertSame(pair,pair.toImmutableForLegacy());Assert.assertEquals("named",pair.getArrayKey());
+        var nativeValue=new NativeMemory<Object>(new Object());Assert.assertSame(nativeValue,nativeValue.toImmutableForLegacy());
+        var observable=new php.runtime.memory.helper.ObservableMemory(Memory.CONST_INT_1);
+        Assert.assertSame(observable,observable.toImmutableForLegacy());
+        var cell=new ReferenceMemory(Memory.CONST_INT_1);var shortcut=new php.runtime.memory.helper.ShortcutMemory(cell);
+        Assert.assertSame(cell,shortcut.toImmutableForLegacy());
+
+        var arrayCalls=new int[1];ArrayMemory customArray=new ArrayMemory() {
+            @Override public Memory toImmutable(){arrayCalls[0]++;return sentinel;}
+        };
+        Assert.assertSame(sentinel,customArray.toImmutableForLegacy());Assert.assertEquals(1,arrayCalls[0]);
+        Assert.assertSame(sentinel,customArray.toImmutableForLegacy());Assert.assertEquals(2,arrayCalls[0]);
+        Assert.assertSame(sentinel,new ReferenceMemory(customArray).toImmutableForLegacy());Assert.assertEquals(3,arrayCalls[0]);
+
+        for(boolean inheritedReference:new boolean[]{false,true}) {
+            var source=ArrayMemory.ofStrings("first","second");source.getCurrentIteratorForNative().next();
+            Assert.assertEquals("second",source.getCurrentIterator().getValue().toString());
+            ReferenceMemory wrapper=inheritedReference?new ReferenceMemory(source){}:new ReferenceMemory(source);
+            var copy=(ArrayMemory)wrapper.toImmutableForLegacy();Assert.assertNotSame(source,copy);
+            Assert.assertNull("legacy source reset",source.getCurrentIterator().getKey());
+            Assert.assertNull("legacy copy reset",copy.getCurrentIterator().getKey());
+        }
+        ArrayMemory inheritedArray=new ArrayMemory(){};inheritedArray.add("first");inheritedArray.add("second");
+        inheritedArray.getCurrentIteratorForNative().next();var copy=(ArrayMemory)inheritedArray.toImmutableForLegacy();
+        Assert.assertNull(inheritedArray.getCurrentIterator().getKey());Assert.assertNull(copy.getCurrentIterator().getKey());
+        var modern=ArrayMemory.ofStrings("first","second");modern.getCurrentIteratorForNative().next();
+        var modernCopy=(ArrayMemory)new ReferenceMemory(modern).toImmutable();
+        Assert.assertEquals("second",modern.getCurrentIterator().getValue().toString());
+        Assert.assertEquals("second",modernCopy.getCurrentIterator().getValue().toString());
+    }
 }

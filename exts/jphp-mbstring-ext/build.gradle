@@ -1,0 +1,11 @@
+dependencies {
+    compileOnly project(':jphp-runtime')
+    implementation 'com.ibm.icu:icu4j:77.1'
+    implementation 'com.ibm.icu:icu4j-charset:77.1'
+
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation project(':jphp-core')
+    testImplementation project(':exts:jphp-zend-ext')
+    testImplementation project(':exts:jphp-intl-ext')
+    testImplementation project.project(':jphp-core').sourceSets.test.output
+}

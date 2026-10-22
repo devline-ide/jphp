@@ -1,0 +1,4 @@
+["strict-string-number",null,["TypeError","json_validate(): Argument #1 ($json) must be of type string, int given"],4,"Syntax error",[]]
+["strict-depth-string",null,["TypeError","json_validate(): Argument #2 ($depth) must be of type int, string given"],4,"Syntax error",[]]
+["strict-null",null,["TypeError","json_validate(): Argument #1 ($json) must be of type string, null given"],4,"Syntax error",[]]
+["strict-stringable",null,["TypeError","json_validate(): Argument #1 ($json) must be of type string, JsonText given"],4,"Syntax error",[]]

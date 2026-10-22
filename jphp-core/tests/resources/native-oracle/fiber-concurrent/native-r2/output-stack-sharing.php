@@ -1,0 +1,2 @@
+<?php
+$e=[];ob_start();echo 'A';$f=new Fiber(function()use(&$e){$e[]='f0:'.ob_get_level();echo 'F';ob_start();echo 'I';$e[]='f1:'.ob_get_level();Fiber::suspend('park');echo 'R';$e[]='f2:'.ob_get_level();$inner=ob_get_clean();return $inner;});$e[]=$f->start();$e[]='m:'.ob_get_level();echo 'M';$f->resume();$e[]='return:'.$f->getReturn();$e[]='outer:'.ob_get_clean();echo json_encode($e);

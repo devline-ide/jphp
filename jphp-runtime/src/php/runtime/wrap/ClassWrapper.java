@@ -56,6 +56,8 @@ public class ClassWrapper {
 
     protected void onWrapConstants(ClassEntity classEntity) {
         for(Field field : nativeClass.getDeclaredFields()){
+            if ((scope == null || !scope.isModernClassLookup()) && nativeClass == php.runtime.ext.core.reflection.ReflectionClass.class
+                    && (field.getName().equals("SKIP_INITIALIZATION_ON_SERIALIZE") || field.getName().equals("SKIP_DESTRUCTOR"))) continue;
             int mod = field.getModifiers();
             if (field.isAnnotationPresent(Reflection.Ignore.class))
                 continue;
@@ -63,9 +65,10 @@ public class ClassWrapper {
             if (Modifier.isFinal(mod) && Modifier.isStatic(mod) && !Modifier.isPrivate(mod)){
                 try {
                     field.setAccessible(true);
-                    classEntity.addConstant(new ConstantEntity(
-                            field.getName(), MemoryUtils.valueOf(field.get(null)), true
-                    ));
+                    ConstantEntity constant = new ConstantEntity(field.getName(), MemoryUtils.valueOf(field.get(null)), true);
+                    if (nativeClass == php.runtime.lang.spl.iterator.ArrayObject.class)
+                        constant.setDeclaredType(new php.runtime.reflection.support.PhpTypeDeclaration(java.util.List.of(java.util.List.of("int"))));
+                    classEntity.addConstant(constant);
                 } catch (IllegalAccessException e) {
                     throw new RuntimeException(e);
                 }
@@ -153,6 +156,7 @@ public class ClassWrapper {
 
     protected void onWrapArgument(ParameterEntity param, Reflection.Arg arg) {
         param.setReference(arg.reference());
+        param.setVariadic(arg.variadic());
         param.setType(arg.type());
         param.setName(arg.value());
         param.setNullable(arg.nullable());
@@ -541,6 +545,7 @@ public class ClassWrapper {
         }
 
         for (Method method : nativeClass.getDeclaredMethods()) {
+            if ((scope == null || !scope.isModernClassLookup()) && php.runtime.PhpLazyObjects.modernReflectionMember(nativeClass,method.getName())) continue;
             if (method.isAnnotationPresent(Reflection.Ignore.class)) continue;
             Reflection.Signature signature = getSignature(method);
 
@@ -555,7 +560,8 @@ public class ClassWrapper {
                 } else {
                     onWrapCompileMethod(classEntity, method);
                 }
-                if (signature != null && nativeClass.isAnnotationPresent(Reflection.NativePhpSignature.class)) {
+                if (signature != null && (nativeClass.isAnnotationPresent(Reflection.NativePhpSignature.class)
+                        || scope != null && scope.isModernClassLookup() && php.runtime.PhpLazyObjects.modernReflectionSignature(nativeClass,method.getName()))) {
                     Reflection.Name named = method.getAnnotation(Reflection.Name.class);
                     MethodEntity wrapped = classEntity.findMethod((named == null ? method.getName() : named.value()).toLowerCase(java.util.Locale.ROOT));
                     Reflection.Arg[] arguments=signature.value();

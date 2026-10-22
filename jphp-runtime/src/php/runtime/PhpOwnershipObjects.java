@@ -293,6 +293,7 @@ public final class PhpOwnershipObjects {
                 }
                 @Override public void destroy(PhpOwnership.Node target,Object context) {
                     // Graph calls destroy only after its resurrection decision. No early/manual/GC guard detach.
+                    PhpLazyObjects.destroyOwnership(object,ObjectCertificate.this,target);
                     if (properties != null) properties.detachSources();
                 }
             });
@@ -308,6 +309,7 @@ public final class PhpOwnershipObjects {
                 throw new IllegalArgumentException("Certificate does not identify this live actual object");
             if (properties != null && object.getOwnershipProperties() != properties.table)
                 throw new IllegalStateException("Actual object property field changed outside its descriptor");
+            PhpLazyObjects.validateOwnership(object,this,node);
         }
         public void validateBinding(PhpOwnershipDomain requested,PhpOwnership.Node candidate,IObject actual) {
             if (requested != domain() || candidate != node || actual != object)
@@ -422,6 +424,14 @@ public final class PhpOwnershipObjects {
         public void publishRestorationClear(PhpOwnershipArrays.RestorationClearPublication publication) {
             if (!publication.validatesTableCommit(this)) throw new IllegalArgumentException("Wrong TABLE restoration cleanup");
             removalRevision++;
+        }
+        /** Private object-to-TABLE publisher authorizes this one actual lazy physical replacement. */
+        void publishLazyReplacement(PhpLazyPropertyTransaction.Prepared placement)throws Throwable {
+            validateAll();placement.storeUsingTableEdge(owner.tableEdge,this);
+        }
+        void replaceLazyEntries(PhpLazyPropertyTransaction.Prepared placement,IdentityHashMap<ReferenceMemory,PhpOwnershipArrays.PhysicalSlot> prepared) {
+            if(!placement.permitsCertificate(this))throw new IllegalArgumentException("Wrong actual lazy TABLE publication");
+            entries=prepared;removalRevision++;
         }
         public long removalRevision() {return removalRevision;}
         public PhpOwnershipArrays.UnsetPublication prepareUnset(String literalStorageKey) {

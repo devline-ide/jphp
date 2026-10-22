@@ -1,0 +1,2 @@
+<?php
+$e=[];spl_autoload_register(function($name)use(&$e){$e[]='load:'.$name;Fiber::suspend('park');eval('class '.$name.' {}');});ob_start();$f=new Fiber(function(){return new PendingFiberClass;});$e[]=$f->start();echo 'M';$f->resume();$e[]='class:'.$f->getReturn()::class;$e[]='out:'.ob_get_clean();echo json_encode($e);

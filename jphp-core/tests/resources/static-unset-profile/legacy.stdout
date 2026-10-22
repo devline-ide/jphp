@@ -1,0 +1,1 @@
+a:4:{i:0;s:12:"before-unset";i:1;s:70:"warn:2048:Accessing static property StaticUnsetProbe::$x as non static";i:2;s:11:"after-unset";i:3;s:8:"static:7";}

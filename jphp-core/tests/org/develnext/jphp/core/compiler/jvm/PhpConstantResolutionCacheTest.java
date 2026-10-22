@@ -47,7 +47,13 @@ public class PhpConstantResolutionCacheTest {
                     return new MethodVisitor(Opcodes.ASM5) {
                         @Override public void visitMethodInsn(int opcode, String owner, String name,
                                                                String descriptor, boolean isInterface) {
-                            if (owner.equals("php/runtime/env/Environment") && name.equals("__getConstant")) {
+                            if (owner.equals(php.runtime.PhpConstantReads.OWNER) && name.equals("fetch")) {
+                                assertEquals("typed emitted helper opcode", Opcodes.INVOKESTATIC, opcode);
+                                assertFalse("typed helper is a class static member", isInterface);
+                                assertEquals("typed emitted helper", php.runtime.PhpConstantReads.DESCRIPTOR, descriptor);
+                                count[0]++;
+                            } else if (owner.equals("php/runtime/env/Environment") && name.equals("__getConstant")) {
+                                assertEquals("modern emitted helper opcode", Opcodes.INVOKEVIRTUAL, opcode);
                                 assertEquals("modern emitted helper", "(Ljava/lang/String;Ljava/lang/String;Lphp/runtime/env/TraceInfo;ZLjava/lang/String;)Lphp/runtime/Memory;", descriptor);
                                 count[0]++;
                             }

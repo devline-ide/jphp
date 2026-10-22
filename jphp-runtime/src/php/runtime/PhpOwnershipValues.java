@@ -41,7 +41,7 @@ public final class PhpOwnershipValues {
             validate();
             if (raw instanceof ObjectMemory) {
                 var object=((ObjectMemory)raw).value;
-                if(object.getClass()==php.runtime.lang.exception.BaseTypeError.class) {
+                if(PhpOwnershipThrowables.isEngineThrowableType(object.getClass())) {
                     var nativeCertificate=((php.runtime.lang.exception.BaseTypeError)object).getOwnershipThrowable();
                     if(nativeCertificate==null)throw new IllegalArgumentException("Native TypeError lacks its complete allocation origin");
                     nativeCertificate.validateBinding(domain,node,object);return this;

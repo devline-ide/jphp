@@ -727,11 +727,15 @@ public class ExprGenerator extends Generator<ExprStmtToken> {
                     closure.setFunction(token);
                     closure.setOwnerClass(analyzer.getClazz());
                     closure.setParentFunction(parentFunction);
-                    tokens.add(closure);
                     analyzer.registerClosure(closure);
 
-                    List<Token> tmp = processSimpleExpr(current, iterator);
-                    tokens.addAll(tmp);
+                    if(analyzer.getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                        // The body has already been parsed; continue from its closure value.
+                        tokens.addAll(processSimpleExpr(closure, iterator));
+                    } else {
+                        tokens.add(closure);
+                        tokens.addAll(processSimpleExpr(current, iterator));
+                    }
                 } else {
                     tokens.add(token);
                     analyzer.registerFunction(token);

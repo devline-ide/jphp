@@ -1,0 +1,2 @@
+<?php
+$GLOBALS['events']=[];$f=new Fiber(function(){return include __DIR__.'/outer.php';});$GLOBALS['events'][]=$f->start();$GLOBALS['events'][]='other-ret:'.(include __DIR__.'/other.php');$f->resume();$GLOBALS['events'][]='ret:'.$f->getReturn();echo json_encode($GLOBALS['events']);

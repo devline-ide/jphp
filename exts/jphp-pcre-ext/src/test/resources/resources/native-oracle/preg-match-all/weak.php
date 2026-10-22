@@ -1,0 +1,107 @@
+<?php
+function pma_pack($v) {
+    if (is_string($v)) return ['bytes',bin2hex($v)];
+    if (is_array($v)) { $r=[]; foreach($v as $k=>$x)$r[]=[is_int($k)?['int',$k]:['bytes',bin2hex($k)],pma_pack($x)]; return ['array',$r]; }
+    return $v;
+}
+function pma_trial($id,$p,$s,$flags=0,$offset=0) {
+    $m=['sentinel'];$events=[];
+    set_error_handler(function($n,$t)use(&$events){$events[]=[$n,$t];return true;});
+    try { $r=preg_match_all($p,$s,$m,$flags,$offset);$ex=null; }
+    catch(Throwable $e){$r=null;$ex=[get_class($e),$e->getMessage()];}
+    finally { restore_error_handler(); }
+    echo $id,':',json_encode([pma_pack($r),pma_pack($m),preg_last_error(),preg_last_error_msg(),$events,$ex],JSON_UNESCAPED_SLASHES|JSON_UNESCAPED_UNICODE),"\n";
+}
+echo 'engine:',json_encode([PHP_VERSION,PCRE_VERSION,PCRE_JIT_SUPPORT,ini_get('pcre.backtrack_limit'),ini_get('pcre.recursion_limit')]),"\n";
+pma_trial('literal-default','~(a)(b)~','abxab');
+pma_trial('literal-pattern','~(a)(b)~','abxab',PREG_PATTERN_ORDER);
+pma_trial('literal-set','~(a)(b)~','abxab',PREG_SET_ORDER);
+pma_trial('no-match-pattern','~(a)(b)~','zz',PREG_PATTERN_ORDER);
+pma_trial('no-match-set','~(a)(b)~','zz',PREG_SET_ORDER);
+pma_trial('empty-subject-pattern','~(a)?~','',PREG_PATTERN_ORDER);
+pma_trial('empty-subject-set','~(a)?~','',PREG_SET_ORDER);
+pma_trial('tail-pattern','~(a)(b)?(c)?~','a ab abc',PREG_PATTERN_ORDER);
+pma_trial('tail-set','~(a)(b)?(c)?~','a ab abc',PREG_SET_ORDER);
+pma_trial('tail-null-pattern','~(a)(b)?(c)?~','a ab abc',PREG_PATTERN_ORDER|PREG_UNMATCHED_AS_NULL);
+pma_trial('tail-null-set','~(a)(b)?(c)?~','a ab abc',PREG_SET_ORDER|PREG_UNMATCHED_AS_NULL);
+pma_trial('middle-pattern','~(a)(b)?(c)~','ac abc',PREG_PATTERN_ORDER);
+pma_trial('middle-set','~(a)(b)?(c)~','ac abc',PREG_SET_ORDER);
+pma_trial('middle-offset-pattern','~(a)(b)?(c)~','zac zabc',PREG_OFFSET_CAPTURE|PREG_PATTERN_ORDER);
+pma_trial('middle-offset-set','~(a)(b)?(c)~','zac zabc',PREG_OFFSET_CAPTURE|PREG_SET_ORDER);
+pma_trial('all-flags-pattern','~(a)(b)?(c)?~','a ab abc',PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL|PREG_PATTERN_ORDER);
+pma_trial('all-flags-set','~(a)(b)?(c)?~','a ab abc',PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL|PREG_SET_ORDER);
+pma_trial('empty-v-unmatched-pattern','~(a()|b(c)?)~','a b',PREG_UNMATCHED_AS_NULL|PREG_PATTERN_ORDER);
+pma_trial('empty-v-unmatched-set','~(a()|b(c)?)~','a b',PREG_UNMATCHED_AS_NULL|PREG_SET_ORDER);
+pma_trial('named-pattern','~(?<word>a)(?<tail>b)?~','a ab',PREG_PATTERN_ORDER);
+pma_trial('named-set','~(?<word>a)(?<tail>b)?~','a ab',PREG_SET_ORDER);
+pma_trial('named-offset-null-pattern','~(?<word>a)(?<tail>b)?~','a ab',PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL|PREG_PATTERN_ORDER);
+pma_trial('named-offset-null-set','~(?<word>a)(?<tail>b)?~','a ab',PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL|PREG_SET_ORDER);
+pma_trial('duplicate-pattern','~(?<x>a)|(?<x>b)~J','aba',PREG_PATTERN_ORDER);
+pma_trial('duplicate-set','~(?<x>a)|(?<x>b)~J','aba',PREG_SET_ORDER);
+pma_trial('duplicate-null-pattern','~(?<x>a)|(?<x>b)~J','aba',PREG_UNMATCHED_AS_NULL|PREG_PATTERN_ORDER);
+pma_trial('duplicate-null-set','~(?<x>a)|(?<x>b)~J','aba',PREG_UNMATCHED_AS_NULL|PREG_SET_ORDER);
+pma_trial('duplicate-both-pattern','~(?<x>a)(?<x>b)~J','ab ab',PREG_PATTERN_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('duplicate-both-set','~(?<x>a)(?<x>b)~J','ab ab',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('branch-reset-pattern','~(?|(a)|(b))~','abba',PREG_PATTERN_ORDER);
+pma_trial('branch-reset-set','~(?|(a)|(b))~','abba',PREG_SET_ORDER);
+pma_trial('mark-pattern','~a(*MARK:A)|b|c(*MARK:C)~','abcba',PREG_PATTERN_ORDER);
+pma_trial('mark-set','~a(*MARK:A)|b|c(*MARK:C)~','abcba',PREG_SET_ORDER);
+pma_trial('mark-offset-null-pattern','~a(*MARK:A)|b|c(*MARK:C)~','abcba',PREG_PATTERN_ORDER|PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL);
+pma_trial('mark-offset-null-set','~a(*MARK:A)|b|c(*MARK:C)~','abcba',PREG_SET_ORDER|PREG_OFFSET_CAPTURE|PREG_UNMATCHED_AS_NULL);
+pma_trial('empty-alternative','~(?:|a)~','a',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-alternative-pattern','~(?:|a)~','a',PREG_PATTERN_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('lazy-empty','~a*?~','aa',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('greedy-empty','~a*~','aa',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-keep','~a\K~','aa',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-keep-alternative','~(?:ab\K|a)~','abab',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-lookahead','~(?=a)~','aa',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-boundaries','~\b~','a b',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-utf','~(?:)~u','Жé𐍈',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-crlf','~(*CRLF)(?:)~',"\r\n",PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-crlf-or-cr','~(*CRLF)(?:|\r)~',"\r\n",PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-crlf-or-lf','~(*CRLF)(?:|\n)~',"\r\n",PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('newline-anycrlf','~(*ANYCRLF)^|$~m',"a\r\nb\rc\n",PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('empty-offset-end','~~','abc',PREG_SET_ORDER|PREG_OFFSET_CAPTURE,3);
+pma_trial('utf-letters','~(?<s>\p{L})~u','!Жé𐍈',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('binary-byte','~(.)~',"\xff\x00\xfe",PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('binary-nul','~\x00(.)~',"x\x00\xffz\x00a",PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('pattern-byte',"~\xff~","x\xffy\xff",PREG_PATTERN_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('pattern-nul',"~a\x00b~","xa\x00ba\x00b",PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('bad-subject-utf','~.~u',"\xff",PREG_SET_ORDER);
+pma_trial('bad-pattern-utf',"~\xff~u",'x');
+pma_trial('bad-offset-utf','~.~u','Жa',PREG_OFFSET_CAPTURE,1);
+pma_trial('offset-bytes','~.~u','aЖz',PREG_SET_ORDER|PREG_OFFSET_CAPTURE,3);
+pma_trial('negative-offset','~.~','abcd',PREG_SET_ORDER|PREG_OFFSET_CAPTURE,-2);
+pma_trial('negative-utf-offset','~.~u','aЖz',PREG_SET_ORDER|PREG_OFFSET_CAPTURE,-3);
+pma_trial('offset-past','~.~','abc',PREG_SET_ORDER,5);
+pma_trial('negative-past','~.~','abc',PREG_OFFSET_CAPTURE,-9);
+pma_trial('offset-min','~.~','abc',PREG_OFFSET_CAPTURE,-PHP_INT_MAX-1);
+pma_trial('anchor-offset','~^b~','ab b',PREG_SET_ORDER,1);
+pma_trial('anchor-startoffset','~\G.~','abcd',PREG_SET_ORDER|PREG_OFFSET_CAPTURE,1);
+pma_trial('keep','~foo\Kbar~','foobarfoobar',PREG_OFFSET_CAPTURE|PREG_SET_ORDER);
+pma_trial('recursive','~(?<n>\((?:[^()]++|(?&n))*\))~','(a(b)c)(d)',PREG_SET_ORDER);
+pma_trial('lookbehind','~(?<=foo)bar~','foobarfoobar',PREG_SET_ORDER);
+pma_trial('skip-fail','~"[^"]*"(*SKIP)(*F)|\w+~','a "b c" d',PREG_SET_ORDER|PREG_OFFSET_CAPTURE);
+pma_trial('bounded-backtrack-error','~(*NO_JIT)(*LIMIT_MATCH=8)(a+)+$~','aaaaaaaaaaaaaaaaaaaaaaaaX',PREG_SET_ORDER);
+pma_trial('invalid-pattern','~(~','a');
+pma_trial('invalid-delimiter','abc','a');
+pma_trial('invalid-modifier','~a~q','a');
+pma_trial('invalid-keep-assertion','~(?=a\K)~','a');
+pma_trial('invalid-order-both','~a~','a',PREG_PATTERN_ORDER|PREG_SET_ORDER);
+pma_trial('invalid-flag4','~a~','a',4);
+pma_trial('invalid-negative-flags','~a~','a',-1);
+pma_trial('array-pattern',[],'a');
+pma_trial('array-subject','~a~',[]);
+pma_trial('array-flags','~a~','a',[]);
+pma_trial('array-offset','~a~','a',PREG_SET_ORDER,[]);
+pma_trial('coerce-pattern-int',123,'123123',PREG_SET_ORDER);
+pma_trial('coerce-subject-int','~2~',1212,PREG_SET_ORDER);
+pma_trial('coerce-subject-bool','~1~',true,PREG_SET_ORDER);
+pma_trial('coerce-subject-null','~~',null,PREG_SET_ORDER);
+pma_trial('coerce-flags-string','~a~','aa','2');
+pma_trial('coerce-offset-string','~a~','aaa',PREG_SET_ORDER,'1');
+pma_trial('coerce-offset-float','~a~','aaa',PREG_SET_ORDER,1.5);
+pma_trial('coerce-flags-null','~a~','aa',null);
+$shared=null;$alias=&$shared;$r=preg_match_all('~(?<n>a)~','aa',$shared,PREG_SET_ORDER);echo 'matches-alias:',json_encode([$r,pma_pack($shared),pma_pack($alias)]),"\n";
+$before=['saved'];$m=$before;$r=preg_match_all('~a~','aa',$m);$copy=$m;$m[0][0]='changed';echo 'matches-cow:',json_encode([$r,pma_pack($before),pma_pack($copy),pma_pack($m)]),"\n";
+$f=new ReflectionFunction('preg_match_all');$params=[];foreach($f->getParameters()as $p)$params[]=[$p->getName(),(string)$p->getType(),$p->isPassedByReference(),$p->isOptional(),$p->isDefaultValueAvailable()?$p->getDefaultValue():null];echo 'reflection:',json_encode([(string)$f->getReturnType(),$f->getNumberOfRequiredParameters(),$f->getNumberOfParameters(),$params]),"\n";

@@ -1020,7 +1020,7 @@ public class Tokenizer {
 
                 break;
             } else if (TokenizeGrammarUtils.isVariableChar(ch)){
-                if (phpLanguageProfile == PhpLanguageProfile.PHP_8_5 && currentPosition > startPosition
+                if (currentPosition > startPosition
                         && !TokenizeGrammarUtils.isVariableChar(prev_ch)) {
                     splitVariable = true;
                     break;

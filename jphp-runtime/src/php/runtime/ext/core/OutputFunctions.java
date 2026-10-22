@@ -161,7 +161,7 @@ public class OutputFunctions extends FunctionsContainer {
                 return false;
             }
             if (modern && !requireOutputCapability(env, trace, buffer, 16, "ob_clean", "delete")) return false;
-            buffer.setTrace(trace);
+            buffer.setTrace(trace, "ob_clean");
             if (modern) buffer.cleanPhp85(false); else buffer.clean();
             return true;
         } else {
@@ -179,7 +179,7 @@ public class OutputFunctions extends FunctionsContainer {
                 return false;
             }
             if (modern && !requireOutputCapability(env, trace, buffer, 64, "ob_end_clean", "discard")) return false;
-            buffer.setTrace(trace);
+            buffer.setTrace(trace, "ob_end_clean");
             if (modern) {
                 try { buffer.cleanPhp85(true); } finally { env.popOutputBuffer(); }
             } else {
@@ -198,7 +198,7 @@ public class OutputFunctions extends FunctionsContainer {
         OutputBuffer buffer = env.peekOutputBuffer();
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         if (buffer != null && !buffer.isRoot()){
-            buffer.setTrace(trace);
+            buffer.setTrace(trace, "ob_end_flush");
             if (modern) {
                 if (buffer.isLock()) { env.error(trace, "ob_end_flush(): Cannot use output buffering in output buffering display handlers"); return false; }
                 if (!requireOutputCapability(env, trace, buffer, 64, "ob_end_flush", "send")) return false;
@@ -226,7 +226,7 @@ public class OutputFunctions extends FunctionsContainer {
         OutputBuffer buffer = env.peekOutputBuffer();
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         if (buffer != null && !buffer.isRoot()) {
-            buffer.setTrace(trace);
+            buffer.setTrace(trace, "ob_flush");
             if (modern) {
                 if (buffer.isLock()) { env.error(trace, "ob_flush(): Cannot use output buffering in output buffering display handlers"); return false; }
                 if (!requireOutputCapability(env, trace, buffer, 32, "ob_flush", "flush")) return false;
@@ -252,7 +252,7 @@ public class OutputFunctions extends FunctionsContainer {
                 env.error(trace, ErrorType.E_NOTICE, "ob_get_clean(): Failed to delete buffer of %s (%d)", buffer.getName(), buffer.getLevel() - 1);
                 return result;
             }
-            buffer.setTrace(trace);
+            buffer.setTrace(trace, "ob_get_clean");
             if (modern) {
                 try { buffer.cleanPhp85(true); } finally { env.popOutputBuffer(); }
             } else buffer.clean();
@@ -277,7 +277,7 @@ public class OutputFunctions extends FunctionsContainer {
                 env.error(trace, ErrorType.E_NOTICE, "ob_get_flush(): Failed to delete buffer of %s (%d)", buffer.getName(), buffer.getLevel() - 1);
                 return result;
             }
-            buffer.setTrace(trace);
+            buffer.setTrace(trace, "ob_get_flush");
             if (modern) {
                 try { buffer.flushPhp85(true); } finally { env.popOutputBuffer(); }
             } else buffer.flush();

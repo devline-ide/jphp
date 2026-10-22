@@ -7,6 +7,7 @@ public class VariableStats {
     protected boolean reference; // variable is used with references, e.g: $var =& $var2;
     protected boolean unstable; // variable cannot store constant values, option for optimization
     protected boolean used;
+    protected boolean explicitValueCapture;
 
     public VariableStats() {
     }
@@ -64,6 +65,9 @@ public class VariableStats {
         this.used = used;
         return this;
     }
+
+    public boolean isExplicitValueCapture() {return explicitValueCapture;}
+    public VariableStats setExplicitValueCapture(boolean value) {explicitValueCapture=value;return this;}
 
     public boolean isUnused() {
         return !passed && !arrayAccess && !reference && !unstable && !mutable && !used;

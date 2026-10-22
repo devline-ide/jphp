@@ -72,7 +72,8 @@ public class ArrayFunctions extends FunctionsContainer {
         if (expectingReference(env, trace, array, "reset")) {
             if (expecting(env, trace, 1, array, ARRAY)) {
                 ArrayMemory memory = array.toValue(ArrayMemory.class);
-                return memory.resetCurrentIterator().toImmutable();
+                return (env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                        ? memory.resetCurrentIteratorForNative() : memory.resetCurrentIterator()).toImmutable();
             }
         }
         return Memory.FALSE;
@@ -82,7 +83,8 @@ public class ArrayFunctions extends FunctionsContainer {
         if (expectingReference(env, trace, array, "next")) {
             if (expecting(env, trace, 1, array, ARRAY)) {
                 ArrayMemory memory = array.toValue(ArrayMemory.class);
-                ForeachIterator iterator = memory.getCurrentIterator();
+                ForeachIterator iterator = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                        ? memory.getMutableCurrentIteratorForNative() : memory.getCurrentIterator();
                 if (iterator.next())
                     return iterator.getValue().toImmutable();
                 else
@@ -96,7 +98,8 @@ public class ArrayFunctions extends FunctionsContainer {
         if (expectingReference(env, trace, array, "prev")) {
             if (expecting(env, trace, 1, array, ARRAY)) {
                 ArrayMemory memory = array.toValue(ArrayMemory.class);
-                ForeachIterator iterator = memory.getCurrentIterator();
+                ForeachIterator iterator = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                        ? memory.getMutableCurrentIteratorForNative() : memory.getCurrentIterator();
                 if (iterator.prev())
                     return iterator.getValue().toImmutable();
                 else
@@ -109,7 +112,9 @@ public class ArrayFunctions extends FunctionsContainer {
     public static Memory current(Environment env, TraceInfo trace, @Reference Memory array) {
         if (expectingReference(env, trace, array, "current")) {
             if (expecting(env, trace, 1, array, ARRAY)) {
-                Memory value = array.toValue(ArrayMemory.class).getCurrentIterator().getValue();
+                ArrayMemory memory = array.toValue(ArrayMemory.class);
+                Memory value = (env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                        ? memory.getCurrentPointerForNative() : memory.getCurrentIterator()).getValue();
                 return value == null ? Memory.FALSE : value.toImmutable();
             }
         }
@@ -119,7 +124,9 @@ public class ArrayFunctions extends FunctionsContainer {
     public static Memory key(Environment env, TraceInfo trace, @Reference Memory array) {
         if (expectingReference(env, trace, array, "key")) {
             if (expecting(env, trace, 1, array, ARRAY)) {
-                Memory value = array.toValue(ArrayMemory.class).getCurrentIterator().getMemoryKey();
+                ArrayMemory memory = array.toValue(ArrayMemory.class);
+                Memory value = (env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                        ? memory.getCurrentPointerForNative() : memory.getCurrentIterator()).getMemoryKey();
                 return value == null ? Memory.FALSE : value;
             }
         }
@@ -133,7 +140,9 @@ public class ArrayFunctions extends FunctionsContainer {
     public static Memory end(Environment env, TraceInfo trace, @Reference Memory array) {
         if (expectingReference(env, trace, array, "end")) {
             if (expecting(env, trace, 1, array, ARRAY)) {
-                ForeachIterator iterator = array.toValue(ArrayMemory.class).getCurrentIterator();
+                ArrayMemory memory = array.toValue(ArrayMemory.class);
+                ForeachIterator iterator = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5
+                        ? memory.getMutableCurrentIteratorForNative() : memory.getCurrentIterator();
                 if (iterator.end()) {
                     return iterator.getValue().toImmutable();
                 } else {
@@ -147,10 +156,13 @@ public class ArrayFunctions extends FunctionsContainer {
     public static Memory each(Environment env, TraceInfo trace, @Reference Memory array) {
         if (expectingReference(env, trace, array, "each")) {
             if (expecting(env, trace, 1, array, ARRAY)) {
-                ForeachIterator iterator = array.toValue(ArrayMemory.class).getCurrentIterator();
-                if (iterator.next()) {
+                ArrayMemory memory = array.toValue(ArrayMemory.class);
+                boolean nativePointer=memory.hasNativeCurrentIterator();
+                ForeachIterator iterator = nativePointer ? memory.getMutableCurrentIteratorForNative() : memory.getCurrentIterator();
+                if (nativePointer ? iterator.getKey() != null : iterator.next()) {
                     Memory value = iterator.getValue().toImmutable();
                     Memory key = iterator.getMemoryKey();
+                    if(nativePointer)iterator.next();
 
                     ArrayMemory result = new ArrayMemory();
 

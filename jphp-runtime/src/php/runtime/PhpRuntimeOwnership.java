@@ -1795,7 +1795,7 @@ public final class PhpRuntimeOwnership {
                 throw new IllegalArgumentException("Ordinary execution coverage is incomplete for this body");
             RuntimePlan runtimePlan=requireRuntimePlan(bytes,member);
             for(String required:plan.requiredCapabilities())
-                if(!required.equals("frame-local-publication-v1")&&!required.equals("empty-tick-handler")&&!required.equals("literal-buffered-output")&&!exactNativeDependency(runtimePlan,required)&&!exactFunctionDependency(runtimePlan,required))
+                if(!required.equals("frame-local-publication-v1")&&!required.equals("empty-tick-handler")&&!required.equals("literal-buffered-output")&&!exactNativeDependency(runtimePlan,required)&&!exactFunctionDependency(runtimePlan,required)&&!exactSessionCvUnset(plan,member,bytes,required))
                     throw new IllegalArgumentException("Ordinary call/callback capability is not connected: "+required);
             if(entity.getParameters()!=null)for(var parameter:entity.getParameters())
                 if(parameter.isVariadic()||parameter.getDefaultInitializer()!=null||parameter.isReference()&&(parameter.getTypeChecker()!=null||parameter.getDefaultValue()!=null||entity.getParameters().length!=1||entity.isReturnReference()))
@@ -1804,6 +1804,50 @@ public final class PhpRuntimeOwnership {
             if(entity.getParameters()!=null&&entity.getParameters().length==1&&entity.getParameters()[0].isReference()&&plan.locals().stream().noneMatch(local->local.importKind()==PhpOwnershipExecution.ImportKind.ARGUMENT&&local.importIndex()==0&&local.importMode()==PhpOwnershipExecution.Mode.CELL&&local.storage()==PhpOwnershipExecution.Storage.ADDRESS&&local.name().equals(entity.getParameters()[0].getName())))throw new IllegalArgumentException("Reference function lacks its declared actual parameter CV");
             if(plan.requiredCapabilities().contains("literal-buffered-output"))PhpOwnershipNativeCalls.requireLiteralBufferedOutput(environment);
             protocol.validate(plan,member,bytes);targets.put(entity,new Target(entity,member,bytes.clone(),plan,runtimePlan));
+        }
+        /** Recognize only the actual ordered VALUE-import annotation, under this Authority's complete runtime body. */
+        private boolean exactLexicalCaptureImport(php.runtime.reflection.MethodEntity method,PhpOwnershipExecution.FramePlan plan,String required) {
+            boolean cells=required.equals("closure-capture-import-v2");
+            if(!cells && !required.equals("closure-value-import-v1"))return false;
+            if(!(method.getClazz() instanceof php.runtime.reflection.helper.ClosureEntity closure)
+                    || plan.entryKind()!=PhpOwnershipExecution.EntryKind.LEXICAL_CLOSURE
+                    || !method.getName().equals("__invoke") || closure.findMethod("__invoke")!=method)
+                throw new IllegalArgumentException("VALUE capture annotation lacks its actual lexical invocation");
+            var captures=closure.getOwnershipCapturePlan();
+            if(captures==null || captures.usesThis() || closure.getGeneratorEntity()!=null
+                    || (!cells && captures.entries().stream().anyMatch(entry->entry.mode()!=php.runtime.reflection.helper.ClosureEntity.CaptureMode.VALUE))
+                    || (cells && captures.entries().stream().noneMatch(entry->entry.mode()==php.runtime.reflection.helper.ClosureEntity.CaptureMode.CELL)))
+                throw new IllegalArgumentException("VALUE capture annotation differs from its actual lexical schema");
+            // Nonstatic, unbound closures and empty capture lists are ordinary supported callbacks.
+            boolean[] imported=new boolean[captures.entries().size()];int count=0;
+            for(var local:plan.locals())if(local.importKind()==PhpOwnershipExecution.ImportKind.CAPTURE) {
+                int index=local.importIndex();
+                if(index<0 || index>=imported.length || imported[index]
+                        || local.importMode()!=(captures.entries().get(index).mode()==php.runtime.reflection.helper.ClosureEntity.CaptureMode.CELL
+                            ? PhpOwnershipExecution.Mode.CELL:PhpOwnershipExecution.Mode.VALUE)
+                        || local.importMode()==PhpOwnershipExecution.Mode.CELL && local.storage()!=PhpOwnershipExecution.Storage.ADDRESS
+                        || !local.name().equals(captures.entries().get(index).name()))
+                    throw new IllegalArgumentException("VALUE capture CV differs from its exact ordered declaration");
+                imported[index]=true;count++;
+            }
+            if(count!=imported.length)throw new IllegalArgumentException("VALUE capture annotation omits an actual capture");
+            try{PhpOwnershipClosures.validateLexicalShell(closure,closure.getNativeClass().getConstructor(Environment.class,
+                    php.runtime.reflection.ClassEntity.class,Memory.class,String.class,Memory[].class));}
+            catch(NoSuchMethodException failure){throw new IllegalArgumentException("VALUE capture lacks its exact lexical shell constructor",failure);}
+            return true;
+        }
+        /** A known Session annotation is accepted only beside the actual pre-existing ordinary CV-unset publisher. */
+        private boolean exactSessionCvUnset(PhpOwnershipExecution.FramePlan plan,java.lang.reflect.Method member,byte[] bytes,String required) {
+            if(!required.startsWith("lexical-cv-unset-v2:"))return false;
+            int id;try{id=Integer.parseInt(required.substring("lexical-cv-unset-v2:".length()));}
+            catch(NumberFormatException invalid){throw new IllegalArgumentException("Malformed actual CV-unset annotation",invalid);}
+            if(plan.locals().stream().noneMatch(local->local.id()==id && local.jvmSlot()==id && local.storage()==PhpOwnershipExecution.Storage.ADDRESS))
+                throw new IllegalArgumentException("CV-unset annotation lacks its exact ADDRESS descriptor");
+            try {
+                if(!PhpPrimitiveCellPlan.hasSessionCvUnset(member.getDeclaringClass(),bytes,member.getName(),PhpOwnershipExecution.descriptor(member),id))
+                    throw new IllegalArgumentException("CV-unset annotation lacks its actual guarded/ordinary publisher pair");
+            }catch(IOException invalid){throw new IllegalArgumentException("CV-unset physical proof was rejected",invalid);}
+            return true;
         }
         public void registerMethod(php.runtime.reflection.MethodEntity entity,byte[] bytes,PhpOwnershipExecution.CompleteFrameProtocol protocol)throws Throwable {
             open();domain.currentContext();Objects.requireNonNull(protocol);if(environment.getClass()!=Environment.class)throw new IllegalArgumentException("Custom Environment callback protocol is incomplete");var member=Objects.requireNonNull(entity.getNativeMethod());
@@ -1816,7 +1860,7 @@ public final class PhpRuntimeOwnership {
                     ||plan.thrownIds().length!=0||plan.returnIds().length!=0)
                 throw new IllegalArgumentException("Ordinary method custody frontier is incomplete");
             RuntimePlan runtime=requireRuntimePlan(bytes,member);
-            for(String required:plan.requiredCapabilities())if(!required.equals("frame-local-publication-v1")&&!required.equals("empty-tick-handler")&&!required.equals("literal-buffered-output")&&!exactNativeDependency(runtime,required))
+            for(String required:plan.requiredCapabilities())if(!required.equals("frame-local-publication-v1")&&!required.equals("empty-tick-handler")&&!required.equals("literal-buffered-output")&&!exactNativeDependency(runtime,required)&&!exactLexicalCaptureImport(entity,plan,required)&&!exactSessionCvUnset(plan,member,bytes,required))
                 throw new IllegalArgumentException("Method callback capability is incomplete: "+required);
             if(entity.getParameters()!=null)for(var parameter:entity.getParameters())if(parameter.isReference()||parameter.isVariadic()||parameter.getDefaultInitializer()!=null)
                 throw new IllegalArgumentException("Method SEND/default protocol is incomplete");
@@ -1965,7 +2009,7 @@ public final class PhpRuntimeOwnership {
                     ||plan.thrownIds().length!=0||plan.returnIds().length!=0)
                 throw new IllegalArgumentException("Module producer/callback coverage is incomplete");
             RuntimePlan runtimePlan=requireRuntimePlan(bytes,member);
-            for(String required:plan.requiredCapabilities())if(!required.equals("frame-local-publication-v1")&&!required.equals("empty-tick-handler")&&!required.equals("literal-buffered-output")&&!exactNativeDependency(runtimePlan,required)&&!exactFunctionDependency(runtimePlan,required))
+            for(String required:plan.requiredCapabilities())if(!required.equals("frame-local-publication-v1")&&!required.equals("empty-tick-handler")&&!required.equals("literal-buffered-output")&&!exactNativeDependency(runtimePlan,required)&&!exactFunctionDependency(runtimePlan,required)&&!exactSessionCvUnset(plan,member,bytes,required))
                 throw new IllegalArgumentException("Module capability is not connected: "+required);
             if(plan.requiredCapabilities().contains("literal-buffered-output"))PhpOwnershipNativeCalls.requireLiteralBufferedOutput(environment);
             protocol.validate(plan,member,bytes);targets.put(entity,new Target(entity,member,bytes.clone(),plan,runtimePlan));
@@ -2115,6 +2159,7 @@ public final class PhpRuntimeOwnership {
         @Override public void close() throws Exception {
             open();if(!frames.isEmpty())throw new IllegalStateException("Close actual runtime frames before authority shutdown");
             for(Holder holder:holders)if(holder.authority==this&&!holder.closed&&holder.purpose==Purpose.FIELD)throw new IllegalStateException("Finalize the actual Environment handler fields before authority shutdown");
+            if(PhpParameterDefaults.hasManagedRoots(environment,domain))throw new IllegalStateException("Finalize the actual Environment parameter defaults before authority shutdown");
             try(var cleanup=participant.enter()) {
                 retireDisposedHolders();
                 try{domain.graph().deferDestruction(()->{for(GlobalSlot global:new ArrayList<>(globals.values())){global.unset();global.holder.close();}globals.clear();});}catch(Throwable failure){fail(failure);}
@@ -2540,6 +2585,23 @@ public final class PhpRuntimeOwnership {
         private final Map<Integer,ObjectMemory> lifecycleReceivers=new HashMap<>();
         private boolean closed;
         private Frame(Authority authority){this.authority=authority;}
+        private final Map<PhpConstantReads.Site,Holder> constantReadRoots=new IdentityHashMap<>();
+        public void requireConstantRead(PhpConstantReads.Site site) {
+            open();Invocation invocation=authority.invocations.peek();
+            if(invocation==null || invocation.frame!=this || !invocation.entered || authority.currentFrame()!=this
+                    || !site.matches(invocation.target.member))
+                throw new IllegalArgumentException("Constant read differs from its actual runtime frame");
+            invocation.target.validate(authority);
+        }
+        public Memory retainConstantRead(PhpConstantReads.Site site,Memory raw)throws Throwable {
+            requireConstantRead(site);Value checked=authority.value(raw,Role.VALUE);
+            if(checked.node!=null) {
+                Holder root=constantReadRoots.get(site);
+                if(root==null) {root=track(new Holder(authority,authority.domain.graph().root(),null,Purpose.OWNER));constantReadRoots.put(site,root);}
+                try(Publication publication=root.prepare(checked)){publication.storeDirect();publication.commit();}
+            }
+            return raw;
+        }
         public Authority authority(){return authority;}
         private void open(){authority.open();if(closed)throw new IllegalStateException("Runtime frame is closed");}
         private Holder track(Holder holder){cleanupOrder.push(holder);return holder;}
@@ -2566,6 +2628,30 @@ public final class PhpRuntimeOwnership {
             if(invocation==null||invocation.frame!=this||!invocation.entered||invocation.lifecycleEntry==null||!invocation.target.runtimePlan.lifecycle()||invocation.target.runtimePlan.lifecycleReceivers().stream().noneMatch(value->value.local()==localId)||raw==null||raw.getClass()!=ObjectMemory.class||((ObjectMemory)raw).value!=invocation.receiver||locals.containsKey(localId)||lifecycleReceivers.containsKey(localId))throw new IllegalArgumentException("Lifecycle self import lacks its exact borrowed origin");
             invocation.lifecycleEntry.validateReceiver(authority.domain,authority.environment,(php.runtime.reflection.MethodEntity)invocation.target.entity,((ObjectMemory)raw).value);
             lifecycleReceivers.put(localId,(ObjectMemory)raw);return raw;
+        }
+        /** Noncreating named VALUE read for the exact generated module Closure producer. */
+        public Memory readModuleClosureCapture(int producer,php.runtime.reflection.helper.ClosureEntity closure,php.runtime.lang.Closure actualClosure,int captureIndex,ArrayMemory actualLocals) throws Throwable {
+            open();Invocation invocation=authority.invocations.peek();
+            if(invocation==null||invocation.frame!=this||!invocation.entered||authority.currentFrame()!=this
+                    ||invocation.target.plan.entryKind()!=PhpOwnershipExecution.EntryKind.MODULE
+                    ||!(invocation.target.entity instanceof php.runtime.reflection.ModuleEntity module)
+                    ||actualLocals!=authority.environment.getRuntimeGlobalsTable())
+                throw new IllegalArgumentException("Named Closure capture needs its actual module global table");
+            var plan=Objects.requireNonNull(closure.getOwnershipCapturePlan());
+            if(captureIndex<0||captureIndex>=plan.entries().size()
+                    ||plan.entries().get(captureIndex).mode()!=php.runtime.reflection.helper.ClosureEntity.CaptureMode.VALUE)
+                throw new IllegalArgumentException("Named Closure capture is not its declared VALUE import");
+            ClosureLiteral literal=invocation.target.runtimePlan.literals().stream().filter(value->value.producer()==producer
+                    &&value.closure().equals(closure.getInternalName())&&value.module().equals(module.getInternalName())
+                    &&module.findClosure(value.index())==closure).findFirst().orElseThrow(()->new IllegalArgumentException("Named Closure capture lacks its actual literal producer"));
+            Holder allocation=evalHolder(literal.producer());allocation.requireProducerEvaluation();
+            if(allocation.role!=Role.VALUE||!(allocation.raw instanceof ObjectMemory)
+                    ||((ObjectMemory)allocation.raw).value!=actualClosure||actualClosure.getReflection()!=closure
+                    ||module.findClosure(literal.index())!=closure)
+                throw new IllegalArgumentException("Named Closure capture differs from its actual allocated literal VALUE");
+            authority.globalTable();String name=plan.entries().get(captureIndex).name();
+            GlobalSlot slot=authority.globalSlot(ArrayMemory.toKey(php.runtime.memory.StringMemory.valueOf(name)));
+            return slot.isLinked()?slot.read():Memory.UNDEFINED;
         }
         public ReferenceMemory globalsAddress(int localId) {
             open();Invocation invocation=authority.invocations.peek();
@@ -3796,6 +3882,15 @@ public final class PhpRuntimeOwnership {
             if(current!=member||!((php.runtime.loader.RuntimeClassLoader)member.getDeclaringClass().getClassLoader()).matchesDefinedBytecode(member.getDeclaringClass(),bytes))
                 throw new IllegalArgumentException("Function capability changed before invocation");
             authority.validateNativeDependencies(runtimePlan);
+            String captureCapability=plan.requiredCapabilities().contains("closure-capture-import-v2")?"closure-capture-import-v2"
+                    :plan.requiredCapabilities().contains("closure-value-import-v1")?"closure-value-import-v1":null;
+            if(captureCapability!=null) {
+                if(!(entity instanceof php.runtime.reflection.MethodEntity method)
+                        || !authority.exactLexicalCaptureImport(method,plan,captureCapability))
+                    throw new IllegalArgumentException("VALUE capture declaration changed before invocation");
+            }
+            for(String required:plan.requiredCapabilities())if(required.startsWith("lexical-cv-unset-v2:"))
+                authority.exactSessionCvUnset(plan,member,bytes,required);
             for(NativeMember nativeMember:runtimePlan.nativeMembers()) {
                 var semantic=authority.nativeMember(nativeMember.owner(),nativeMember.name(),nativeMember.descriptor());
                 var proof=php.runtime.invoke.PhpNativeResultUse.require(semantic,nativeMember.physicalOwner(),nativeMember.physicalName(),nativeMember.physicalDescriptor(),nativeMember.discardedResult());

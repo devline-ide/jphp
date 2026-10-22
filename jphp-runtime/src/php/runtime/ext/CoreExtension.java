@@ -125,6 +125,10 @@ public class CoreExtension extends Extension implements ProgramShutdownHandler {
         scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpSensitiveParameterValue.class,php.runtime.ext.core.classes.PhpSensitiveParameterValue::configure);
         scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpSensitiveParameterAttribute.class,php.runtime.ext.core.classes.PhpSensitiveParameterAttribute::configure);
         scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpNoDiscardAttribute.class,php.runtime.ext.core.classes.PhpNoDiscardAttribute::configure);
+        // Distinct existing profile-local builtin entities keep the historical Reflection surface intact.
+        scope.registerPhp85LazyClass(this,ReflectionClass.class);
+        scope.registerPhp85LazyClass(this,ReflectionObject.class);
+        scope.registerPhp85LazyClass(this,ReflectionProperty.class);
         scope.registerPhp85LazyClass(this,ReflectionAttribute.class, php.runtime.ext.core.reflection.PhpNativeReflectionProperties::configure);
         scope.registerPhp85LazyClass(this,ReflectionConstant.class, php.runtime.ext.core.reflection.PhpNativeReflectionProperties::configure);
         for(var function:new Php85EnumFunctions().getFunctionSpecs())scope.registerPhp85Function(this,function);
@@ -135,6 +139,9 @@ public class CoreExtension extends Extension implements ProgramShutdownHandler {
         scope.registerPhp85LazyClass(this,ReflectionEnum.class);
         scope.registerPhp85LazyClass(this,ReflectionEnumUnitCase.class);
         scope.registerPhp85LazyClass(this,ReflectionEnumBackedCase.class);
+        scope.registerPhp85LazyClass(this,php.runtime.lang.PhpFiber.class);
+        scope.registerPhp85LazyClass(this,php.runtime.lang.exception.PhpFiberError.class);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.reflection.ReflectionFiber.class);
         registerClass(scope, WrapJavaExceptions.NotImplementedException.class);
 
         // stream

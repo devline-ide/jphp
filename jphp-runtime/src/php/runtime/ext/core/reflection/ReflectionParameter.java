@@ -130,15 +130,16 @@ public class ReflectionParameter extends Reflection implements Reflector {
         php.runtime.reflection.ModuleEntity module = functionEntity instanceof FunctionEntity ? ((FunctionEntity) functionEntity).getModule()
                 : functionEntity instanceof MethodEntity ? ((MethodEntity) functionEntity).getClazz().getModule() : null;
         return module != null ? module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
-                : env.getModuleManager().getPhpLanguageProfile(entity.getTrace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+                : env.getModuleManager().getPhpLanguageProfile(functionEntity instanceof php.runtime.reflection.CompileFunctionEntity
+                        ? env.trace() : entity.getTrace()) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
     }
 
     @Signature
     public Memory allowsNull(Environment env, Memory... args) {
         if (functionEntity instanceof MethodEntity && entity.getType() == php.runtime.common.HintType.ANY) {
             var member = ((MethodEntity) functionEntity).getNativeMethod();
-            if (member != null && member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class)
-                return member.getName().equals("__construct") && position == 0 ? Memory.FALSE : Memory.TRUE;
+            if (member != null && (member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class || member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayObject.class))
+                return (member.getName().equals("__construct") || member.getName().equals("exchangeArray")) && position == 0 ? Memory.FALSE : Memory.TRUE;
         }
         return modern(env) && entity.getTypeChecker() == null || entity.isNullableOrDefaultNull() || entity.getTypeChecker() instanceof php.runtime.reflection.support.PhpTypeDeclaration
                 && ((php.runtime.reflection.support.PhpTypeDeclaration) entity.getTypeChecker()).allowsNull() ? Memory.TRUE : Memory.FALSE;
@@ -146,6 +147,9 @@ public class ReflectionParameter extends Reflection implements Reflector {
 
     @Signature
     public Memory hasType(Environment env, Memory... args) {
+        if (functionEntity instanceof MethodEntity && ((MethodEntity)functionEntity).getNativeMethod() != null
+                && ((MethodEntity)functionEntity).getNativeMethod().getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayObject.class)
+            return Memory.TRUE;
         TypeChecker typeChecker = entity.getTypeChecker();
         return typeChecker != null ? Memory.TRUE : Memory.FALSE;
     }
@@ -154,14 +158,14 @@ public class ReflectionParameter extends Reflection implements Reflector {
     public Memory getType(Environment env, Memory... args) {
         if (position == 0 && functionEntity instanceof MethodEntity) {
             var member = ((MethodEntity) functionEntity).getNativeMethod();
-            if (member != null && member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class
-                    && member.getName().equals("__construct"))
+            if (member != null && (member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class || member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayObject.class)
+                    && (member.getName().equals("__construct") || member.getName().equals("exchangeArray")))
                 return ObjectMemory.valueOf(ReflectionType.fromDeclaration(env, new php.runtime.reflection.support.PhpTypeDeclaration(
                         java.util.List.of(java.util.List.of("object"), java.util.List.of("array")))));
         }
         if (functionEntity instanceof MethodEntity && entity.getType() == php.runtime.common.HintType.ANY) {
             var member = ((MethodEntity) functionEntity).getNativeMethod();
-            if (member != null && member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class)
+            if (member != null && (member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class || member.getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayObject.class))
                 return ObjectMemory.valueOf(ReflectionType.fromDeclaration(env, new php.runtime.reflection.support.PhpTypeDeclaration(
                         java.util.List.of(java.util.List.of("mixed")))));
         }
@@ -268,7 +272,9 @@ public class ReflectionParameter extends Reflection implements Reflector {
     @Signature
     public Memory isDefaultValueConstant(Environment env, Memory... args) {
         return entity.getDefaultValue() instanceof ConstantMemory
-                || entity.getDefaultValue() instanceof ClassConstantMemory ? Memory.TRUE : Memory.FALSE;
+                || entity.getDefaultValue() instanceof ClassConstantMemory
+                || entity.getDefaultInitializer() != null && entity.getDefaultInitializer().constantOnly()
+                    && entity.getDefaultValueConstName() != null ? Memory.TRUE : Memory.FALSE;
     }
 
     @Signature

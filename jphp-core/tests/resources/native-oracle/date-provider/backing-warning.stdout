@@ -1,0 +1,2 @@
+["ArrayObject",[[8192,"ArrayObject::__construct(): Using an object as a backing array for ArrayObject is deprecated, as it allows violating class constraints and invariants"]],["InvalidArgumentException","Overloaded object of type DateTime is not compatible with ArrayObject"]]
+["ArrayIterator",[[8192,"ArrayIterator::__construct(): Using an object as a backing array for ArrayIterator is deprecated, as it allows violating class constraints and invariants"]],["InvalidArgumentException","Overloaded object of type DateTime is not compatible with ArrayIterator"]]

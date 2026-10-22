@@ -1,0 +1,2 @@
+["direct-parent-no-parent",["Error","Cannot access \"parent\" when current class scope has no parent"]]
+["direct-keyword-case",[true,true]]

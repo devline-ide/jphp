@@ -1,0 +1,5 @@
+qa_meta_untyped:["value",false,null,null,true,true,true,true,null,0,1]
+qa_meta_mixed:["value",true,"mixed",true,true,false,true,true,null,0,1]
+qa_meta_class:["value",true,"?stdClass",true,true,false,true,true,null,0,1]
+qa_meta_union:["value",true,"array|string",false,false,false,false,false,"absent",1,1]
+qa_meta_default:["value",true,"int",false,false,false,true,true,7,0,1]

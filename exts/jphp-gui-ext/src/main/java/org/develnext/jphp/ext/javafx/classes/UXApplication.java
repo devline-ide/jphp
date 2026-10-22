@@ -34,6 +34,7 @@ import java.util.concurrent.FutureTask;
 @Name(JavaFXExtension.NS + "UXApplication")
 public class UXApplication extends BaseWrapper<Application> {
     private static Invoker onStart;
+    private static final java.util.concurrent.atomic.AtomicBoolean launchActive = new java.util.concurrent.atomic.AtomicBoolean();
     private static boolean shutdown = false;
 
     public UXApplication(Environment env, Application wrappedObject) {
@@ -149,22 +150,44 @@ public class UXApplication extends BaseWrapper<Application> {
 
         JavaFXRuntime.ensureStarted();
 
+        php.runtime.env.PhpExecutionLineage.Token lineage = php.runtime.env.PhpExecutionLineage.current();
         FutureTask<Memory> futureTask = new FutureTask<>(() -> {
-            try {
-                return callback.callNoThrow();
-            } catch (Exception e) {
-                callback.getEnvironment().catchUncaught(e);
-                return Memory.NULL;
+            try (var binding = php.runtime.env.PhpExecutionLineage.bind(lineage)) {
+                try {
+                    return callback.callNoThrow();
+                } catch (Exception e) {
+                    callback.getEnvironment().catchUncaught(e);
+                    return Memory.NULL;
+                }
             }
         });
 
         Platform.runLater(futureTask);
 
-        try {
-            return futureTask.get();
-        } catch (InterruptedException | ExecutionException e) {
-            throw new CriticalException(e);
+        // This private task is never cancelled: completion witnesses the callback's binding exit.
+        // An interrupted caller must stay PHP-quiescent until that completion, then keep its interrupt.
+        InterruptedException interrupted = null;
+        Throwable failure = null;
+        Memory result = Memory.NULL;
+        for (;;) {
+            try {
+                result = futureTask.get();
+                break;
+            } catch (InterruptedException pending) {
+                if (interrupted == null) interrupted = pending;
+                else if (pending != interrupted) interrupted.addSuppressed(pending);
+            } catch (ExecutionException pending) {
+                failure = pending.getCause();
+                break;
+            }
         }
+        if (interrupted != null) Thread.currentThread().interrupt();
+        if (failure != null) {
+            if (interrupted != null && interrupted != failure) failure.addSuppressed(interrupted);
+            throw failure;
+        }
+        if (interrupted != null) throw interrupted;
+        return result;
     }
 
     @Signature
@@ -214,12 +237,59 @@ public class UXApplication extends BaseWrapper<Application> {
     }
 
     @Signature
-    public static void launch(Invoker onStart) {
-        Environment.addThreadSupport(onStart.getEnvironment());
-
-        UXApplication.onStart = onStart;
-
-        Application.launch(CustomApplication.class);
+    public static void launch(Invoker onStart) throws Throwable {
+        if (Platform.isFxApplicationThread())
+            throw new IllegalStateException("Application launch cannot block the JavaFX application thread");
+        Environment environment = onStart.getEnvironment();
+        // Validate and park before thread registration, static callbacks, or launcher side effects.
+        var parked = environment.scope.getClassLoader().getCallbackDomain().parkForHostLifecycle();
+        Throwable failure = null;
+        InterruptedException interrupted = null;
+        boolean ownsAttempt = false, callbackInstalled = false;
+        Invoker previousOnStart = null;
+        try {
+            if (!launchActive.compareAndSet(false, true))
+                throw new IllegalStateException("Another application launch attempt is active");
+            ownsAttempt = true;
+            Environment.addThreadSupport(environment);
+            previousOnStart = UXApplication.onStart;
+            UXApplication.onStart = onStart;
+            callbackInstalled = true;
+            Throwable[] childFailure = new Throwable[1];
+            Thread launcher = Thread.ofPlatform().name("UXApplication-launch")
+                    .inheritInheritableThreadLocals(false).unstarted(() -> {
+                        try { Application.launch(CustomApplication.class); }
+                        catch (Throwable pending) { childFailure[0] = pending; }
+                    });
+            launcher.start();
+            for (;;) {
+                try { launcher.join(); break; }
+                catch (InterruptedException pending) {
+                    if (interrupted == null) interrupted = pending;
+                    else if (pending != interrupted) interrupted.addSuppressed(pending);
+                }
+            }
+            failure = childFailure[0];
+        } catch (Throwable pending) { failure = pending; }
+        finally {
+            try { parked.close(); }
+            catch (InterruptedException pending) {
+                if (interrupted == null) interrupted = pending;
+                else if (pending != interrupted) interrupted.addSuppressed(pending);
+            } catch (Throwable pending) {
+                if (failure == null) failure = pending;
+                else if (pending != failure) failure.addSuppressed(pending);
+            } finally {
+                if (callbackInstalled) UXApplication.onStart = previousOnStart;
+                if (ownsAttempt) launchActive.set(false);
+            }
+        }
+        if (interrupted != null) Thread.currentThread().interrupt();
+        if (failure != null) {
+            if (interrupted != null && interrupted != failure) failure.addSuppressed(interrupted);
+            throw failure;
+        }
+        if (interrupted != null) throw interrupted;
     }
 
     public static class CustomApplication extends Application {

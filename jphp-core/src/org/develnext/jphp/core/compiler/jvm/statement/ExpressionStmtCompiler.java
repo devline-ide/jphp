@@ -2272,13 +2272,25 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             MethodInsnNode address=new MethodInsnNode(INVOKEVIRTUAL,"php/runtime/PhpRuntimeOwnership$Frame","globalsAddress",
                     "(I)Lphp/runtime/memory/ReferenceMemory;",false);code.add(address);
             code.add(new JumpInsnNode(GOTO,join));code.add(fallback);
-            writePushEnv();writePushConstString(name);
-            writeSysDynamicCall(Environment.class,"getOrCreateGlobal",Memory.class,String.class);
+            writePushEnv();
+            if ("GLOBALS".equals(name) && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                writeSysDynamicCall(Environment.class,"getGlobals",ArrayMemory.class);
+                writeSysStaticCall(ReferenceMemory.class,"valueOf",Memory.class,Memory.class);
+            } else {
+                writePushConstString(name);
+                writeSysDynamicCall(Environment.class,"getOrCreateGlobal",Memory.class,String.class);
+            }
             code.add(join);method.ownership().runtimeFallback(fallback,join);
             method.ownership().runtimeGlobalImport(local.index,address,start,fallback,join);
         } else {
-            writePushEnv();writePushConstString(name);
-            writeSysDynamicCall(Environment.class,"getOrCreateGlobal",Memory.class,String.class);
+            writePushEnv();
+            if ("GLOBALS".equals(name) && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+                writeSysDynamicCall(Environment.class,"getGlobals",ArrayMemory.class);
+                writeSysStaticCall(ReferenceMemory.class,"valueOf",Memory.class,Memory.class);
+            } else {
+                writePushConstString(name);
+                writeSysDynamicCall(Environment.class,"getOrCreateGlobal",Memory.class,String.class);
+            }
         }
         makeVarStore(local);stackPop();
     }
@@ -2310,6 +2322,18 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     }
 
     protected void writeDefineThis(LocalVariable variable) {
+        LabelNode sessionFallback = method.ownership().receiverImport(code, variable);
+        if (sessionFallback != null) {
+            LabelNode end = new LabelNode();
+            code.add(new JumpInsnNode(GOTO, end)); code.add(sessionFallback);
+            method.ownership().beginPassive();
+            try { writeDefineThisFallback(variable); }
+            finally { method.ownership().endPassive(sessionFallback, end); }
+            code.add(end);
+        } else writeDefineThisFallback(variable);
+    }
+
+    private void writeDefineThisFallback(LocalVariable variable) {
         if (!method.ownership().runtimeLifecycleEnabled() || method.getGeneratorEntity() != null) {
             writeDefineThisLegacy(variable);
             return;
@@ -2420,11 +2444,14 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 variable.setReference(true);
             } else { // simple local variables
                 LabelNode ownershipEnd = variable.isReference() ? method.ownership().address(code, variable) : null;
+                boolean captureState=php8CallFrame() && methodStatement.variable(value).isExplicitValueCapture();
                 if (variable.isReference()) {
-                    writePushNewObject(ReferenceMemory.class);
-                } else {
-                    writePushNull();
-                }
+                    if(captureState) {
+                        writePushMemory(Memory.UNDEFINED);
+                        writeSysStaticCall(ReferenceMemory.class,"valueOf",Memory.class,Memory.class);
+                    } else writePushNewObject(ReferenceMemory.class);
+                } else if(captureState)writePushMemory(Memory.UNDEFINED);
+                else writePushNull();
 
                 if (ownershipEnd != null) code.add(ownershipEnd);
                 makeVarStore(variable);
@@ -2461,6 +2488,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         }
         if (php8CallFrame() && value.getName().equals("this") && !quietThisReads.contains(value)) {
             LabelNode present = new LabelNode();
+            method.ownership().receiverReadGuard(code, variable, present);
             writePushDup();
             writeSysDynamicCall(Memory.class, "isNull", boolean.class);
             code.add(new JumpInsnNode(IFEQ, present)); stackPop();
@@ -2639,6 +2667,12 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         return writePushTraceInfo(token.getMeta().getStartLine(), token.getMeta().getStartPosition());
     }
 
+    /** Compact capture helpers consume the exact same trace slot without a generated AALOAD. */
+    public void writePushCaptureTrace(Token token) {
+        int index=method.clazz.addTraceInfo(token.getMeta().getStartLine(),token.getMeta().getStartPosition());
+        writeGetStatic("$TRC",TraceInfo[].class);writePushSmallInt(index);
+    }
+
     void writePushGetFromArray(int index, Class clazz) {
         writePushSmallInt(index);
         code.add(new InsnNode(AALOAD));
@@ -2809,7 +2843,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
     Memory writePushName(NameToken token, boolean returnMemory, boolean writeOpcode) {
         CompileConstant constant = compiler.getScope().findCompileConstant(token.getName(),
                 compiler.getModule().getPhpLanguageProfile());
-        if (constant != null) {
+        if (constant != null && !(compiler.getModule().getPhpLanguageProfile()
+                == php.runtime.common.PhpLanguageProfile.PHP_8_5 && "E_STRICT".equals(token.getName()))) {
             if (returnMemory)
                 return constant.value;
             else if (writeOpcode)
@@ -2832,7 +2867,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     return null;
                 writePushEnv();
                 writePushString(token.getName());
-                writePushString(token.getName().toLowerCase());
+                writePushString(token.getName().toLowerCase(Locale.ROOT));
 
                 // writePushDupLowerCase();
                 writePushTraceInfo(token);
@@ -2841,8 +2876,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     // Leading NUL cannot collide with user-static keys (which start with a JVM class name).
                     writePushConstString("\0jphp.constant.fetch\0" + compiler.getModule().getInternalName()
                             + "\0" + method.getMethodId() + "\0" + compiler.nextConstantFetchSite());
-                    writeSysDynamicCall(Environment.class, "__getConstant",
-                            Memory.class, String.class, String.class, TraceInfo.class, boolean.class, String.class);
+                    writeSysStaticCall(php.runtime.PhpConstantReads.class, "fetch",
+                            Memory.class, Environment.class, String.class, String.class, TraceInfo.class, boolean.class, String.class);
+                    method.ownership().constantRead((MethodInsnNode)code.getLast());
                 } else {
                     writeSysDynamicCall(Environment.class, "__getConstant",
                             Memory.class, String.class, String.class, TraceInfo.class);
@@ -3151,7 +3187,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             VarInsnNode sourceRead=stackPeek().runtimeSourceRead;
             boolean arrayProducer=stackPeek().runtimeArrayValueProducer;
             String closureName=stackPeek().runtimeClosureInternalName;int closureProducer=stackPeek().runtimeClosureProducerId;
-            writeSysDynamicCall(Memory.class, "toImmutable", Memory.class);
+            writeSysDynamicCall(Memory.class,
+                    compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.JPHP_LEGACY
+                            ? "toImmutableForLegacy" : "toImmutable", Memory.class);
             stackPeek().ownershipEvalId = evalId;
             stackPeek().runtimeEvaluationId = runtimeEval;
             stackPeek().runtimeSourceLocalId=sourceLocal;
@@ -4971,6 +5009,53 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         try{return writeExpressionBody(expression,returnValue,returnMemory,writeOpcode);}
         finally{discardedCallWitness=previous;}
     }
+    /** Locate the whole postfix operand, including eager receiver/call/argument effects. */
+    private int silentOperandStart(List<Token> tokens,int end) {
+        int operands=1;
+        for(int i=end-1;i>=0;i--) {
+            Token token=tokens.get(i);if(token==null)continue;
+            if(token instanceof OperatorExprToken operator) {
+                if(operator.isBinary())operands++;
+            } else if(!(token instanceof CallExprToken call && call.getName() instanceof OperatorExprToken)
+                    && --operands==0)return i;
+        }
+        throw new CriticalException("Missing suppression operand");
+    }
+    /** END_SILENCE preserves an explicit mask change made inside the operand. */
+    private void restoreSilentMask(LocalVariable saved) {
+        int env=method.getLocalVariable("~env").index;
+        LabelNode changed=new LabelNode();
+        code.add(new VarInsnNode(ILOAD,saved.index));code.add(new LdcInsnNode(~4437));code.add(new InsnNode(IAND));
+        code.add(new JumpInsnNode(IFEQ,changed)); // No END_SILENCE restoration if suppression was already active.
+        code.add(new VarInsnNode(ALOAD,env));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,Type.getInternalName(Environment.class),"getErrorFlags","()I",false));
+        code.add(new LdcInsnNode(~4437));code.add(new InsnNode(IAND));
+        code.add(new JumpInsnNode(IFNE,changed)); // Preserve an explicit nonfatal mask enabled by the operand.
+        code.add(new VarInsnNode(ALOAD,env));code.add(new VarInsnNode(ILOAD,saved.index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,Type.getInternalName(Environment.class),"setErrorFlags","(I)V",false));
+        code.add(changed);
+    }
+    private void writeSilentOperand(List<Token> tokens) {
+        int id=method.nextStatementIndex(SilentToken.class),env=method.getLocalVariable("~env").index;
+        LocalVariable saved=method.addLocalVariable("~silentMask"+id,null,int.class);
+        LocalVariable failure=method.addLocalVariable("~silentFailure"+id,null,Throwable.class);
+        code.add(new VarInsnNode(ALOAD,env));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,Type.getInternalName(Environment.class),"getErrorFlags","()I",false));
+        code.add(new VarInsnNode(ISTORE,saved.index));
+        code.add(new VarInsnNode(ALOAD,env));code.add(new VarInsnNode(ILOAD,saved.index));
+        // PHP 8 keeps E_ERROR|E_PARSE|E_CORE_ERROR|E_COMPILE_ERROR|E_USER_ERROR|E_RECOVERABLE_ERROR.
+        code.add(new LdcInsnNode(4437));code.add(new InsnNode(IAND));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,Type.getInternalName(Environment.class),"setErrorFlags","(I)V",false));
+        LabelNode start=new LabelNode(),end=new LabelNode(),handler=new LabelNode(),joined=new LabelNode();
+        // Inner call/finally cleanup must retain priority over this outer suppression cleanup.
+        method.node.tryCatchBlocks.add(0,new TryCatchBlockNode(start,end,handler,"java/lang/Throwable"));
+        code.add(start);
+        ExprStmtToken operand=new ExprStmtToken(null,null,new ArrayList<>(tokens));operand.setAsmExpr(operand);
+        writeExpression(operand,true,false,true);
+        code.add(end);restoreSilentMask(saved);code.add(new JumpInsnNode(GOTO,joined));
+        code.add(handler);code.add(new VarInsnNode(ASTORE,failure.index));restoreSilentMask(saved);
+        code.add(new VarInsnNode(ALOAD,failure.index));code.add(new InsnNode(ATHROW));code.add(joined);
+    }
     private Memory writeExpressionBody(ExprStmtToken expression,boolean returnValue,boolean returnMemory,boolean writeOpcode) {
         int initStackSize = method.getStackCount();
         exprStackInit.push(initStackSize);
@@ -4984,6 +5069,12 @@ public class ExpressionStmtCompiler extends StmtCompiler {
         }
 
         List<Token> tokens = expression.getTokens();
+        Map<Integer,Integer> silentOperands=null;
+        if(php8CallFrame() && writeOpcode)for(int i=0;i<tokens.size();i++)if(tokens.get(i) instanceof SilentToken) {
+            if(silentOperands==null)silentOperands=new HashMap<>();
+            // The outermost @ at a shared start owns the range; nested @ is lowered recursively.
+            silentOperands.put(silentOperandStart(tokens,i),i);
+        }
         for(Token token:tokens)if(token instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.VoidCastExprToken
                 && (returnValue || tokens.getLast()!=token))throw new php.runtime.exceptions.ParseException("syntax error, unexpected token \"(void)\"",token.toTraceInfo(compiler.getContext()));
         List<ArrayGetRefExprToken> markedIncrementArrays = new ArrayList<>();
@@ -5004,6 +5095,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             DynamicAccessExprToken access=org.develnext.jphp.core.compiler.common.NullsafeChain.access(tokens.get(i));
             if (access!=null && access.isNullsafe()) { firstNullsafe=i; break; }
         }
+        int eagerEffectBoundary=firstNullsafe;
+        if(silentOperands!=null)for(int start:silentOperands.keySet())
+            eagerEffectBoundary=Math.max(eagerEffectBoundary,start);
         int operatorCount = 0;
         for (Token token : tokens) {
             if (token instanceof OperatorExprToken)
@@ -5020,6 +5114,12 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                     writeNullsafeEnd(nullsafeMissing);nullsafeMissing=null;
                 }
                 if (token == null) continue;
+                Integer silentEnd=silentOperands==null?null:silentOperands.get(tokenIndex);
+                if(silentEnd!=null) {
+                    writeSilentOperand(tokens.subList(tokenIndex,silentEnd));
+                    for(int i=tokenIndex;i<=silentEnd;i++)if(tokens.get(i) instanceof OperatorExprToken)operatorCount--;
+                    tokenIndex=silentEnd;method.entity.setImmutable(false);continue;
+                }
                 DynamicAccessExprToken nullsafe=org.develnext.jphp.core.compiler.common.NullsafeChain.access(token);
                 if (php8CallFrame() && nullsafe!=null && nullsafe.isNullsafe()) {
                     if (!writeOpcode) {invalid=true;break;}
@@ -5057,7 +5157,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                             method.entity.setImmutable(false);
                         } else
                             break;
-                    } else if (tokenIndex<firstNullsafe && (token instanceof CallExprToken || token instanceof NewExprToken
+                    } else if (tokenIndex<eagerEffectBoundary && (token instanceof CallExprToken || token instanceof NewExprToken
                             || token instanceof ArrayExprToken || token instanceof ClosureStmtToken)) {
                         writePush((ValueExprToken) token, true, true);
                     } else

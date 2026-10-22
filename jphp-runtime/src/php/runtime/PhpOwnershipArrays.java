@@ -148,6 +148,15 @@ public final class PhpOwnershipArrays {
                 throw new IllegalArgumentException("CELL certificate does not identify the candidate");
         }
     }
+    /** An already rooted ARRAY callable receiver is read from its actual physical publisher, never raw heap lookup. */
+    PhpOwnershipValues.Binding lazyCallableReceiver(PhpOwnershipValues.Binding owner,Object actualKey) {
+        candidate(owner);
+        if(owner.role()!=PhpOwnershipValues.Role.VALUE||!(owner.rawValue()instanceof ArrayMemory array))
+            throw new IllegalArgumentException("Callable receiver lacks its actual ARRAY VALUE holder");
+        var storage=certificate(array);storage.validateAll(array);var carrier=array.getByScalar(actualKey);
+        if(carrier==null)throw new IllegalArgumentException("Callable receiver placement is absent");
+        var slot=new PhysicalSlot(storage.entries.get(carrier));return slot.payloadPublisher().current().binding();
+    }
     public ArrayWrite prepareWrite(PhpOwnershipHeap.Publisher owner, PhpOwnershipHeap.Snapshot expected) throws Throwable {
         domain().currentContext();Objects.requireNonNull(owner);
         if (owner.domain() != domain() || expected == null || expected.publisher() != owner || owner.current() != expected)
@@ -1060,6 +1069,28 @@ public final class PhpOwnershipArrays {
                 return new CarrierPublication(this,expected,cell);
             }
             return new ReferencePublication(this,expected,cell,null,false);
+        }
+        /** A real frame CV drops its owner pointer, while aliases keep the canonical payload untouched. */
+        void clearLexicalCv(PhpOwnershipExecution.Entry entry,int id)throws Throwable {
+            domain().currentContext();
+            if(!entry.permitsLexicalCvClear(this,id) || owner.selfCell || owner.cellCertificate!=null || owner.unsetSource!=null)
+                throw new IllegalArgumentException("Not this actual lexical CV unlink");
+            owner.current();
+            try(var publication=owner.prepareChecked(PhpOwnershipValues.bindValue(domain(),Memory.UNDEFINED,null))) {
+                owner.carrier.publishOwnershipRaw(publication);publication.commit();
+            }
+        }
+        /** Actual lazy TABLE raw replacement has already unlinked this exact physical slot. */
+        void retireLazyReplacement(PhpLazyPropertyTransaction.Prepared replacement)throws Throwable {
+            domain().currentContext();
+            if(!replacement.permitsRetirement(this))throw new IllegalArgumentException("Physical slot was not unlinked by this lazy TABLE replacement");
+            owner.edge.close();
+        }
+        /** Unpublished fresh carriers retain children only during the actual preparation interval. */
+        void abortLazyPreparation(PhpLazyPropertyTransaction.Prepared replacement)throws Throwable {
+            domain().currentContext();
+            if(!replacement.permitsAbort(this))throw new IllegalArgumentException("Not this abandoned fresh lazy slot");
+            owner.edge.close();
         }
         /** Container destruction releases this edge through graph cleanup; live removals need an address operation. */
         public void detachContainer() {

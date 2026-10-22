@@ -21,6 +21,8 @@ import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
 
 public class RuntimeClassLoader extends URLClassLoader {
+    private final php.runtime.env.PhpCallbackDomain callbackDomain = new php.runtime.env.PhpCallbackDomain();
+    public final php.runtime.env.PhpCallbackDomain getCallbackDomain() { return callbackDomain; }
     protected Map<String, ClassEntity> internalClasses = new HashMap<String, ClassEntity>();
     protected Map<String, FunctionEntity> internalFunctions = new HashMap<String, FunctionEntity>();
     protected Map<String, ModuleEntity> internalModules = new HashMap<String, ModuleEntity>();
@@ -36,7 +38,16 @@ public class RuntimeClassLoader extends URLClassLoader {
         @Override public int hashCode(){return java.util.Objects.hash(templateInternal,module,declarationId,parent,
                 composition==null?null:composition.key(),interfaceCarrier);}
     }
-    private record DefinedBytecode(byte[] inputHash,byte[] definitionHash,String definitionInternal,LinkedIdentity linked) {}
+    private enum CopyPolicy { AS_IS, LEGACY_BEFORE_28 }
+    private static CopyPolicy copyPolicy(ModuleEntity module) {
+        if(module==null || module.getPhpLanguageProfile()!=php.runtime.common.PhpLanguageProfile.JPHP_LEGACY)
+            return CopyPolicy.AS_IS;
+        ModuleEntity.CompilerProvenance origin=module.getCompilerProvenance();
+        return origin.getOrigin()!=ModuleEntity.CompilerOrigin.UNKNOWN && origin.hasKnownCompilerAbi()
+                && origin.getCompilerAbiVersion()>=0 && origin.getCompilerAbiVersion()<28
+                ? CopyPolicy.LEGACY_BEFORE_28 : CopyPolicy.AS_IS;
+    }
+    private record DefinedBytecode(byte[] inputHash,byte[] definitionHash,String definitionInternal,LinkedIdentity linked,CopyPolicy copyPolicy) {}
     private final Map<String, DefinedBytecode> definedBytecodeHashes = new HashMap<>();
 
     /** Purpose-neutral typed Source accessor uses the existing exact defined-input witness. */
@@ -57,17 +68,18 @@ public class RuntimeClassLoader extends URLClassLoader {
         if (expected == null) return false;
         return MessageDigest.isEqual(expected.inputHash(),digest(data))
                 && (expected.linked()==null || actual.getSuperclass()==expected.linked().parent())
-                && MessageDigest.isEqual(expected.definitionHash(),digest(definition(data,expected.definitionInternal(),expected.linked())));
+                && MessageDigest.isEqual(expected.definitionHash(),digest(definition(data,expected.definitionInternal(),expected.linked(),expected.copyPolicy())));
     }
 
     private static byte[] digest(byte[] bytes) {
         try {return MessageDigest.getInstance("SHA-256").digest(bytes);}
         catch(NoSuchAlgorithmException impossible){throw new IllegalStateException(impossible);}
     }
-    private byte[] definition(byte[] data,String name,LinkedIdentity linked) {
+    private byte[] definition(byte[] data,String name,LinkedIdentity linked,CopyPolicy copyPolicy) {
+        byte[] input=copyPolicy==CopyPolicy.LEGACY_BEFORE_28 ? PhpJvmLegacyCopyBytecode.rewrite(data) : data;
         String parent=linked==null || linked.parent()==null ? null : linked.parent().getName().replace('.', '/');
-        byte[] composed=linked==null || linked.composition()==null ? data
-                : PhpJvmTraitMethodCopy.compose(data,linked.composition(),linked.parent(),this);
+        byte[] composed=linked==null || linked.composition()==null ? input
+                : PhpJvmTraitMethodCopy.compose(input,linked.composition(),linked.parent(),this);
         byte[] bound=linked!=null && linked.interfaceCarrier()
                 ? PhpJvmInheritanceBytecode.bindInterfaceCarrier(composed,parent,name)
                 : PhpJvmInheritanceBytecode.bind(composed,parent,linked==null ? null : name);
@@ -84,7 +96,7 @@ public class RuntimeClassLoader extends URLClassLoader {
         Class<?> actual=donor.getNativeClass();byte[] source=translateData(donor.getData());
         if(!matchesDefinedBytecode(actual,source))throw new LinkageError("Trait donor lacks its exact defined-byte witness");
         DefinedBytecode witness=definedBytecodeHashes.get(actual.getName());
-        return definition(source,witness.definitionInternal(),witness.linked());
+        return definition(source,witness.definitionInternal(),witness.linked(),witness.copyPolicy());
     }
     private static String linkedName(LinkedIdentity identity) {
         String key=identity.templateInternal()+"\0"+identity.module()+"\0"+identity.declarationId()+"\0"+identity.parent().getName()
@@ -92,8 +104,9 @@ public class RuntimeClassLoader extends URLClassLoader {
                 +(identity.interfaceCarrier()?"\0PHP_INTERFACE_CARRIER":"");
         return identity.templateInternal()+"$php$link$"+HexFormat.of().formatHex(digest(key.getBytes(StandardCharsets.UTF_8)));
     }
-    private synchronized Class<?> defineOrReuse(String name,byte[] data) {return defineOrReuse(name,data,null);}
-    private synchronized Class<?> defineOrReuse(String name,byte[] data,LinkedIdentity linked) {
+    private synchronized Class<?> defineOrReuse(String name,byte[] data) {return defineOrReuse(name,data,null,CopyPolicy.AS_IS);}
+    private synchronized Class<?> defineOrReuse(String name,byte[] data,CopyPolicy copyPolicy) {return defineOrReuse(name,data,null,copyPolicy);}
+    private synchronized Class<?> defineOrReuse(String name,byte[] data,LinkedIdentity linked,CopyPolicy copyPolicy) {
         String binary=name.replace('/', '.');
         validateOwnershipLinkage(binary,data);
         byte[] hash=digest(data);
@@ -110,22 +123,23 @@ public class RuntimeClassLoader extends URLClassLoader {
         if(existing!=null) {
             DefinedBytecode previous=definedBytecodeHashes.get(binary);
             if(previous==null || !MessageDigest.isEqual(hash,previous.inputHash())
-                    || !java.util.Objects.equals(linked,previous.linked()) || !name.equals(previous.definitionInternal()))
+                    || !java.util.Objects.equals(linked,previous.linked()) || !name.equals(previous.definitionInternal())
+                    || copyPolicy!=previous.copyPolicy())
                 throw new LinkageError("Different declaration or bytecode already defined for "+binary);
             if(linked!=null && linked.composition()!=null && linked.composition().hasRuntimeHooks()) {
-                byte[] verified=definition(data,name,linked);
+                byte[] verified=definition(data,name,linked,copyPolicy);
                 if(!MessageDigest.isEqual(previous.definitionHash(),digest(verified)))
                     throw new LinkageError("Cached trait hook definition differs from its fresh source witness");
                 linked.composition().validateDefined(existing);
             }
             return existing;
         }
-        byte[] transformed=definition(data,name,linked);
+        byte[] transformed=definition(data,name,linked,copyPolicy);
         if(linked!=null && linked.composition()!=null)validateOwnershipLinkage(binary,transformed);
         Class<?> defined=defineClass(binary,transformed,0,transformed.length);
         if(linked!=null && defined.getSuperclass()!=linked.parent())throw new LinkageError("Linked JVM class has the wrong physical parent");
         if(linked!=null && linked.composition()!=null)linked.composition().validateDefined(defined);
-        definedBytecodeHashes.put(binary,new DefinedBytecode(hash,digest(transformed),name,linked));
+        definedBytecodeHashes.put(binary,new DefinedBytecode(hash,digest(transformed),name,linked,copyPolicy));
         return defined;
     }
 
@@ -198,7 +212,7 @@ public class RuntimeClassLoader extends URLClassLoader {
                 linked=new LinkedIdentity(definitionName.replace('.', '/'),clazz.getModule()==null ? "" : clazz.getModule().getInternalName(),clazz.getDeclarationId(),parent,physical,interfaceCarrier);
                 definitionName=linkedName(linked);
             }
-            Class<?> result = defineOrReuse(definitionName,data,linked);
+            Class<?> result = defineOrReuse(definitionName,data,linked,copyPolicy(clazz.getModule()));
 
             clazz.setNativeClazz(result);
         }
@@ -237,7 +251,7 @@ public class RuntimeClassLoader extends URLClassLoader {
         if (withBytecode) {
             byte[] data = translateData(function.getData());
 
-            Class<?> result = defineOrReuse(className, data);
+            Class<?> result = defineOrReuse(className, data,copyPolicy(function.getModule()));
 
             function.setNativeClazz(result);
         }
@@ -289,7 +303,7 @@ public class RuntimeClassLoader extends URLClassLoader {
 
         if (withBytecode) {
             byte[] data = translateData(module.getData());
-            Class<?> result = defineOrReuse(internal, data);
+            Class<?> result = defineOrReuse(internal, data,copyPolicy(module));
             module.setNativeClazz(result);
         }
 
@@ -311,11 +325,11 @@ public class RuntimeClassLoader extends URLClassLoader {
         return data;
     }
 
-    synchronized public void addLibrary(URL url) {
-        addURL(url);
-
-        for (Callback<Void, URL> listener : addLibraryListeners) {
-            listener.call(url);
+    public void addLibrary(URL url) {
+        try(var admission=callbackDomain.enter()) {
+            List<Callback<Void,URL>> listeners;
+            synchronized(this){addURL(url);listeners=new ArrayList<>(addLibraryListeners);}
+            for(Callback<Void,URL> listener:listeners)listener.call(url);
         }
     }
 
@@ -324,6 +338,6 @@ public class RuntimeClassLoader extends URLClassLoader {
     }
 
     public void onAddLibrary(Callback<Void, URL> listener) {
-        addLibraryListeners.add(listener);
+        synchronized(this){addLibraryListeners.add(listener);}
     }
 }

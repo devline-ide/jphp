@@ -25,6 +25,8 @@ public class ReflectionClass extends Reflection {
     public final static int IS_EXPLICIT_ABSTRACT = 32;
     public final static int IS_FINAL = 64;
     public final static int IS_READONLY = 65536;
+    public final static int SKIP_INITIALIZATION_ON_SERIALIZE = 8;
+    public final static int SKIP_DESTRUCTOR = 16;
 
     protected ClassEntity entity;
 
@@ -38,7 +40,8 @@ public class ReflectionClass extends Reflection {
 
     public ReflectionClass setEntity(ClassEntity entity) {
         this.entity = entity;
-        getProperties().put("name", new StringMemory(entity.getName()));
+        if(getOwnershipObject()==null)getProperties().put("name",new StringMemory(entity.getName()));
+        else php.runtime.PhpOwnershipReflectionCalls.publishMetadata(this,"name",new StringMemory(entity.getName()));
 
         return this;
     }
@@ -58,7 +61,7 @@ public class ReflectionClass extends Reflection {
         if (argument.isObject()) {
             entity = argument.toValue(ObjectMemory.class).getReflection();
         } else {
-            entity = env.fetchClass(argument.toString(), true);
+            entity = env.fetchClass(php.runtime.common.PhpClassNames.lookupName(env, argument.toString()), true);
             if (entity == null)
                 exception(env, Messages.ERR_CLASS_NOT_FOUND.fetch(argument.toString()));
         }
@@ -81,22 +84,41 @@ public class ReflectionClass extends Reflection {
         return constantEntity.getValue(env);
     }
 
-    @Signature
+    @Signature(@Arg(value="name", type=HintType.STRING))
+    public Memory getReflectionConstant(Environment env, Memory... args) {
+        ConstantEntity constant = entity.findConstant(args[0].toString());
+        if (constant == null || constant.isPrivate() && constant.getClazz() != entity) return Memory.FALSE;
+        return ObjectMemory.valueOf(new ReflectionClassConstant(env, constant));
+    }
+
+    private boolean reflectionConstantMatches(ConstantEntity constant, int filter) {
+        if (constant.isPrivate() && constant.getClazz() != entity) return false;
+        int flags = constant.isPrivate() ? 4 : constant.isProtected() ? 2 : 1;
+        if (constant.isFinal()) flags |= 32;
+        return filter == -1 || (flags & filter) != 0;
+    }
+
+    @Signature(@Arg(value="filter",type=HintType.INT,nullable=true,optional=@Optional("null")))
     public Memory getConstants(Environment env, Memory... args) {
+        boolean modern = PhpReflectionModifiers.modern(env, env.trace());
+        int filter = args.length == 0 || args[0].isNull() ? -1 : args[0].toInteger();
         ArrayMemory result = new ArrayMemory();
         for (ConstantEntity e : entity.getConstants()) {
-            result.put(e.getName(), e.getValue(env));
+            if (!modern || reflectionConstantMatches(e, filter)) result.put(e.getName(), e.getValue(env));
         }
         return result.toConstant();
     }
 
-    @Signature
+    @Signature(@Arg(value="filter",type=HintType.INT,nullable=true,optional=@Optional("null")))
     public Memory getReflectionConstants(Environment env, Memory... args) {
+        boolean modern = PhpReflectionModifiers.modern(env, env.trace());
+        int filter = args.length == 0 || args[0].isNull() ? -1 : args[0].toInteger();
         ArrayMemory result = new ArrayMemory();
         for (ConstantEntity e : entity.getConstants()) {
-            result.putAsKeyString(e.getName(), ObjectMemory.valueOf(new ReflectionClassConstant(env, e)));
+            if (modern) {
+                if (reflectionConstantMatches(e, filter)) result.add(ObjectMemory.valueOf(new ReflectionClassConstant(env, e)));
+            } else result.putAsKeyString(e.getName(), ObjectMemory.valueOf(new ReflectionClassConstant(env, e)));
         }
-
         return result.toConstant();
     }
 
@@ -157,10 +179,32 @@ public class ReflectionClass extends Reflection {
         return new StringMemory(entity.getTrace().getFileName());
     }
 
+    private java.util.Collection<ClassEntity> reflectionInterfaces(Environment env) {
+        if (!PhpReflectionModifiers.modern(env, env.trace())) return entity.getInterfaces().values();
+        var result = new java.util.LinkedHashMap<String,ClassEntity>();
+        collectReflectionInterfaces(entity, result, new java.util.IdentityHashMap<>());
+        return result.values();
+    }
+
+    private static void collectReflectionInterfaces(ClassEntity subject,
+            java.util.LinkedHashMap<String,ClassEntity> result, java.util.IdentityHashMap<ClassEntity,Boolean> visited) {
+        if (visited.put(subject, Boolean.TRUE) != null) return;
+        if (subject.getParent() != null) collectReflectionInterfaces(subject.getParent(), result, visited);
+        for (ClassEntity contract : subject.getInterfaces().values())
+            result.putIfAbsent(php.runtime.common.PhpClassNames.canonicalKey(contract.getName()), contract);
+        var pending = new java.util.ArrayList<>(result.values());
+        for (int index=0; index<pending.size(); index++) {
+            for (ClassEntity contract : pending.get(index).getInterfaces().values()) {
+                if (result.putIfAbsent(php.runtime.common.PhpClassNames.canonicalKey(contract.getName()), contract) == null)
+                    pending.add(contract);
+            }
+        }
+    }
+
     @Signature
     public Memory getInterfaceNames(Environment env, Memory... args) {
         ArrayMemory result = new ArrayMemory();
-        for (ClassEntity e : entity.getInterfaces().values()) {
+        for (ClassEntity e : reflectionInterfaces(env)) {
             result.add(new StringMemory(e.getName()));
         }
 
@@ -172,10 +216,12 @@ public class ReflectionClass extends Reflection {
         ArrayMemory result = new ArrayMemory();
         ClassEntity classEntity = env.fetchClass("ReflectionClass");
 
-        for (ClassEntity e : entity.getInterfaces().values()) {
+        boolean modern = PhpReflectionModifiers.modern(env, env.trace());
+        for (ClassEntity e : reflectionInterfaces(env)) {
             ReflectionClass cls = new ReflectionClass(env, classEntity);
             cls.setEntity(e);
-            result.add(new ObjectMemory(cls));
+            if (modern) result.putAsKeyString(e.getName(), new ObjectMemory(cls));
+            else result.add(new ObjectMemory(cls));
         }
 
         return result.toConstant();
@@ -234,8 +280,9 @@ public class ReflectionClass extends Reflection {
         ArrayMemory result = new ArrayMemory();
         ClassEntity classEntity = env.fetchClass("ReflectionMethod");
 
+        boolean modern=PhpReflectionModifiers.modern(env,env.trace());
         for (MethodEntity e : entity.getMethods().values()) {
-            if (checkModifiers(e, mod)) {
+            if (modern ? mod == -1 || (PhpReflectionModifiers.methodFlags(e) & mod) != 0 : checkModifiers(e, mod)) {
                 ReflectionMethod method = new ReflectionMethod(env, classEntity);
                 method.setEntity(e);
                 method.setReflectedClass(entity);
@@ -369,7 +416,7 @@ public class ReflectionClass extends Reflection {
     @Signature
     public Memory getParentClass(Environment env, Memory... args) {
         if (entity.getParent() == null)
-            return Memory.NULL;
+            return PhpReflectionModifiers.modern(env, env.trace()) ? Memory.FALSE : Memory.NULL;
 
         ClassEntity classEntity = env.fetchClass("ReflectionClass");
         ReflectionClass result = new ReflectionClass(env, classEntity);
@@ -529,6 +576,64 @@ public class ReflectionClass extends Reflection {
         return entity.isInternal() ? Memory.FALSE : Memory.TRUE;
     }
 
+    @Signature(value={@Arg(value="initializer",type=HintType.CALLABLE),@Arg(value="options",type=HintType.INT,optional=@Optional("0"))},result=@Arg(type=HintType.OBJECT))
+    public Memory newLazyGhost(Environment env,Memory...args) throws Throwable {
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null) {
+            var packet=php.runtime.PhpOwnershipReflectionCalls.current(env,this,"newLazyGhost",args);
+            return ObjectMemory.valueOf(php.runtime.PhpLazyObjects.createManaged(env,entity,args[0],php.runtime.PhpLazyObjects.Strategy.GHOST,args[1].toInteger(),packet));
+        }
+        return ObjectMemory.valueOf(php.runtime.PhpLazyObjects.create(env,entity,args[0],php.runtime.PhpLazyObjects.Strategy.GHOST,args[1].toInteger()));
+    }
+    @Signature(value={@Arg(value="factory",type=HintType.CALLABLE),@Arg(value="options",type=HintType.INT,optional=@Optional("0"))},result=@Arg(type=HintType.OBJECT))
+    public Memory newLazyProxy(Environment env,Memory...args) throws Throwable {
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null) {
+            var packet=php.runtime.PhpOwnershipReflectionCalls.current(env,this,"newLazyProxy",args);
+            return ObjectMemory.valueOf(php.runtime.PhpLazyObjects.createManaged(env,entity,args[0],php.runtime.PhpLazyObjects.Strategy.PROXY,args[1].toInteger(),packet));
+        }
+        return ObjectMemory.valueOf(php.runtime.PhpLazyObjects.create(env,entity,args[0],php.runtime.PhpLazyObjects.Strategy.PROXY,args[1].toInteger()));
+    }
+    @Signature(value={@Arg(value="object",type=HintType.OBJECT),@Arg(value="initializer",type=HintType.CALLABLE),@Arg(value="options",type=HintType.INT,optional=@Optional("0"))},returnType="void")
+    public Memory resetAsLazyGhost(Environment env,Memory...args) throws Throwable {
+        var object=php.runtime.PhpLazyObjects.requireReceiver(env,entity,args[0],"resetAsLazyGhost");
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null)
+            php.runtime.PhpLazyObjects.resetManaged(env,object,args[0],args[1],php.runtime.PhpLazyObjects.Strategy.GHOST,args[2].toInteger(),php.runtime.PhpOwnershipReflectionCalls.current(env,this,"resetAsLazyGhost",args));
+        else php.runtime.PhpLazyObjects.reset(env,object,args[1],php.runtime.PhpLazyObjects.Strategy.GHOST,args[2].toInteger());
+        return Memory.NULL;
+    }
+    @Signature(value={@Arg(value="object",type=HintType.OBJECT),@Arg(value="factory",type=HintType.CALLABLE),@Arg(value="options",type=HintType.INT,optional=@Optional("0"))},returnType="void")
+    public Memory resetAsLazyProxy(Environment env,Memory...args) throws Throwable {
+        var object=php.runtime.PhpLazyObjects.requireReceiver(env,entity,args[0],"resetAsLazyProxy");
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null)
+            php.runtime.PhpLazyObjects.resetManaged(env,object,args[0],args[1],php.runtime.PhpLazyObjects.Strategy.PROXY,args[2].toInteger(),php.runtime.PhpOwnershipReflectionCalls.current(env,this,"resetAsLazyProxy",args));
+        else php.runtime.PhpLazyObjects.reset(env,object,args[1],php.runtime.PhpLazyObjects.Strategy.PROXY,args[2].toInteger());
+        return Memory.NULL;
+    }
+    @Signature(value=@Arg(value="object",type=HintType.OBJECT),result=@Arg(type=HintType.OBJECT))
+    public Memory initializeLazyObject(Environment env,Memory...args) throws Throwable {
+        var object=php.runtime.PhpLazyObjects.requireReceiver(env,entity,args[0],"initializeLazyObject");var result=php.runtime.PhpLazyObjects.initialize(env,object);
+        return php.runtime.PhpOwnershipExecution.current(env)==null?result:php.runtime.PhpLazyObjects.managedObjectResult(
+                php.runtime.PhpOwnershipReflectionCalls.current(env,this,"initializeLazyObject",args),object,args[0],result);
+    }
+    @Signature(value=@Arg(value="object",type=HintType.OBJECT),result=@Arg(type=HintType.BOOLEAN))
+    public Memory isUninitializedLazyObject(Environment env,Memory...args) {
+        return php.runtime.PhpLazyObjects.uninitialized(php.runtime.PhpLazyObjects.requireReceiver(env,entity,args[0],"isUninitializedLazyObject"))?Memory.TRUE:Memory.FALSE;
+    }
+    @Signature(value=@Arg(value="object",type=HintType.OBJECT),result=@Arg(type=HintType.OBJECT))
+    public Memory markLazyObjectAsInitialized(Environment env,Memory...args) throws Throwable {
+        var object=php.runtime.PhpLazyObjects.requireReceiver(env,entity,args[0],"markLazyObjectAsInitialized");var result=php.runtime.PhpLazyObjects.mark(env,object);
+        return php.runtime.PhpOwnershipExecution.current(env)==null?result:php.runtime.PhpLazyObjects.managedObjectResult(
+                php.runtime.PhpOwnershipReflectionCalls.current(env,this,"markLazyObjectAsInitialized",args),object,args[0],result);
+    }
+    @Signature(value=@Arg(value="object",type=HintType.OBJECT),result=@Arg(type=HintType.CALLABLE,nullable=true))
+    public Memory getLazyInitializer(Environment env,Memory...args) {
+        var object=php.runtime.PhpLazyObjects.requireReceiver(env,entity,args[0],"getLazyInitializer");
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null) {
+            try{return php.runtime.PhpLazyObjects.managedInitializerResult(php.runtime.PhpOwnershipReflectionCalls.current(env,this,"getLazyInitializer",args),object);}
+            catch(Throwable failure){return php.runtime.PhpLazyObjects.raiseInitializerFailure(failure);}
+        }
+        return php.runtime.PhpLazyObjects.initializer(object);
+    }
+
     @Signature
     public Memory newInstance(Environment env, Memory... args) throws Throwable {
         return new ObjectMemory(entity.newObject(env, env.trace(), true, args));
@@ -548,8 +653,10 @@ public class ReflectionClass extends Reflection {
 
     @Signature
     public Memory newInstanceWithoutConstructor(Environment env, Memory... args) throws Throwable {
-        if (entity.getNativeClass() == php.runtime.lang.PhpWeakReference.class)
-            env.exception(ReflectionException.class, "Class WeakReference is an internal class marked as final that cannot be instantiated without invoking its constructor");
+        if (entity.getNativeClass() == php.runtime.lang.PhpWeakReference.class
+                || entity.getNativeClass() == php.runtime.lang.PhpFiber.class
+                || entity.getNativeClass() == ReflectionFiber.class)
+            env.exception(ReflectionException.class, "Class %s is an internal class marked as final that cannot be instantiated without invoking its constructor",entity.getName());
         return new ObjectMemory(entity.newObject(env, env.trace(), false, args));
     }
 

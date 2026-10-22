@@ -1,0 +1,6 @@
+grammar	weak	38
+grammar	strict	4
+effects	state	6
+grammar	precedence	6
+reflection	reflection	1
+effects	supplement-supported	3

@@ -10,6 +10,13 @@ import java.nio.charset.Charset;
 
 public class ReferenceMemory extends Memory {
     private static final Object SHARED_REFERENCE = new Object();
+    // Preserve existing subclass conversion contracts; values never retain a Class, Memory or Environment.
+    private static final ClassValue<Boolean> INHERITS_IMMUTABLE_CONVERSION = new ClassValue<Boolean>() {
+        @Override protected Boolean computeValue(Class<?> type) {
+            try { return type.getMethod("toImmutable").getDeclaringClass() == ReferenceMemory.class; }
+            catch (NoSuchMethodException impossible) { throw new IllegalStateException("Missing public immutable conversion", impossible); }
+        }
+    };
     private Memory _value;
     private transient Object ownershipAuthority;
     /** Sealed native-map structure persists independently of the actual payload publisher. */
@@ -270,6 +277,36 @@ public class ReferenceMemory extends Memory {
     }
 
     /** Unserialization replaces the property's own zval; old aliases retain their separate CELL. */
+    /** Only the actual SPL own-table producer may replace this address without assigning through its old CELL. */
+    final void publishSplArrayObjectOwnProperty(PhpObjectProperties table,
+            php.runtime.lang.spl.iterator.ArrayObject owner,php.runtime.reflection.PropertyEntity property,Memory value) {
+        rejectUnmanagedOwnershipMutation();
+        if(owner==null || owner.peekProperties()!=table || table.declaration(property.getSpecificName())!=property
+                || table.getByScalar(property.getSpecificName())!=this || isCanonicalReferenceCell() || getRuntimeHolder()!=null)
+            throw new IllegalArgumentException("Raw SPL publication needs its unissued physical property address");
+        var direct=propertySource;ReferenceMemory oldCell=getReference();
+        if(direct!=null && (direct.property!=property || direct.cell!=oldCell
+                || direct.ownerToken()!=null && !direct.ownerToken().matches(owner)))
+            throw new IllegalArgumentException("Raw SPL publication has a different actual property Source");
+        if(oldCell!=this && !oldCell.isCanonicalReferenceCell())
+            throw new IllegalArgumentException("Raw SPL publication has a noncanonical old reference");
+        if(propertySources!=null)for(var source:propertySources)
+            if(source.cell==this && source!=direct)
+                throw new IllegalArgumentException("Raw SPL publication cannot retire another property's address constraint");
+        // An escaped old CELL keeps its native typed constraint. The new raw zval acquires no Source.
+        if(direct!=null && oldCell==this)direct.cell=null;
+        var fresh=property.getDeclaredType()==null?null:direct==null
+                ?new php.runtime.memory.helper.PhpPropertyGuard.Source(owner.getEnvironment(),property,
+                        php.runtime.memory.helper.PhpPropertyGuard.instanceOwner(owner)):direct.freshDeclaration();
+        propertySource=null;propertySources=null;
+        storeRaw(value==null?NULL:value);
+        if(fresh!=null) {
+            // Keep the property's declaration on its address, without constraining a raw incoming alias.
+            propertySource=fresh;fresh.cell=getReference();
+            if(fresh.cell==this)propertySources=new java.util.ArrayList<>(java.util.List.of(fresh));
+        }
+    }
+
     public Memory restorePropertyValue(Memory value) {
         rejectUnmanagedOwnershipMutation();
         if (isCanonicalReferenceCell()) throw new IllegalArgumentException("Restoration needs the property's address carrier");
@@ -318,6 +355,86 @@ public class ReferenceMemory extends Memory {
             finished=true;
         }
         @Override public void close() {if (!finished) {open();finished=true;}}
+    }
+
+    /** Batched instance Source publication for one actual prepared lazy TABLE layout. */
+    public static OwnershipLazySources prepareOwnershipLazySources(php.runtime.PhpLazyPropertyTransaction.Prepared placement) {
+        return new OwnershipLazySources(placement);
+    }
+    public static final class OwnershipLazySources {
+        private record Old(ReferenceMemory carrier,Memory raw,php.runtime.memory.helper.PhpPropertyGuard.Source source,ReferenceMemory cell) {}
+        private record Fresh(ReferenceMemory carrier,ReferenceMemory cell,php.runtime.memory.helper.PhpPropertyGuard.Source source) {}
+        private static final class CellSources {
+            final ReferenceMemory cell;
+            final java.util.List<php.runtime.memory.helper.PhpPropertyGuard.Source> before,after;
+            final php.runtime.memory.helper.PhpPropertyGuard.Source[] contents;
+            final java.util.IdentityHashMap<php.runtime.memory.helper.PhpPropertyGuard.Source,Boolean> removals=new java.util.IdentityHashMap<>();
+            CellSources(ReferenceMemory cell) {
+                this.cell=cell;before=cell.propertySources;
+                contents=before==null?null:before.toArray(new php.runtime.memory.helper.PhpPropertyGuard.Source[0]);
+                after=before==null?new java.util.ArrayList<>():new java.util.ArrayList<>(before);
+            }
+            void finishRemovals() {
+                after.clear();int removed=0;
+                if(contents!=null)for(var source:contents) {
+                    if(removals.containsKey(source))removed++;else after.add(source);
+                }
+                if(removed!=removals.size())throw new IllegalArgumentException("Physical Source is absent or duplicated in its actual CELL");
+            }
+            void validate() {
+                if(cell.propertySources!=before)throw new IllegalArgumentException("Lazy source CELL membership changed");
+                if(before!=null) {
+                    if(before.size()!=contents.length)throw new IllegalArgumentException("Lazy source CELL membership changed");
+                    for(int i=0;i<contents.length;i++)if(before.get(i)!=contents[i])throw new IllegalArgumentException("Lazy source CELL membership changed");
+                }
+            }
+        }
+        private final php.runtime.PhpLazyPropertyTransaction.Prepared placement;
+        private final java.util.List<Old> old=new java.util.ArrayList<>();
+        private final java.util.List<Fresh> fresh=new java.util.ArrayList<>();
+        private final java.util.IdentityHashMap<ReferenceMemory,CellSources> cells=new java.util.IdentityHashMap<>();
+        private boolean stored;
+        private OwnershipLazySources(php.runtime.PhpLazyPropertyTransaction.Prepared placement) {
+            this.placement=java.util.Objects.requireNonNull(placement);
+            var owner=placement.actualObject();
+            for(var carrier:placement.oldCarriers()) {
+                var source=carrier.propertySource;var cell=source==null?null:source.cell;
+                if(source!=null&&(source.ownerToken()==null||!source.ownerToken().matches(owner)||cell==null))
+                    throw new IllegalArgumentException("Lazy replacement cannot detach another instance's Source");
+                old.add(new Old(carrier,carrier._value,source,cell));
+                if(source!=null) {
+                    var group=cells.computeIfAbsent(cell,CellSources::new);
+                    if(group.removals.put(source,Boolean.TRUE)!=null)throw new IllegalArgumentException("Physical Source attached to two property carriers");
+                }
+            }
+            for(var group:cells.values())group.finishRemovals();
+            var lifetime=php.runtime.memory.helper.PhpPropertyGuard.instanceOwner(owner);
+            for(var carrier:placement.newCarriers()) {
+                var row=placement.sourceRow(carrier);var property=row.declaration();
+                if(property==null||property.getDeclaredType()==null||row.explicitlyUnset())continue;
+                var cell=row.binding().role()==php.runtime.PhpOwnershipValues.Role.CELL?(ReferenceMemory)row.binding().rawValue():carrier;
+                if(carrier.propertySource!=null)throw new IllegalArgumentException("Lazy fresh carrier already has a Source");
+                var source=new php.runtime.memory.helper.PhpPropertyGuard.Source(placement.environment(),property,lifetime);
+                fresh.add(new Fresh(carrier,cell,source));cells.computeIfAbsent(cell,CellSources::new).after.add(source);
+            }
+            validate();
+        }
+        public void validate() {
+            if(stored)throw new IllegalStateException("Lazy typed Sources already published");
+            for(var record:old)if(record.carrier._value!=record.raw||record.carrier.propertySource!=record.source||record.source!=null&&record.source.cell!=record.cell)
+                throw new IllegalArgumentException("Lazy property Source changed during preparation");
+            for(var group:cells.values())group.validate();
+            for(var record:fresh)if(record.carrier.propertySource!=null||record.source.cell!=null)
+                throw new IllegalArgumentException("Fresh lazy Source was published early");
+        }
+        public void store(php.runtime.PhpLazyPropertyTransaction.Prepared actual) {
+            if(stored||actual!=placement||!placement.permitsSources(this))throw new IllegalArgumentException("Lazy Source store lacks its actual pending layout");
+            // Everything is preallocated. Shared CELL changes are applied once, never one stale list per property.
+            for(var group:cells.values())group.cell.propertySources=group.after.isEmpty()?null:group.after;
+            for(var record:old)if(record.source!=null){record.carrier.propertySource=null;record.source.cell=null;}
+            for(var record:fresh){record.carrier.propertySource=record.source;record.source.cell=record.cell;}
+            stored=true;
+        }
     }
 
     /** Removal detaches exactly the declaring property's Source, never other reference constraints. */
@@ -511,8 +628,14 @@ public class ReferenceMemory extends Memory {
         ReferenceMemory cell=getReference();
         cell.rejectUnmanagedOwnershipMutation();cell.purgeDeadPropertySources();
         if(direct!=null && direct.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.checkWrite(direct,cell.getRawValue());
-        Memory checked=cell.propertySources == null ? value
-                : php.runtime.memory.helper.PhpPropertyGuard.write(cell.propertySources, value, direct);
+        var sources=cell.propertySources;
+        if(direct!=null && (sources==null || !sources.contains(direct))) {
+            // A raw SPL property can own a declaration without imposing it on its incoming CELL.
+            var declared=new java.util.ArrayList<php.runtime.memory.helper.PhpPropertyGuard.Source>();
+            if(sources!=null)declared.addAll(sources);declared.add(direct);sources=declared;
+        }
+        Memory checked=sources == null ? value
+                : php.runtime.memory.helper.PhpPropertyGuard.write(sources, value, direct);
         if(direct!=null && direct.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.checkWrite(direct,cell.getRawValue());
         cell.storeRaw(checked);
         if(direct!=null && direct.property.isPhpReadonly()) php.runtime.PhpReadonlyProperty.wrote(direct);
@@ -1409,6 +1532,18 @@ public class ReferenceMemory extends Memory {
             case NULL:
             case REFERENCE:
             case ARRAY: return getValue().toImmutable();
+            default: return getValue();
+        }
+    }
+
+    @Override
+    public Memory toImmutableForLegacy() {
+        if (getClass() != ReferenceMemory.class && !INHERITS_IMMUTABLE_CONVERSION.get(getClass()))
+            return toImmutable();
+        switch (getValue().type){
+            case NULL:
+            case REFERENCE:
+            case ARRAY: return getValue().toImmutableForLegacy();
             default: return getValue();
         }
     }

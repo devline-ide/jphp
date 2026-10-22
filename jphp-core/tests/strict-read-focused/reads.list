@@ -1,0 +1,7 @@
+strict-reads-versus-probes
+strict-repeated-site-and-namespace
+strict-deferred-defaults
+strict-global-const-deferred
+strict-throw-before-publication
+strict-dynamic-throw-before-publication
+strict-namespace-user-shadow

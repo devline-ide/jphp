@@ -52,9 +52,13 @@ public final class PhpPropertyHookAccess {
 
  /** Consumer view only: raw cast/serialization continues to use the object's backing storage. */
  public static php.runtime.lang.ForeachIterator consumerProperties(IObject receiver,Environment env,TraceInfo trace,ClassEntity context,int visibility){
-  ClassEntity entity=receiver.getReflection();boolean hooked=false;
+  final IObject actualReceiver=php.runtime.PhpLazyObjects.observeUnchecked(env,receiver,php.runtime.PhpLazyObjects.Observation.PROPERTIES);
+  if(actualReceiver instanceof php.runtime.lang.support.IPhpNativeDateView date && visibility!=2)return date.phpDateExport(env).foreachIterator(false,false);
+  if(actualReceiver instanceof php.runtime.lang.spl.iterator.ArrayObject && visibility!=2)
+   return ((php.runtime.lang.spl.iterator.ArrayObject)actualReceiver).castArray(env).toValue(ArrayMemory.class).foreachIterator(false,false);
+  ClassEntity entity=actualReceiver.getReflection();boolean hooked=false;
   for(ClassEntity owner=entity;owner!=null&&!hooked;owner=owner.getParent())for(PropertyEntity property:owner.getProperties())if(property.getPhpHooks()!=null){hooked=true;break;}
-  ArrayMemory storage=receiver.getProperties();if(!hooked)return storage.foreachIterator(false,false);
+  ArrayMemory storage=actualReceiver.getProperties();if(!hooked)return storage.foreachIterator(false,false);
   if(visibility<0||visibility>2)throw new IllegalArgumentException("Unknown property consumer visibility");
   java.util.Deque<ClassEntity> lineage=new java.util.ArrayDeque<>();for(ClassEntity owner=entity;owner!=null;owner=owner.getParent())lineage.push(owner);
   java.util.LinkedHashMap<String,PropertyEntity> positions=new java.util.LinkedHashMap<>();
@@ -81,7 +85,7 @@ public final class PhpPropertyHookAccess {
      if(visibility==2&&property!=null&&property.canAccess(env,context)!=0)continue;
      Memory value;var hooks=property==null?null:property.getPhpHooks();
      if(hooks!=null&&hooks.get()!=null){
-      try{value=read(property,env,trace,receiver,false,null,null);}catch(Throwable failure){return PhpPropertyHookAccess.<Boolean,RuntimeException>consumerFailure(failure);}
+      try{value=read(property,env,trace,actualReceiver,false,null,null);}catch(Throwable failure){return PhpPropertyHookAccess.<Boolean,RuntimeException>consumerFailure(failure);}
      }else{
       if(hooks!=null&&hooks.isVirtual())continue;
       ReferenceMemory entry=storage.getByScalar(key);if(entry==null)continue;value=entry.getValue();

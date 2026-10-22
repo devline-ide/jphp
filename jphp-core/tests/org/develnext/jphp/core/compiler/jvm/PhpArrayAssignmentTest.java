@@ -100,4 +100,149 @@ public class PhpArrayAssignmentTest extends JvmCompilerCase {
             return new String(input.readAllBytes(), StandardCharsets.UTF_8);
         }
     }
+    @Test public void testNativeUnsetAdvancesCurrentCursorAcrossPlainCowAndAliases() throws Throwable {
+        String raw=resource("php85_cursor_unset.php");assertTrue(raw.startsWith("<?php"));
+        byte[] expected=resource("php85_cursor_unset.stdout").getBytes(StandardCharsets.UTF_8);
+        assertEquals("native stderr","",resource("php85_cursor_unset.stderr"));
+        assertEquals("complete native cursor rows",12,new String(expected,StandardCharsets.UTF_8).lines().count());
+        for(boolean debug:new boolean[]{false,true})for(boolean dumped:new boolean[]{false,true}) {
+            var scope=newScope();scope.setDebugMode(debug);scope.setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);
+            scope.registerExtension(new StandardExtension());scope.registerExtension(new org.develnext.jphp.zend.ext.json.JsonExtension());
+            var output=new ByteArrayOutputStream();var env=new Environment(scope,output);Throwable primary=null;
+            try {
+                var context=new Context(raw.substring(5));context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
+                var module=new JvmCompiler(env,context).compile(false);
+                if(dumped) {
+                    var bytes=new ByteArrayOutputStream();var dumper=new ModuleDumper(context,env,debug);dumper.save(module,bytes);
+                    assertEquals(ModuleDumper.COMPILER_ABI_VERSION,ModuleDumper.readHeader(new ByteArrayInputStream(bytes.toByteArray())).getCompilerAbiVersion());
+                    module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));assertTrue(module.isCompiledArtifact());
+                }
+                assertEquals(PhpLanguageProfile.PHP_8_5,module.getPhpLanguageProfile());
+                assertEquals(PhpLanguageProfile.JPHP_LEGACY,scope.getPhpLanguageProfile());
+                scope.loadModule(module);scope.addUserModule(module);env.registerModule(module);module.include(env);env.flushAll();
+                assertArrayEquals("native cursor unset debug="+debug+" PHB="+dumped,expected,output.toByteArray());
+            }catch(Throwable failure){primary=failure;throw failure;}
+            finally {
+                try{env.doFinal();}catch(Throwable cleanup){if(primary==null)throw cleanup;else if(primary!=cleanup)primary.addSuppressed(cleanup);}
+            }
+        }
+    }
+
+    private byte[] oldCursorWireResource(String name) throws IOException {
+        try(InputStream in=getClass().getClassLoader().getResourceAsStream("resources/expressions/"+name)) {
+            assertNotNull(name,in);return in.readAllBytes();
+        }
+    }
+
+    @Test public void testActualAbi27LegacyAndModernCursorAssignmentsKeepWireProfile() throws Throwable {
+        String[] files={"legacy27_cursor_assignment.phb","modern27_cursor_assignment.phb"};
+        String[] outputs={"legacy27_cursor_assignment.stdout","php85_cursor_unset.stdout"};
+        PhpLanguageProfile[] profiles={PhpLanguageProfile.JPHP_LEGACY,PhpLanguageProfile.PHP_8_5};
+        for(int i=0;i<files.length;i++) {
+            String label="immutable ABI27 wire="+files[i]+",profile="+profiles[i];
+            byte[] wire=oldCursorWireResource(files[i]);byte[] expected=oldCursorWireResource(outputs[i]);
+            var header=ModuleDumper.readHeader(new ByteArrayInputStream(wire));
+            assertEquals(label,27,header.getCompilerAbiVersion());assertEquals(label,profiles[i],header.getPhpLanguageProfile());
+            var scope=newScope();scope.setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);scope.setDebugMode(false);
+            scope.registerExtension(new org.develnext.jphp.zend.ext.ZendExtension());
+            var output=new ByteArrayOutputStream();var env=new Environment(scope,output);Throwable primary=null;
+            try {
+                var context=new Context("");context.setPhpLanguageProfile(profiles[i]);
+                var module=new ModuleDumper(context,env,false).load(new ByteArrayInputStream(wire));
+                assertTrue(label,module.isCompiledArtifact());assertEquals(label,profiles[i],module.getPhpLanguageProfile());
+                assertEquals(label,27,module.getCompilerProvenance().getCompilerAbiVersion());
+                byte[] original=module.getData().clone();
+                scope.loadModule(module);scope.addUserModule(module);env.registerModule(module);
+                module.includeNoThrow(env,env.getGlobals());env.flushAll();
+                assertArrayEquals(label,expected,output.toByteArray());
+                assertArrayEquals(label+" original transport bytecode",original,module.getData());
+                var actual=module.getNativeMethod().getDeclaringClass();
+                assertTrue(label+" exact actual JVM definition/input witness",scope.getClassLoader().matchesDefinedBytecode(actual,original));
+                assertEquals(label,PhpLanguageProfile.JPHP_LEGACY,scope.getPhpLanguageProfile());
+                assertEquals(label,profiles[i],module.getPhpLanguageProfile());
+            }catch(Throwable failure){primary=failure;throw failure;}
+            finally {
+                try{env.doFinal();}catch(Throwable cleanup){if(primary==null)throw cleanup;else if(primary!=cleanup)primary.addSuppressed(cleanup);}
+                scope.getClassLoader().close();
+            }
+        }
+    }
+
+    @Test public void testModernResetLeavesNextOnSuccessorAcrossCopiesAndAliases() throws Throwable {
+        String raw=resource("php85_reset_next.php");assertTrue(raw.startsWith("<?php"));
+        byte[] expected=oldCursorWireResource("php85_reset_next.stdout");
+        assertEquals("native stderr","",resource("php85_reset_next.stderr"));
+        assertEquals("complete reset rows",7,new String(expected,StandardCharsets.UTF_8).lines().count());
+        for(boolean debug:new boolean[]{false,true})for(boolean dumped:new boolean[]{false,true}) {
+            var scope=newScope();scope.setDebugMode(debug);scope.setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);
+            scope.registerExtension(new StandardExtension());scope.registerExtension(new org.develnext.jphp.zend.ext.json.JsonExtension());
+            var output=new ByteArrayOutputStream();var env=new Environment(scope,output);Throwable primary=null;
+            try {
+                var context=new Context(raw.substring(5));context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
+                var module=new JvmCompiler(env,context).compile(false);
+                if(dumped) {
+                    var bytes=new ByteArrayOutputStream();var dumper=new ModuleDumper(context,env,debug);dumper.save(module,bytes);
+                    module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));assertTrue(module.isCompiledArtifact());
+                }
+                scope.loadModule(module);scope.addUserModule(module);env.registerModule(module);module.include(env);env.flushAll();
+                assertArrayEquals("reset/next native debug="+debug+" PHB="+dumped,expected,output.toByteArray());
+                assertEquals(PhpLanguageProfile.PHP_8_5,module.getPhpLanguageProfile());
+                assertEquals(PhpLanguageProfile.JPHP_LEGACY,scope.getPhpLanguageProfile());
+            }catch(Throwable failure){primary=failure;throw failure;}
+            finally{try{env.doFinal();}catch(Throwable cleanup){if(primary==null)throw cleanup;else if(primary!=cleanup)primary.addSuppressed(cleanup);}}
+        }
+    }
+
+    @Test public void testModernNativePointerPrevEndAndMutationMatchesActualPhp85() throws Throwable {
+        String raw=resource("php85_native_pointer.php");assertTrue(raw.startsWith("<?php"));
+        byte[] expected=oldCursorWireResource("php85_native_pointer.stdout");
+        assertEquals("native stderr","",resource("php85_native_pointer.stderr"));
+        assertEquals("complete native pointer rows",10,new String(expected,StandardCharsets.UTF_8).lines().count());
+        for(boolean debug:new boolean[]{false,true})for(boolean dumped:new boolean[]{false,true}) {
+            var scope=newScope();scope.setDebugMode(debug);scope.setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);
+            scope.registerExtension(new StandardExtension());scope.registerExtension(new org.develnext.jphp.zend.ext.json.JsonExtension());
+            var output=new ByteArrayOutputStream();var env=new Environment(scope,output);Throwable primary=null;
+            try {
+                var context=new Context(raw.substring(5));context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
+                var module=new JvmCompiler(env,context).compile(false);
+                if(dumped) {
+                    var bytes=new ByteArrayOutputStream();var dumper=new ModuleDumper(context,env,debug);dumper.save(module,bytes);
+                    module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));assertTrue(module.isCompiledArtifact());
+                }
+                scope.loadModule(module);scope.addUserModule(module);env.registerModule(module);module.include(env);env.flushAll();
+                assertArrayEquals("native pointer debug="+debug+" PHB="+dumped,expected,output.toByteArray());
+                assertEquals(PhpLanguageProfile.PHP_8_5,module.getPhpLanguageProfile());
+                assertEquals(PhpLanguageProfile.JPHP_LEGACY,scope.getPhpLanguageProfile());
+            }catch(Throwable failure){primary=failure;throw failure;}
+            finally{try{env.doFinal();}catch(Throwable cleanup){if(primary==null)throw cleanup;else if(primary!=cleanup)primary.addSuppressed(cleanup);}}
+        }
+    }
+
+    @Test public void testArrayKeyEndpointsDoNotMoveNativePointerAndMatchPhp85() throws Throwable {
+        String qaTestClasses=System.getProperty("qa.endpoint.test.classes");
+        if(qaTestClasses!=null)assertEquals("actual endpoint test class origin", java.nio.file.Path.of(qaTestClasses).toRealPath(), java.nio.file.Path.of(getClass().getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath());
+        String raw=resource("php85_array_key_endpoints.php");assertTrue(raw.startsWith("<?php"));
+        byte[] expected=oldCursorWireResource("php85_array_key_endpoints.stdout");
+        assertEquals("native stderr","",resource("php85_array_key_endpoints.stderr"));
+        assertEquals("complete array-key endpoint rows",38,new String(expected,StandardCharsets.UTF_8).lines().count());
+        for(boolean debug:new boolean[]{false,true})for(boolean dumped:new boolean[]{false,true}) {
+            var scope=newScope();scope.setDebugMode(debug);scope.setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);
+            scope.registerExtension(new StandardExtension());scope.registerExtension(new org.develnext.jphp.zend.ext.json.JsonExtension());
+            var output=new ByteArrayOutputStream();var env=new Environment(scope,output);Throwable primary=null;
+            try {
+                var context=new Context(raw.substring(5));context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
+                var module=new JvmCompiler(env,context).compile(false);
+                if(dumped) {
+                    var bytes=new ByteArrayOutputStream();var dumper=new ModuleDumper(context,env,debug);dumper.save(module,bytes);
+                    module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));assertTrue(module.isCompiledArtifact());
+                }
+                scope.loadModule(module);scope.addUserModule(module);env.registerModule(module);module.include(env);env.flushAll();
+                assertArrayEquals("array-key endpoints debug="+debug+" PHB="+dumped,expected,output.toByteArray());
+                System.out.println("ARRAY_KEY_ENDPOINT_NATIVE38_BYTES debug="+debug+" phb="+dumped);
+                assertEquals(PhpLanguageProfile.PHP_8_5,module.getPhpLanguageProfile());
+                assertEquals(PhpLanguageProfile.JPHP_LEGACY,scope.getPhpLanguageProfile());
+            }catch(Throwable failure){primary=failure;throw failure;}
+            finally{try{env.doFinal();}catch(Throwable cleanup){if(primary==null)throw cleanup;else if(primary!=cleanup)primary.addSuppressed(cleanup);}}
+        }
+    }
 }

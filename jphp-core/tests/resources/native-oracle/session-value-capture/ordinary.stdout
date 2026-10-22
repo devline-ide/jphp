@@ -1,0 +1,5 @@
+["lazy-capture",true,true]
+["retired",true,7]
+["warning-snapshot",[{"before":1},null],{"after":2},["Undefined variable $absent"]]
+["throw","capture-warning"]
+["throw-release",true]

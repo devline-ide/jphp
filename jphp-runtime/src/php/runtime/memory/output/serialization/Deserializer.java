@@ -230,7 +230,7 @@ public class Deserializer {
 
                             i = this.pos;
                             ClassEntity classEntity = env.fetchClass(memory.toString(), true);
-                            if (classEntity != null && classEntity.isAnonymous()) env.exception(php.runtime.lang.BaseException.class,
+                            if (classEntity != null && (classEntity.isAnonymous() || classEntity.getNativeClass() == php.runtime.lang.PhpFiber.class)) env.exception(php.runtime.lang.BaseException.class,
                                     "Unserialization of '%s' is not allowed", classEntity.getName());
                             if (classEntity == null){
                                 env.error(trace, ErrorType.E_ERROR, Messages.ERR_CLASS_NOT_FOUND, memory.toString());

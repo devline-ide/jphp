@@ -231,7 +231,9 @@ public class Context {
         if (inputStream != null){
             readContent(new InputStreamReader(inputStream, charset));
         } else if (content == null && file != null){
-            readContent(new InputStreamReader(new FileInputStream(file), charset));
+            try (InputStream input = new FileInputStream(file)) {
+                readContent(new InputStreamReader(input, charset));
+            }
         }
         return content;
     }

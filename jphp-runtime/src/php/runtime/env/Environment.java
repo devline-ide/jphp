@@ -38,6 +38,7 @@ import php.runtime.reflection.support.ReflectionUtils;
 import php.runtime.util.JVMStackTracer;
 
 import java.io.File;
+import java.io.InputStream;
 import java.io.OutputStream;
 import java.io.PrintStream;
 import java.lang.ref.Reference;
@@ -58,9 +59,11 @@ public class Environment {
     public final CompileScope scope;
     public final Map<String, Memory> configuration = new HashMap<String, Memory>();
     public final static Map<String, ConfigChangeHandler> configurationHandler;
+    private static final ConfigChangeHandler INCLUDE_PATH_HANDLER;
 
     // call stack
     private CallStack callStack = new CallStack(this);
+    private volatile php.runtime.PhpFiberScheduler fiberScheduler;
 
     private Set<String> includePaths;
 
@@ -144,7 +147,8 @@ public class Environment {
     private final Set<ThreadBinding> threadBindings = new HashSet<>();
     private ThreadBinding constructionBinding;
     private boolean finalizationStarted;
-    private Thread embeddingFinalizationThread;
+    private final PhpOperationGate finalizationGate = new PhpOperationGate();
+    private PhpExecutionLineage.Token finalizationOwner;
     private volatile boolean finalizationComplete;
     private IdentityHashMap<CallCache<?>, CallCache.Row> callCacheRows;
     private IdentityHashMap<ClassEntity,php.runtime.PhpEnums.State> enumStates;
@@ -161,6 +165,17 @@ public class Environment {
     }
     private volatile ThreadLocal<php.runtime.PhpOwnershipExecution.Context> ownershipExecutionContexts;
     private php.runtime.PhpRuntimeOwnership.Authority runtimeOwnership;
+    private php.runtime.PhpParameterDefaults.State parameterDefaults;
+    private IdentityHashMap<PhpExecutionLineage.Token,Boolean> strictConstantDeprecationDispatch;
+    public final php.runtime.PhpParameterDefaults.State parameterDefaultState(boolean create) {
+        synchronized (threadBindings) {
+            if (parameterDefaults == null && create) {
+                if (finalizationComplete) throw new IllegalStateException("Environment parameter defaults have retired");
+                parameterDefaults = new php.runtime.PhpParameterDefaults.State(this);
+            }
+            return parameterDefaults;
+        }
+    }
     /** One explicitly connected ordinary authority shares the existing heap; no inferred domain. */
     public final php.runtime.PhpRuntimeOwnership.Authority getRuntimeOwnership() {return runtimeOwnership;}
     public final void bindRuntimeOwnership(php.runtime.PhpRuntimeOwnership.Authority authority) {
@@ -438,7 +453,9 @@ public class Environment {
 
     /** Deliver notifications on a runtime caller, with a temporary binding and balanced PHP stack. */
     public final void runPendingFinalizers() {
-        if (pendingJvmFinalizers != null) { php.runtime.PhpPrimitiveCellRuntime.opaque(this);drainPendingJvmFinalizers(); }
+        if(pendingJvmFinalizers!=null)try(var admission=enterCallbackDomainForRetirement()) {
+            php.runtime.PhpPrimitiveCellRuntime.opaque(this);drainPendingJvmFinalizers();
+        }
     }
 
     private void drainPendingJvmFinalizers() {
@@ -587,6 +604,7 @@ public class Environment {
         ReferenceMemory syntheticGlobalsCarrier=this.globals.put("GLOBALS", this.globals);
         this.syntheticGlobalsOrigin=new SyntheticGlobalsOrigin(this,syntheticGlobalsCarrier);
         syntheticGlobalsCarrier.attachSyntheticGlobalsOrigin(this.syntheticGlobalsOrigin);
+        this.globals.attachSyntheticGlobalsOrigin(this.syntheticGlobalsOrigin);
         this.globals.put("_ENV", ObjectMemory.valueOf(new WrapEnvironmentVariables(this)));
 
         //classMap.putAll(scope.getClassMap());
@@ -652,25 +670,43 @@ public class Environment {
     }
 
     /** Finalize an embedded runtime without CLI reporting or terminating the host JVM. */
-    public synchronized void doFinalForEmbedding() throws Throwable {
-        Thread previous = embeddingFinalizationThread;
-        embeddingFinalizationThread = Thread.currentThread();
-        try {
-            doFinal();
-        } finally {
-            embeddingFinalizationThread = previous;
-        }
+    public void doFinalForEmbedding() throws Throwable {
+        finalizeEnvironment(true);
     }
 
     public void doFinal() throws Throwable {
+        finalizeEnvironment(false);
+    }
+
+    private void finalizeEnvironment(boolean embedding) throws Throwable {
         if (php.runtime.PhpOwnershipExecution.currentEntry(this) != null
                 || runtimeOwnership != null && runtimeOwnership.isExecuting())
             throw new IllegalStateException("Environment finalization inside an owned invocation requires an explicit unwind handoff");
+        PhpExecutionLineage.Token lineage = executionLineage();
         synchronized (threadBindings) {
-            if (finalizationStarted) return;
-            finalizationStarted = true;
+            if (finalizationComplete || finalizationStarted && finalizationOwner == lineage) return;
         }
-        boolean embedding = embeddingFinalizationThread == Thread.currentThread();
+        // Wait only for positively identified work in other Environments; target/unknown callbacks reject.
+        // Domain admission precedes the per-Env owner so another Env's callback can finalize this Env.
+        try (PhpCallbackDomain.Lease admission = scope.getClassLoader().getCallbackDomain().enterForEnvironmentRetirement(this)) {
+            try (PhpOperationGate.Lease owner = finalizationGate.enter(lineage, PhpOperationGate.Reentry.REJECT)) {
+                php.runtime.PhpParameterDefaults.requireRetirementCarrier(this);
+                synchronized (threadBindings) {
+                    if (finalizationComplete) return;
+                    finalizationOwner = lineage;
+                }
+                try {
+                    if (fiberScheduler != null) fiberScheduler.prepareEnvironmentRetirement();
+                    synchronized (threadBindings) { finalizationStarted = true; }
+                    finalizeEnvironmentBody(embedding);
+                } finally {
+                    synchronized (threadBindings) { finalizationOwner = null; }
+                }
+            }
+        }
+    }
+
+    private void finalizeEnvironmentBody(boolean embedding) throws Throwable {
         Throwable failure = null;
         try (ThreadBinding binding = bindCurrentThread()) {
             for (ShutdownHandler handler : shutdownFunctions) {
@@ -705,6 +741,8 @@ public class Environment {
                 catch (Throwable cleanup) {
                     failure = composeFinalizationFailure(failure, cleanup);
                 }
+                try { php.runtime.PhpParameterDefaults.retire(this); }
+                catch (Throwable cleanup) { failure = composeFinalizationFailure(failure, cleanup); }
                 try { releaseOwnedErrorHandlers(); }
                 catch (Throwable cleanup) {
                     failure = composeFinalizationFailure(failure, cleanup);
@@ -717,6 +755,7 @@ public class Environment {
                 if (failure != null) throw failure;
             } else {
                 finalizeObjects();
+                php.runtime.PhpParameterDefaults.retire(this);
                 releaseOwnedErrorHandlers();
                 flushAll();
                 lastMessage = null;
@@ -725,6 +764,14 @@ public class Environment {
             if (thrown != failure) failure = composeFinalizationFailure(failure, thrown);
             throw failure;
         } finally {
+            try {
+                try { php.runtime.PhpParameterDefaults.retire(this); }
+                catch (Throwable cleanup) {
+                    if (failure == null) { failure = cleanup; throw cleanup; }
+                    Throwable composed = composeFinalizationFailure(failure, cleanup);
+                    if (composed != failure) { failure = composed; throw composed; }
+                }
+            } finally {
             try {releaseOwnedErrorHandlers();}
             catch (Throwable cleanup) {
                 if (failure == null) {failure=cleanup;throw cleanup;}
@@ -741,6 +788,7 @@ public class Environment {
             synchronized (gcObjects) { pendingJvmFinalizers = null; }
             try { retireThreadBindings(); }
             catch (RuntimeException | Error cleanup) { if (failure == null) throw cleanup; else if (cleanup != failure) failure.addSuppressed(cleanup); }
+            }
             }
         }
     }
@@ -901,15 +949,17 @@ public class Environment {
     }
 
     public Set<String> getIncludePaths() {
-        return includePaths;
+        synchronized(configuration){return includePaths;}
     }
 
     public void addIncludePath(String value) {
-        includePaths.add(value);
+        try (var admission=enterCallbackDomain()) {
+            includePaths.add(value);
+        }
     }
 
     public void setIncludePaths(Set<String> includePaths) {
-        this.includePaths = includePaths;
+        try(var admission=enterCallbackDomain()){synchronized(configuration){this.includePaths=includePaths;}}
     }
 
     public Map<String, ClassEntity> getLoadedClasses() {
@@ -951,32 +1001,29 @@ public class Environment {
     }
 
     private ClassEntity autoloadCall(String name, String lowerName, boolean modern) {
-        synchronized (autoloadLocks) {
-            // detect recursion in autoload
-            if (StringUtils.isValidClassName(name) && autoloadLocks.add(lowerName)) {
-                try {
-                    StringMemory tmp = new StringMemory(name);
-
-                    for (SplClassLoader loader : classLoaders) {
-                        loader.load(tmp);
-
-                        ClassEntity classEntity = fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
-
-                        if (classEntity != null) {
-                            return classEntity;
-                        }
+        try (var admission=enterCallbackDomain()) {
+            synchronized (autoloadLocks) {
+                // Native recursion guard is shared across Fibers, but metadata reservation never owns the PHP callback.
+                if (!StringUtils.isValidClassName(name) || !autoloadLocks.add(lowerName)) return null;
+            }
+            try {
+                StringMemory tmp = new StringMemory(name);
+                Set<SplClassLoader> visited=Collections.newSetFromMap(new IdentityHashMap<>());
+                for (;;) {
+                    SplClassLoader loader=null;
+                    synchronized (classLoaders) {
+                        for(SplClassLoader candidate:classLoaders)if(visited.add(candidate)){loader=candidate;break;}
                     }
-
-                    if (defaultAutoLoader != null) {
-                        defaultAutoLoader.load(tmp);
-                    }
-
-                    return fetchClass(name, false, modern ? PhpLanguageProfile.PHP_8_5 : PhpLanguageProfile.JPHP_LEGACY);
-                } finally {
-                    autoloadLocks.remove(lowerName);
+                    if(loader==null)break;
+                    loader.load(tmp);
+                    ClassEntity entity=fetchClass(name,false,modern?PhpLanguageProfile.PHP_8_5:PhpLanguageProfile.JPHP_LEGACY);
+                    if(entity!=null)return entity;
                 }
-            } else {
-                return null;
+                SplClassLoader fallback=defaultAutoLoader;
+                if(fallback!=null)fallback.load(tmp);
+                return fetchClass(name,false,modern?PhpLanguageProfile.PHP_8_5:PhpLanguageProfile.JPHP_LEGACY);
+            } finally {
+                synchronized (autoloadLocks) {autoloadLocks.remove(lowerName);}
             }
         }
     }
@@ -1036,25 +1083,38 @@ public class Environment {
     }
 
     private ClassEntity lookupClass(String name, boolean modern) {
-        if(modern) {ClassEntity builtin=scope.fetchPhp85Class(name);if(builtin!=null) return builtin;}
-        ClassEntity entity = classMap.get(PhpClassNames.canonicalKey(name));
-        return modern || PhpClassNames.isModern(entity) ? entity : legacyClassMap.get(name.toLowerCase());
+        if(modern){ClassEntity builtin=scope.fetchPhp85Class(name);if(builtin!=null)return builtin;}
+        synchronized(classMap){ClassEntity entity=classMap.get(PhpClassNames.canonicalKey(name));
+            return modern || PhpClassNames.isModern(entity)?entity:legacyClassMap.get(name.toLowerCase());}
+    }
+
+    private ClassEntity lookupPublishedClass(String name,boolean modern) {
+        if(modern){ClassEntity builtin=scope.peekPhp85Class(name);if(builtin!=null)return builtin;}
+        ClassEntity entity;
+        synchronized(classMap){entity=classMap.get(PhpClassNames.canonicalKey(name));
+            if(!modern && !PhpClassNames.isModern(entity))entity=legacyClassMap.get(name.toLowerCase());}
+        if(modern && entity!=null && scope.isPhp85ClassReserved(name))return null;
+        return entity;
     }
 
     private boolean hasClassCollision(String name, ClassEntity entity) {
-        String key = PhpClassNames.canonicalKey(name);
-        return classMap.containsKey(key)
-                || !PhpClassNames.isModern(entity) && legacyClassMap.containsKey(name.toLowerCase());
+        synchronized (classMap) {
+            String key = PhpClassNames.canonicalKey(name);
+            return classMap.containsKey(key)
+                    || !PhpClassNames.isModern(entity) && legacyClassMap.containsKey(name.toLowerCase());
+        }
     }
 
     private void publishClass(String name, ClassEntity entity) {
-        String key = PhpClassNames.canonicalKey(name);
-        ClassEntity previous = classMap.put(key, entity);
-        String previousLegacyKey = legacyClassKeys.remove(key);
-        if (previousLegacyKey != null) legacyClassMap.remove(previousLegacyKey, previous);
-        if (!PhpClassNames.isModern(entity)) {
-            String legacyKey = name.toLowerCase();
-            legacyClassMap.put(legacyKey, entity); legacyClassKeys.put(key, legacyKey);
+        synchronized (classMap) {
+            String key = PhpClassNames.canonicalKey(name);
+            ClassEntity previous = classMap.put(key, entity);
+            String previousLegacyKey = legacyClassKeys.remove(key);
+            if (previousLegacyKey != null) legacyClassMap.remove(previousLegacyKey, previous);
+            if (!PhpClassNames.isModern(entity)) {
+                String legacyKey = name.toLowerCase();
+                legacyClassMap.put(legacyKey, entity); legacyClassKeys.put(key, legacyKey);
+            }
         }
     }
 
@@ -1071,39 +1131,25 @@ public class Environment {
     }
 
     private ClassEntity fetchClass(String name, String nameL, boolean autoLoad, boolean modern) {
-        nameL = modern ? PhpClassNames.canonicalKey(name) : name.toLowerCase();
-        ClassEntity entity = lookupClass(name, modern);
-
-        if (entity != null) {
-            return entity;
-        }
-
-        synchronized (classMap) {
-            entity = lookupClass(name, modern); // try retry!
-
-            if (entity == null) {
-                entity = scope.fetchUserClass(name, nameL, modern);
-
-                if (entity != null) {
-                    // A folded legacy query is not a new alias. Scope aliases retain their live Java registration binding.
-                    boolean canonicalAlias = scope.getClassMap().get(PhpClassNames.canonicalKey(name)) == entity;
-                    ClassEntity shadow = classMap.get(PhpClassNames.canonicalKey(entity.getName()));
-                    if (!canonicalAlias && shadow != null && shadow != entity && PhpClassNames.isModern(shadow)) return null;
-                    try {
-                        entity.initEnvironment(this);
-                    } catch (Throwable throwable) {
-                        throw new CriticalException(throwable);
-                    }
-                    if (!scope.isPhp85Builtin(entity) && (shadow == null || shadow == entity)) publishClass(entity.getName(), entity);
-                    return entity;
-                }
-
-                ClassEntity classEntity = autoLoad ? dispatchAutoload(name, nameL, modern) : null;
-
-                return classEntity;
-            } else {
+        ClassEntity published=lookupPublishedClass(name,modern);
+        if(published!=null)return published;
+        try (var admission=enterCallbackDomain()) {
+            nameL = modern ? PhpClassNames.canonicalKey(name) : name.toLowerCase();
+            ClassEntity entity=lookupClass(name,modern);
+            if(entity!=null)return entity;
+            entity=scope.fetchUserClass(this,name,nameL,modern);
+            if(entity!=null) {
+                boolean canonicalAlias=scope.getClassMap().get(PhpClassNames.canonicalKey(name))==entity;
+                ClassEntity shadow;
+                synchronized(classMap){shadow=classMap.get(PhpClassNames.canonicalKey(entity.getName()));}
+                if(!canonicalAlias && shadow!=null && shadow!=entity && PhpClassNames.isModern(shadow))return null;
+                try {entity.initEnvironment(this);}catch(RuntimeException | Error failure){throw failure;}
+                catch(Throwable throwable){throw new CriticalException(throwable);}
+                synchronized(classMap){shadow=classMap.get(PhpClassNames.canonicalKey(entity.getName()));}
+                if(!scope.isPhp85Builtin(entity) && (shadow==null || shadow==entity))publishClass(entity.getName(),entity);
                 return entity;
             }
+            return autoLoad?dispatchAutoload(name,nameL,modern):null;
         }
     }
 
@@ -1122,31 +1168,27 @@ public class Environment {
     }
 
     public void registerFunction(FunctionEntity entity) {
-        synchronized (functionMap) {
-            if (functionMap.containsKey(entity.getLowerName()) || entity.getModule()!=null
-                    && entity.getModule().getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5 && scope.fetchPhp85Function(entity.getName())!=null)
-                exception("Function '%s' already registered", entity.getName());
-
-            functionMap.put(entity.getLowerName(), entity);
+        try(var admission=enterCallbackDomain()) {
+            boolean collision;
+            synchronized(functionMap){collision=functionMap.containsKey(entity.getLowerName());}
+            if(collision || entity.getModule()!=null && entity.getModule().getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5 && scope.fetchPhp85Function(entity.getName())!=null)
+                exception("Function '%s' already registered",entity.getName());
+            synchronized(functionMap){functionMap.put(entity.getLowerName(),entity);}
         }
     }
 
     /** Alias publication is local to this Environment and retains the actual declaration identity. */
     public boolean registerClassAlias(String name,ClassEntity entity,PhpLanguageProfile profile) {
-        synchronized (classMap) {
-            if (hasClassCollision(name,entity) || fetchClass(name,false,profile)!=null) return false;
-            publishClass(name,entity);
-            return true;
+        try(var admission=enterCallbackDomain()) {
+            if(hasClassCollision(name,entity) || fetchClass(name,false,profile)!=null)return false;
+            publishClass(name,entity);return true;
         }
     }
 
     public void registerClass(ClassEntity entity) {
-        synchronized (classMap) {
-            if (hasClassCollision(entity.getName(), entity))
-                exception("Class '%s' already registered", entity.getName());
-
-            publishClass(entity.getName(), entity);
-            entity.initEnvironment(this);
+        try(var admission=enterCallbackDomain()) {
+            if(hasClassCollision(entity.getName(),entity))exception("Class '%s' already registered",entity.getName());
+            publishClass(entity.getName(),entity);entity.initEnvironment(this);
         }
     }
 
@@ -1180,39 +1222,37 @@ public class Environment {
     }
 
     public boolean defineDeclaredConstant(String moduleName,String name,Memory value) {
-        ModuleEntity module=scope.getClassLoader().getModule(moduleName);
-        ConstantEntity declaration=module==null ? null : module.getDeferredGlobalConstantDeclaration(name);
-        if(declaration==null) throw new php.runtime.exceptions.CriticalException("Missing deferred global constant declaration");
-        if(findConstant(name)!=null) {
-            error(declaration.getTrace(), E_WARNING, "Constant %s already defined, this will be an error in PHP 9", name);
-            return false;
+        try (var admission=enterCallbackDomain()) {
+            ModuleEntity module=scope.getClassLoader().getModule(moduleName);
+            ConstantEntity declaration=module==null ? null : module.getDeferredGlobalConstantDeclaration(name);
+            if(declaration==null) throw new php.runtime.exceptions.CriticalException("Missing deferred global constant declaration");
+            if(findConstant(name)!=null) {
+                error(declaration.getTrace(), E_WARNING, "Constant %s already defined, this will be an error in PHP 9", name);
+                return false;
+            }
+            ConstantEntity constant=new ConstantEntity(name,value,true);
+            constant.setModule(module);constant.setContext(declaration.getContext());constant.setTrace(declaration.getTrace());
+            constant.setDocComment(declaration.getDocComment());constant.setPhpAttributes(declaration.getPhpAttributes());
+            constantMap.put(name.toLowerCase(java.util.Locale.ROOT),constant);return true;
         }
-        ConstantEntity constant=new ConstantEntity(name,value,true);
-        constant.setModule(module);constant.setContext(declaration.getContext());constant.setTrace(declaration.getTrace());
-        constant.setDocComment(declaration.getDocComment());constant.setPhpAttributes(declaration.getPhpAttributes());
-        constantMap.put(name.toLowerCase(java.util.Locale.ROOT),constant);return true;
     }
     public boolean defineConstant(String name, Memory value, boolean caseSensitise) {
-        Memory constant = findConstant(name);
-        if (constant != null)
-            return false;
+        try (var admission=enterCallbackDomain()) {
+            Memory constant = findConstant(name);
+            if (constant != null)
+                return false;
 
-        constantMap.put(name.toLowerCase(), new ConstantEntity(name, value, caseSensitise));
-        return true;
+            constantMap.put(name.toLowerCase(), new ConstantEntity(name, value, caseSensitise));
+            return true;
+        }
     }
 
     public Memory getConfigValue(String name, Memory defaultValue) {
-        Memory result = null;
-        if (scope.configuration == null || (result = configuration.get(name)) != null) {
-            if (result == null) result = configuration.get(name);
-            if (result == null)
-                return defaultValue;
-
-            return result;
-        }
-
-        result = scope.configuration.get(name);
-        return result == null ? defaultValue : result;
+        Memory result;
+        synchronized(configuration){result=configuration.get(name);}
+        if(result!=null)return result;
+        if(scope.configuration!=null)result=scope.configuration.get(name);
+        return result==null?defaultValue:result;
     }
 
     public Memory getConfigValue(String name) {
@@ -1220,47 +1260,53 @@ public class Environment {
     }
 
     public ArrayMemory getConfigValues(String prefix, boolean includingGlobal) {
-        if (prefix != null)
-            prefix = prefix + ".";
-
-        ArrayMemory result = new ArrayMemory();
-        if (includingGlobal)
-            if (scope.configuration != null) {
-                for (Map.Entry<String, Memory> entry : scope.configuration.entrySet()) {
-                    String key = entry.getKey();
-                    if (prefix != null && !key.startsWith(prefix)) continue;
-
-                    result.put(key, entry.getValue().toImmutable());
-                }
-            }
-
-        for (Map.Entry<String, Memory> entry : configuration.entrySet()) {
-            String key = entry.getKey();
-
-            if (prefix != null && !key.startsWith(prefix)) continue;
-            result.put(key, entry.getValue().toImmutable());
-        }
+        String selected=prefix==null?null:prefix+".";
+        Map<String,Memory> snapshot=new LinkedHashMap<>();
+        if(includingGlobal && scope.configuration!=null)snapshot.putAll(scope.configuration);
+        synchronized(configuration){snapshot.putAll(configuration);}
+        ArrayMemory result=new ArrayMemory();
+        for(Map.Entry<String,Memory> entry:snapshot.entrySet())
+            if(selected==null || entry.getKey().startsWith(selected))result.put(entry.getKey(),entry.getValue().toImmutable());
         return result;
     }
 
+    protected final Memory prepareConfigValue(String name, Memory value) {
+        value=value.toValue();return value.isString()?value:new StringMemory(value.toString());
+    }
+
     public Memory setConfigValue(String name, Memory value) {
-        value = value.toValue();
-        if (!value.isString())
-            value = new StringMemory(value.toString());   // fix capability with zend php
-
-        ConfigChangeHandler handler = configurationHandler.get(name);
-        if (handler != null)
-            handler.onChange(this, value);
-
-        return configuration.put(name, value);
+        try(var admission=enterCallbackDomain()) {
+            ConfigChangeHandler handler=configurationHandler.get(name);
+            if(handler!=null && handler!=INCLUDE_PATH_HANDLER && php.runtime.lang.PhpFiber.current(this)!=null)
+                php.runtime.lang.PhpFiber.fail(this,"Nontransactional configuration handlers cannot run inside a Fiber");
+            Memory prepared=prepareConfigValue(name,value);
+            if(handler==INCLUDE_PATH_HANDLER) {
+                Set<String> paths=preparedIncludePaths(prepared);
+                synchronized(configuration){includePaths=paths;return configuration.put(name,prepared);}
+            }
+            if(handler!=null)try(var capability=PhpExecutionLineage.nonSuspendingCallback()){handler.onChange(this,prepared);}
+            synchronized(configuration){return configuration.put(name,prepared);}
+        }
     }
 
     public void restoreConfigValue(String name) {
-        configuration.remove(name);
+        try(var admission=enterCallbackDomain()) {
+            ConfigChangeHandler handler=configurationHandler.get(name);
+            if(handler!=null && handler!=INCLUDE_PATH_HANDLER && php.runtime.lang.PhpFiber.current(this)!=null)
+                php.runtime.lang.PhpFiber.fail(this,"Nontransactional configuration handlers cannot run inside a Fiber");
+            Memory fallback=scope.configuration==null?null:scope.configuration.get(name);
+            if(handler==INCLUDE_PATH_HANDLER) {
+                Set<String> paths=preparedIncludePaths(fallback);
+                synchronized(configuration){includePaths=paths;configuration.remove(name);}return;
+            }
+            synchronized(configuration){configuration.remove(name);}
+            if(handler!=null)try(var capability=PhpExecutionLineage.nonSuspendingCallback()){handler.onChange(this,fallback);}
+        }
+    }
 
-        ConfigChangeHandler handler = configurationHandler.get(name);
-        if (handler != null)
-            handler.onChange(this, getConfigValue(name));
+    private Set<String> preparedIncludePaths(Memory value) {
+        if(value==null)return Collections.emptySet();
+        Set<String> paths=new HashSet<>();Collections.addAll(paths,StringUtils.split(value.toString(),Constants.PATH_SEPARATOR,255));return paths;
     }
 
     public Memory getOrCreateGlobal(String name) {
@@ -1284,11 +1330,11 @@ public class Environment {
 
     @SuppressWarnings("unchecked")
     public <T> T getUserValue(String name, Class<T> clazz) {
-        return (T) userValues.get(name);
+        synchronized(userValues){return (T)userValues.get(name);}
     }
 
     public void setUserValue(String name, Object value) {
-        userValues.put(name, value);
+        synchronized(userValues){userValues.put(name,value);}
     }
 
     public <T> T getUserValue(Class<T> clazz) {
@@ -1304,7 +1350,7 @@ public class Environment {
     }
 
     public boolean removeUserValue(String name) {
-        return userValues.remove(name) != null;
+        synchronized(userValues){return userValues.remove(name)!=null;}
     }
 
     public int getErrorFlags() {
@@ -1582,8 +1628,10 @@ public class Environment {
     public void exception(TraceInfo trace, Class<? extends BaseBaseException> e, String message, Object... args) {
         ClassEntity entity = fetchClass(e);
         var ownedExecution=php.runtime.PhpOwnershipExecution.current(this);
-        if(ownedExecution!=null && e==php.runtime.lang.exception.BaseTypeError.class) {
-            try {throw php.runtime.PhpOwnershipThrowables.typeError(ownedExecution,entity,trace,String.format(message,args));}
+        if(ownedExecution!=null && (e==php.runtime.lang.exception.BaseTypeError.class || e==php.runtime.lang.exception.BaseArgumentCountError.class)) {
+            try {throw e==php.runtime.lang.exception.BaseTypeError.class
+                    ? php.runtime.PhpOwnershipThrowables.typeError(ownedExecution,entity,trace,String.format(message,args))
+                    : php.runtime.PhpOwnershipThrowables.argumentCountError(ownedExecution,entity,trace,String.format(message,args));}
             catch(Throwable failure) {Environment.<RuntimeException>throwThreadFailure(failure);return;}
         }
         IObject object = entity.newObjectWithoutConstruct(this);
@@ -1598,7 +1646,7 @@ public class Environment {
     }
 
     public boolean isHandleErrors(ErrorType type) {
-        return ErrorType.check(errorFlags, type);
+        return ErrorType.check(getErrorFlags(), type);
     }
 
     public void warning(String message, Object... args) {
@@ -1701,39 +1749,33 @@ public class Environment {
     }
 
     public ModuleEntity importCompiledModule(Context context, boolean debugInformation) throws Throwable {
-        String moduleName = context.getModuleName();
-        ModuleEntity module;
-        synchronized (scope) {
-            module = moduleName == null ? null : scope.findCachedModule(moduleName, true, context.getPhpLanguageProfile(scope));
-            if (module == null) {
-                ModuleDumper moduleDumper = new ModuleDumper(context, this, debugInformation);
-                module = moduleDumper.load(context.getInputStream(getDefaultCharset()));
+        try(var admission=enterCallbackDomain()) {
+            String name=context.getModuleName();
+            ModuleEntity module=name==null?null:scope.findCachedModule(name,true,context.getPhpLanguageProfile(scope));
+            if(module==null)try(var loading=scope.beginModuleLoad(context,true)) {
+                ModuleDumper dumper=new ModuleDumper(context,this,debugInformation);
+                // Only the exact builtin file Context creates an owned stream here; custom providers stay borrowed.
+                if(context.getClass()==Context.class && context.file!=null) {
+                    try(InputStream input=context.getInputStream(getDefaultCharset())) {module=dumper.load(input);}
+                } else module=dumper.load(context.getInputStream(getDefaultCharset()));
+                scope.loadModule(module);scope.addUserModule(module);
             }
-            scope.loadModule(module);
-            scope.addUserModule(module);
+            else {scope.loadModule(module);scope.addUserModule(module);}
+            registerModule(module);return module;
         }
-
-        registerModule(module);
-        return module;
     }
 
     public ModuleEntity importModule(Context context) throws Throwable {
-        context.freezeImplicitClassImports();
-        String moduleName = context.getModuleName();
-        ModuleEntity module;
-        synchronized (scope) {
-            module = moduleName == null ? null : scope.findCachedModule(moduleName, false,
-                    context.getPhpLanguageProfile(scope), context.getImplicitClassImportsFingerprint());
-            if (module == null) {
-                AbstractCompiler compiler = scope.createCompiler(this, context);
-                module = compiler.compile(false);
+        try(var admission=enterCallbackDomain()) {
+            context.freezeImplicitClassImports();String name=context.getModuleName();
+            ModuleEntity module=name==null?null:scope.findCachedModule(name,false,context.getPhpLanguageProfile(scope),context.getImplicitClassImportsFingerprint());
+            if(module==null)try(var loading=scope.beginModuleLoad(context,false)) {
+                AbstractCompiler compiler=scope.createCompiler(this,context);module=compiler.compile(false);
+                scope.loadModule(module);scope.addUserModule(module);
             }
-            scope.loadModule(module);
-            scope.addUserModule(module);
+            else {scope.loadModule(module);scope.addUserModule(module);}
+            registerModule(module);return module;
         }
-
-        registerModule(module);
-        return module;
     }
 
     public Memory eval(String code) throws Throwable {
@@ -1769,42 +1811,25 @@ public class Environment {
     }
 
     public void registerModule(ModuleEntity module, boolean ignoreErrors) {
-        synchronized (classMap) {
-            // Validate the complete class batch before publishing either index.
-            if (!ignoreErrors) for (ClassEntity entity : module.getClasses()) {
-                if (entity.isStatic() && hasClassCollision(entity.getName(), entity)) {
-                    error(entity.getTrace(), Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(entity.getName()));
-                }
+        try(var admission=enterCallbackDomain()) {
+            if(!ignoreErrors)for(ClassEntity entity:module.getClasses())
+                if(entity.isStatic() && hasClassCollision(entity.getName(),entity))
+                    error(entity.getTrace(),Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(entity.getName()));
+            for(ClassEntity entity:module.getClasses())if(entity.isStatic()) {
+                entity.setModule(module);publishClass(entity.getName(),entity);entity.register(this);
             }
-            for (ClassEntity entity : module.getClasses()) {
-                if (entity.isStatic()) {
-                    entity.setModule(module);
-                    publishClass(entity.getName(), entity);
-                    entity.register(this);
-                }
-            }
-        }
-
-        for (FunctionEntity entity : module.getFunctions()) {
-            if (entity.isStatic()) {
-                entity.setModule(module);
-
-                if (functionMap.put(entity.getLowerName(), entity) != null && !ignoreErrors) {
-                    error(entity.getTrace(), Messages.ERR_CANNOT_REDECLARE_FUNCTION.fetch(entity.getName()));
-                }
-
+            for(FunctionEntity entity:module.getFunctions())if(entity.isStatic()) {
+                entity.setModule(module);FunctionEntity previous;
+                synchronized(functionMap){previous=functionMap.put(entity.getLowerName(),entity);}
+                if(previous!=null && !ignoreErrors)error(entity.getTrace(),Messages.ERR_CANNOT_REDECLARE_FUNCTION.fetch(entity.getName()));
                 entity.register(this);
             }
-        }
-
-        for (ConstantEntity entity : module.getConstants()) {
-            entity.setModule(module);
-
-            if (constantMap.put(entity.getLowerName(), entity) != null && !ignoreErrors) {
-                error(entity.getTrace(), Messages.ERR_CANNOT_REDECLARE_CONSTANT.fetch(entity.getName()));
+            for(ConstantEntity entity:module.getConstants()) {
+                entity.setModule(module);ConstantEntity previous;
+                synchronized(constantMap){previous=constantMap.put(entity.getLowerName(),entity);}
+                if(previous!=null && !ignoreErrors)error(entity.getTrace(),Messages.ERR_CANNOT_REDECLARE_CONSTANT.fetch(entity.getName()));
+                entity.register(this);
             }
-
-            entity.register(this);
         }
     }
 
@@ -1831,11 +1856,45 @@ public class Environment {
         }
     }
 
+    /** Value reads carry builtin diagnostics; metadata/probe findConstant callers remain silent. */
+    public Memory readConstant(String name, TraceInfo trace) {
+        return constantReadValue(name, name.toLowerCase(java.util.Locale.ROOT), trace, findConstant(name));
+    }
+
+    private Memory constantReadValue(String name, String lowerName, TraceInfo trace, Memory value) {
+        if (value != null && "E_STRICT".equals(name)
+                && moduleManager.getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            ConstantEntity user = constantMap.get(lowerName);
+            CompileConstant builtin = scope.findCompileConstant(name);
+            if ((user == null || user.caseSensitise && !name.equals(user.getName()))
+                    && builtin != null && value == builtin.value) {
+                // Suppress only this constant's diagnostic during its own handler; other carriers remain independent.
+                PhpExecutionLineage.Token lineage = executionLineage();
+                synchronized (threadBindings) {
+                    if (strictConstantDeprecationDispatch != null && strictConstantDeprecationDispatch.containsKey(lineage)) return value;
+                    if (strictConstantDeprecationDispatch == null) strictConstantDeprecationDispatch = new IdentityHashMap<>();
+                    strictConstantDeprecationDispatch.put(lineage,Boolean.TRUE);
+                }
+                try { error(trace, E_DEPRECATED, "Constant E_STRICT is deprecated since 8.4, the error level was removed"); }
+                finally {
+                    synchronized (threadBindings) {
+                        strictConstantDeprecationDispatch.remove(lineage);
+                        if (strictConstantDeprecationDispatch.isEmpty()) strictConstantDeprecationDispatch = null;
+                    }
+                }
+            }
+        }
+        return value;
+    }
+
     /** Successful FETCH_CONSTANT resolution is cached per emitted site and Environment, never per JVM class. */
     public Memory __getConstant(String name, String lowerName, TraceInfo trace, boolean fallback, String siteKey) {
         boolean cacheResolution = fallback && name.indexOf(Information.NAMESPACE_SEP_CHAR) >= 0;
         Memory cached = cacheResolution ? getStatic(siteKey) : null;
-        if (cached != null) return findConstant(cached.toString());
+        if (cached != null) {
+            String resolved = cached.toString();
+            return constantReadValue(resolved, resolved.toLowerCase(java.util.Locale.ROOT), trace, findConstant(resolved));
+        }
         String resolved = name;
         Memory constant = findConstant(name, lowerName);
         if (constant == null && fallback) {
@@ -1849,6 +1908,7 @@ public class Environment {
             exception(trace, php.runtime.lang.exception.BaseError.class, "Undefined constant \"%s\"", name);
             return Memory.NULL;
         }
+        constant = constantReadValue(resolved, resolved.toLowerCase(java.util.Locale.ROOT), trace, constant);
         // Retain only the immutable resolved name, avoiding an extra owner of object/closure constants.
         if (cacheResolution) getOrCreateStatic(siteKey, StringMemory.valueOf(resolved));
         return constant;
@@ -1877,7 +1937,7 @@ public class Environment {
             return StringMemory.valueOf(name);
         }
 
-        return constant;
+        return constantReadValue(name, lowerName, trace, constant);
     }
 
     /*public Memory __getConstant(String name, String lowerName, TraceInfo trace){
@@ -1898,7 +1958,7 @@ public class Environment {
 
     private Memory __import(String path, ArrayMemory locals, TraceInfo trace, String funcName, boolean once, Callback<Void, Void> callback)
             throws Throwable {
-        synchronized (moduleManager) {
+        try(var admission=enterCallbackDomain()) {
             if (once && moduleManager.isIncluded(path)) {
                 return Memory.TRUE;
             }
@@ -1921,6 +1981,7 @@ public class Environment {
                     locals = new ArrayMemory();
                 }
 
+                admission.includeBody();
                 return module.include(this, locals);
             } finally {
                 popCall();
@@ -1979,7 +2040,7 @@ public class Environment {
     public void registerObjectInGC(IObject object) {
         ClassEntity entity = object.getReflection();
 
-        if (entity != null && entity.methodDestruct != null) {
+        if (entity != null && (entity.methodDestruct != null || object instanceof php.runtime.lang.support.IPhpNativeRetirement)) {
             try {
                 cleanGcObjects();
             } catch (Throwable throwable) {
@@ -2075,23 +2136,21 @@ public class Environment {
     }
 
     public ClassEntity __getAnonymousClass(String moduleIndex, String name) {
-        if (php.runtime.PhpOwnershipExecution.current(this) != null)
-            throw new IllegalArgumentException("Anonymous declaration lacks its complete ownership protocol");
-        ModuleEntity module = scope.moduleIndexMap.get(moduleIndex);
-        ClassEntity entity = module == null ? null : module.findClass(name);
-        if (entity == null || !entity.isAnonymous())
-            throw new CriticalException("Invalid anonymous declaration in module " + moduleIndex);
-        synchronized (classMap) {
-            ClassEntity present = lookupClass(name, true);
-            if (present!=null && entity.isUnresolvedDeclaration() && present.getModule()==module) return present;
-            if (present != null && present != entity) throw new CriticalException("Anonymous class identity collision");
-            if (present == null) {
-                if (entity.isUnresolvedDeclaration()) return __declareClass(moduleIndex,name);
-                entity.initEnvironment(this);
-                publishClass(name, entity);
+        try(var admission=enterCallbackDomain()) {
+            if(php.runtime.PhpOwnershipExecution.current(this)!=null)
+                throw new IllegalArgumentException("Anonymous declaration lacks its complete ownership protocol");
+            ModuleEntity module=scope.moduleIndexMap.get(moduleIndex);
+            ClassEntity entity=module==null?null:module.findClass(name);
+            if(entity==null || !entity.isAnonymous())throw new CriticalException("Invalid anonymous declaration in module "+moduleIndex);
+            ClassEntity present=lookupClass(name,true);
+            if(present!=null && entity.isUnresolvedDeclaration() && present.getModule()==module)return present;
+            if(present!=null && present!=entity)throw new CriticalException("Anonymous class identity collision");
+            if(present==null) {
+                if(entity.isUnresolvedDeclaration())return __declareClass(moduleIndex,name);
+                entity.initEnvironment(this);publishClass(name,entity);
             }
+            return entity;
         }
-        return entity;
     }
 
     public ClassEntity __defineClass(TraceInfo trace, String moduleIndex, int declarationId) {
@@ -2121,37 +2180,25 @@ public class Environment {
     }
 
     private ClassEntity defineClassDeclaration(TraceInfo trace, String moduleIndex, ClassEntity template) {
-        String name = template.getName();
-        synchronized (classMap) {
-            if (hasDeclarationCollision(name, template))
-                error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
-        }
-        String pendingKey = "\0class-link:" + moduleIndex + ":"
-                + (template.isDeferredDeclaration() ? template.getDeclarationId() : name);
-        if (getUserValue(pendingKey, Boolean.class) != null)
-            exception(trace, php.runtime.lang.exception.BaseError.class, "Class \"%s\" not found", name);
-        setUserValue(pendingKey, Boolean.TRUE);
-        try {
-            String parentName = template.getDeferredParentName();
-            ClassEntity parent = parentName == null ? null
-                    : fetchClass(parentName, true, template.getModule().getPhpLanguageProfile());
-            if (parentName != null && parent == null)
-                exception(trace, php.runtime.lang.exception.BaseError.class, "Class \"%s\" not found", parentName);
-            synchronized (classMap) {
-                // Parent autoload can itself publish a competing declaration.
-                if (hasDeclarationCollision(name, template))
-                    error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
-                ClassEntity bound = php.runtime.reflection.PhpClassDeclaration.bind(template, parent, this);
-                if (hasDeclarationCollision(name, bound))
-                    error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+        try(var admission=enterCallbackDomain()) {
+            String name=template.getName();
+            if(hasDeclarationCollision(name,template))error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+            String pendingKey="\0class-link:"+moduleIndex+":"+(template.isDeferredDeclaration()?template.getDeclarationId():name);
+            if(getUserValue(pendingKey,Boolean.class)!=null)
+                exception(trace,php.runtime.lang.exception.BaseError.class,"Class \"%s\" not found",name);
+            setUserValue(pendingKey,Boolean.TRUE);
+            try {
+                String parentName=template.getDeferredParentName();
+                ClassEntity parent=parentName==null?null:fetchClass(parentName,true,template.getModule().getPhpLanguageProfile());
+                if(parentName!=null && parent==null)
+                    exception(trace,php.runtime.lang.exception.BaseError.class,"Class \"%s\" not found",parentName);
+                if(hasDeclarationCollision(name,template))error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+                ClassEntity bound=php.runtime.reflection.PhpClassDeclaration.bind(template,parent,this);
+                if(hasDeclarationCollision(name,bound))error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
                 bound.initEnvironment(this);
-                if (hasDeclarationCollision(name, bound))
-                    error(trace, Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
-                publishClass(name, bound);
-                return bound;
-            }
-        } finally {
-            setUserValue(pendingKey, null);
+                if(hasDeclarationCollision(name,bound))error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+                publishClass(name,bound);return bound;
+            }finally{setUserValue(pendingKey,null);}
         }
     }
 
@@ -2286,17 +2333,19 @@ public class Environment {
     }
 
     public void __defineFunction(TraceInfo trace, String moduleInternalName, int index) {
-        ModuleEntity module = scope.moduleIndexMap.get(moduleInternalName);
-        if (module == null)
-            throw new CriticalException("Cannot find module: " + moduleInternalName);
+        try (var admission=enterCallbackDomain()) {
+            ModuleEntity module = scope.moduleIndexMap.get(moduleInternalName);
+            if (module == null)
+                throw new CriticalException("Cannot find module: " + moduleInternalName);
 
-        FunctionEntity function = module.findFunction(index);
+            FunctionEntity function = module.findFunction(index);
 
-        if (functionMap.put(function.getLowerName(), function) != null) {
-            triggerError(new FatalException(
-                    Messages.ERR_CANNOT_REDECLARE_FUNCTION.fetch(function.getName()),
-                    trace
-            ));
+            if (functionMap.put(function.getLowerName(), function) != null) {
+                triggerError(new FatalException(
+                        Messages.ERR_CANNOT_REDECLARE_FUNCTION.fetch(function.getName()),
+                        trace
+                ));
+            }
         }
     }
 
@@ -2635,6 +2684,133 @@ public class Environment {
         }
     }
 
+    /** Ordinary Generator request: logical admission and ob context only, never Fiber scheduling. */
+    public final php.runtime.util.generator.Collector.ExecutionContext generatorExecutionContext() {
+        PhpExecutionLineage.Token lineage=executionLineage();
+        ConcurrentEnvironment concurrent=getClass()==ConcurrentEnvironment.class?(ConcurrentEnvironment)this:null;
+        Object output=concurrent==null?null:concurrent.captureGeneratorOutput();
+        return new php.runtime.util.generator.Collector.ExecutionContext() {
+            private PhpExecutionLineage.Binding binding;
+            private ConcurrentEnvironment.GeneratorOutputBinding outputBinding;
+            @Override public void enter(){binding=PhpExecutionLineage.bind(lineage);
+                try{if(concurrent!=null)outputBinding=concurrent.bindGeneratorOutput(output);}
+                catch(RuntimeException | Error failure){binding.close();binding=null;throw failure;}}
+            @Override public void close(){try{if(outputBinding!=null){outputBinding.close();outputBinding=null;}}
+                finally{if(binding!=null){binding.close();binding=null;}}}
+        };
+    }
+
+    /** Callback transactions are shared only by scopes using the same runtime loader. */
+    public final PhpCallbackDomain.Lease enterCallbackDomain() {
+        return scope.getClassLoader().getCallbackDomain().enter(this);
+    }
+    public final PhpCallbackDomain.Lease enterCallbackDomainForRetirement() {
+        return scope.getClassLoader().getCallbackDomain().enterForRetirement(this);
+    }
+    public final PhpExecutionLineage.Token executionLineage() { return PhpExecutionLineage.current(); }
+    public final void validateCallbackDomain() { scope.getClassLoader().getCallbackDomain().validateEntry(); }
+    public final void prepareFiberHandoff(FiberState state) {
+        validateFiberState(state);
+        state.lineage = scope.getClassLoader().getCallbackDomain().handoffLineage(state.lineage);
+    }
+
+    /** Explicitly supported hosts only; arbitrary overridden state is never guessed. */
+    public final boolean supportsFiberHost() {
+        return (getClass()==Environment.class || getClass()==ConcurrentEnvironment.class)
+                && scope.getClassLoader().getClass()==php.runtime.loader.RuntimeClassLoader.class;
+    }
+    private void requireFiberHost() {
+        if(!supportsFiberHost())throw new IllegalStateException("Unsupported Fiber host state");
+    }
+    /** Segment-local stack/mask/suppression; outputContext is shared by the caller lineage. */
+    public static final class FiberState {
+        final Environment environment;
+        CallStack stack;
+        int errorFlags;
+        Stack<Integer> silent;
+        final Object outputContext;
+        PhpExecutionLineage.Token lineage;
+        FiberState(Environment environment,CallStack stack,int errorFlags,Stack<Integer> silent,Object outputContext) {
+            this.environment=environment;this.stack=stack;this.errorFlags=errorFlags;this.silent=silent;this.outputContext=outputContext;
+            this.lineage=PhpExecutionLineage.current();
+        }
+        public CallStack stack() {return stack;}
+    }
+    private void validateFiberState(FiberState state) {
+        requireFiberHost();
+        if(state==null || state.environment!=this)throw new IllegalArgumentException("Foreign Fiber host state");
+    }
+    public final FiberState newFiberState() {
+        FiberState current=currentFiberState();
+        return new FiberState(this,new CallStack(this),current.errorFlags,new Stack<>(),current.outputContext);
+    }
+    public final FiberState currentFiberState() {
+        requireFiberHost();
+        if(getClass()==ConcurrentEnvironment.class)return ((ConcurrentEnvironment)this).captureFiberState();
+        return new FiberState(this,callStack,errorFlags,silentFlags,outputBuffers);
+    }
+    public final FiberState delegatedFiberState(FiberState parent,CallStack stack) {
+        validateFiberState(parent);
+        return new FiberState(this,stack,parent.errorFlags,parent.silent,parent.outputContext);
+    }
+    public final void finishDelegatedFiberState(FiberState parent,FiberState delegated) {
+        validateFiberState(parent);validateFiberState(delegated);
+        if(parent.outputContext!=delegated.outputContext)throw new IllegalStateException("Generator changed its output lineage");
+        parent.errorFlags=delegated.errorFlags;parent.silent=delegated.silent;parent.lineage=delegated.lineage;
+    }
+    private void installOrdinaryFiberState(FiberState state) {
+        // Ordinary Environment has one shared output stack; validate before mutating the active segment.
+        if(outputBuffers!=state.outputContext)throw new IllegalStateException("Fiber output lineage changed");
+        callStack=state.stack;errorFlags=state.errorFlags;silentFlags=state.silent;
+    }
+    /** Physical-thread binding; closing never writes another thread's ThreadLocal slots. */
+    public final class FiberStateBinding implements AutoCloseable {
+        private final Thread owner=Thread.currentThread();
+        private final FiberState previous;
+        private PhpExecutionLineage.Binding lineageBinding;
+        private boolean closed;
+        private FiberStateBinding(FiberState state,FiberState caller) {
+            if(Environment.this.getClass()==ConcurrentEnvironment.class) {
+                ConcurrentEnvironment host=(ConcurrentEnvironment)Environment.this;
+                previous=host.activeFiberState();host.installFiberState(state);
+            } else {previous=caller;installOrdinaryFiberState(state);}
+            lineageBinding=PhpExecutionLineage.bind(state.lineage);
+        }
+        private void closeState(FiberState restored) {
+            if(closed)return;
+            if(Thread.currentThread()!=owner)throw new IllegalStateException("Foreign Fiber host-state restoration");
+            if(Environment.this.getClass()==ConcurrentEnvironment.class)((ConcurrentEnvironment)Environment.this).installFiberState(previous);
+            else installOrdinaryFiberState(restored);
+            lineageBinding.close();closed=true;
+        }
+        public void refreshLineage(FiberState restored) {
+            validateFiberState(restored);
+            if (closed || Thread.currentThread()!=owner) throw new IllegalStateException("Foreign or closed Fiber lineage refresh");
+            lineageBinding.close();lineageBinding=PhpExecutionLineage.bind(restored.lineage);
+        }
+        /** Delegated park restores the Fiber caller; delegated completion restores the blocked generator caller. */
+        public void closeTo(FiberState restored) {validateFiberState(restored);closeState(restored);}
+        @Override public void close() {closeState(previous);}
+    }
+    public final FiberStateBinding bindFiberState(FiberState state,FiberState caller) {
+        validateFiberState(state);validateFiberState(caller);return new FiberStateBinding(state,caller);
+    }
+
+    /** Output handler exclusion belongs to the output lineage, not the physical carrier. */
+    public boolean isOutputHandlerActive() {return defaultBuffer.__isRootHandlerActive();}
+    public void changeOutputHandlerDepth(int delta) {defaultBuffer.__changeRootHandlerDepth(delta);}
+    public final php.runtime.PhpFiberScheduler getFiberScheduler(boolean create) {
+        var value=fiberScheduler;
+        if(value==null && create)synchronized(threadBindings) {
+            value=fiberScheduler;
+            if(value==null) {
+                if(finalizationStarted || finalizationComplete)throw new IllegalStateException("Environment has retired");
+                fiberScheduler=value=new php.runtime.PhpFiberScheduler(this);
+            }
+        }
+        return value;
+    }
+
     public CallStack getCallStack() {
         return callStack;
     }
@@ -2649,7 +2825,7 @@ public class Environment {
 
     static {
         configurationHandler = new HashMap<String, ConfigChangeHandler>();
-        configurationHandler.put("include_path", new ConfigChangeHandler() {
+        INCLUDE_PATH_HANDLER = new ConfigChangeHandler() {
             @Override
             public void onChange(Environment env, Memory value) {
                 if (value == null)
@@ -2662,6 +2838,7 @@ public class Environment {
                     env.setIncludePaths(paths);
                 }
             }
-        });
+        };
+        configurationHandler.put("include_path",INCLUDE_PATH_HANDLER);
     }
 }

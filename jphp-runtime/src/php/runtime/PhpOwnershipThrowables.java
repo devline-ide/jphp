@@ -10,6 +10,10 @@ import java.util.*;
 /** Exact engine TypeError allocation and failure custody; native ancestry is not a capability. */
 public final class PhpOwnershipThrowables {
     private PhpOwnershipThrowables() {}
+    /** Exact engine implementations only; Throwable/TypeError ancestry alone never grants native custody. */
+    public static boolean isEngineThrowableType(Class<?> type) {
+        return type==BaseTypeError.class || type==BaseArgumentCountError.class;
+    }
     public record TraceFrame(CallStackItem metadata,List<PhpOwnershipValues.Binding> arguments) {
         public TraceFrame {Objects.requireNonNull(metadata);arguments=List.copyOf(arguments);}
     }
@@ -18,6 +22,7 @@ public final class PhpOwnershipThrowables {
         private final PhpOwnershipArrays arrays;
         private final Environment originEnvironment;
         private final BaseTypeError object;
+        private final Class<?> implementation;
         private final ClassEntity entity;
         private final PhpOwnership.Node node;
         private final ArrayMemory properties;
@@ -28,7 +33,7 @@ public final class PhpOwnershipThrowables {
         private boolean initialized;
         private Certificate(PhpOwnershipExecution.Session session,BaseTypeError object,ArrayMemory properties,
                             PhpOwnershipArrays.StorageCertificate storage) {
-            this.domain=session.domain();this.arrays=session.arrays();this.originEnvironment=session.environment();this.object=object;this.entity=object.getReflection();this.properties=properties;this.storage=storage;
+            this.domain=session.domain();this.arrays=session.arrays();this.originEnvironment=session.environment();this.object=object;this.implementation=object.getClass();this.entity=object.getReflection();this.properties=properties;this.storage=storage;
             node=session.domain().object(object,new PhpOwnershipDomain.Lifecycle() {
                 @Override public void destroy(PhpOwnership.Node ignored,Object releasing) {
                     custody=null;object.clearOwnershipThrowable(Certificate.this);
@@ -37,13 +42,13 @@ public final class PhpOwnershipThrowables {
         }
         public PhpOwnership.Node node(){return node;}
         public void validateBinding(PhpOwnershipDomain domain,PhpOwnership.Node actual,php.runtime.lang.IObject identity) {
-            if(domain!=this.domain || actual!=node || identity!=object || object.getClass()!=BaseTypeError.class
+            if(domain!=this.domain || actual!=node || identity!=object || object.getClass()!=implementation || entity.getNativeClass()!=implementation
                     || object.getOwnershipThrowable()!=this || object.getReflection()!=entity || object.getEnvironment()!=originEnvironment || !initialized || node.state()==PhpOwnership.State.DISPOSED)
                 throw new IllegalArgumentException("TypeError allocation lacks its exact complete native origin");
             if(arrays.certificate(properties)!=storage)throw new IllegalArgumentException("Native throwable backing certificate changed");
         }
         public void validateAttachment(BaseBaseException actual,ArrayMemory table) {
-            if(actual!=object || actual.getClass()!=BaseTypeError.class || table!=properties || initialized)
+            if(actual!=object || actual.getClass()!=implementation || table!=properties || initialized)
                 throw new IllegalArgumentException("Native TypeError attachment is not its private allocation");
             if(arrays.certificate(table)!=storage)throw new IllegalArgumentException("Native throwable backing certificate changed");
         }
@@ -78,7 +83,7 @@ public final class PhpOwnershipThrowables {
         }
     }
     public static Certificate certificate(Throwable error) {
-        if(error==null || error.getClass()!=BaseTypeError.class)return null;
+        if(error==null || !isEngineThrowableType(error.getClass()))return null;
         return ((BaseTypeError)error).getOwnershipThrowable();
     }
     static Certificate require(PhpOwnershipExecution.Session session,BaseBaseException error) {
@@ -109,10 +114,18 @@ public final class PhpOwnershipThrowables {
     }
     public static BaseTypeError typeError(PhpOwnershipExecution.Session session,ClassEntity entity,
                                            TraceInfo trace,String message)throws Throwable {
+        return engineError(session,entity,trace,message,BaseTypeError.class,"TypeError");
+    }
+    public static BaseArgumentCountError argumentCountError(PhpOwnershipExecution.Session session,ClassEntity entity,
+                                                           TraceInfo trace,String message)throws Throwable {
+        return (BaseArgumentCountError)engineError(session,entity,trace,message,BaseArgumentCountError.class,"ArgumentCountError");
+    }
+    private static BaseTypeError engineError(PhpOwnershipExecution.Session session,ClassEntity entity,
+                                            TraceInfo trace,String message,Class<? extends BaseTypeError> implementation,String phpName)throws Throwable {
         Objects.requireNonNull(session);Objects.requireNonNull(entity);Objects.requireNonNull(message);
-        if(entity.getNativeClass()!=BaseTypeError.class || session.environment().fetchClass(BaseTypeError.class)!=entity
-                || !"TypeError".equals(entity.getName()) || entity.methodDestruct!=null)
-            throw new IllegalArgumentException("Engine TypeError class differs from its exact trusted native contract");
+        if(!isEngineThrowableType(implementation) || entity.getNativeClass()!=implementation
+                || session.environment().fetchClass(implementation)!=entity || !phpName.equals(entity.getName()) || entity.methodDestruct!=null)
+            throw new IllegalArgumentException("Engine throwable class differs from its exact trusted native contract");
         var entry=PhpOwnershipExecution.currentEntry(session.environment());
         if(entry==null || entry.session()!=session)throw new IllegalArgumentException("Engine TypeError needs its actual releasing entry");
         List<TraceFrame> frames=session.captureThrowableTrace();
@@ -150,7 +163,8 @@ public final class PhpOwnershipThrowables {
                 if(property==null || property.getGetter()!=null || property.isStatic())throw new IllegalArgumentException("Native TypeError property descriptor changed");
                 var entryProperty=props.insertBucket(property.getSpecificName(),session.value(values[i]));if(names[i].equals("previous"))previous=entryProperty;
             }
-            BaseTypeError error=new BaseTypeError(session.environment(),entity);
+            BaseTypeError error=implementation==BaseTypeError.class ? new BaseTypeError(session.environment(),entity)
+                    : new BaseArgumentCountError(session.environment(),entity);
             certificate=new Certificate(session,error,props.array(),props.certificate());certificate.previous=previous;
             allocation=session.domain().hostValue(certificate.node,new ObjectMemory(error));
             var exact=certificate;var owned=allocation;

@@ -343,7 +343,52 @@ public class LangFunctions extends FunctionsContainer {
         }
     }
 
+    private static ClassEntity definedClassScope(Environment env) {
+        CallStackItem active=env.peekCall(0);
+        // A global function ends lexical class scope; do not search through its caller.
+        if(active!=null && active.object instanceof php.runtime.lang.Closure) {
+            String scope=((php.runtime.lang.Closure)active.object).getScope();
+            return scope==null?null:env.fetchClass(scope,false,php.runtime.common.PhpLanguageProfile.PHP_8_5);
+        }
+        return env.__getContextClass(0);
+    }
+
     public static boolean defined(Environment env, String name) {
+        int separator=name.indexOf("::");
+        if(separator<0)return env.findConstant(name)!=null;
+        var executing=php.runtime.PhpPropertyWriteContext.current(env);
+        TraceInfo trace=executing==null?env.trace():executing.trace;
+        if (env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
+            {
+                if(separator==0 || name.indexOf('\0')>=0) return false;
+                String className=name.substring(0,separator),member=name.substring(separator+2);
+                ClassEntity receiver;
+                String keyword=className.toLowerCase(java.util.Locale.ROOT);
+                if(keyword.equals("self")||keyword.equals("parent")||keyword.equals("static")) {
+                    ClassEntity context=definedClassScope(env);
+                    if(context==null) {
+                        env.exception(trace,php.runtime.lang.exception.BaseError.class,
+                                "Cannot access \"%s\" when no class scope is active",keyword);return false;
+                    }
+                    receiver=keyword.equals("self")?context:keyword.equals("parent")?context.getParent():env.getLateStaticClass();
+                    if(receiver==null) {
+                        env.exception(trace,php.runtime.lang.exception.BaseError.class,
+                                "Cannot access \"parent\" when current class scope has no parent");return false;
+                    }
+                } else receiver=env.fetchClass(className.startsWith("\\")?className.substring(1):className,
+                        true,php.runtime.common.PhpLanguageProfile.PHP_8_5);
+                if(receiver==null || receiver.isTrait())return false;
+                ConstantEntity constant=receiver.findConstant(member);
+                if(constant==null)return false;
+                ClassEntity scope=definedClassScope(env),owner=constant.getClazz();
+                boolean accessible=constant.isPublic()||scope!=null&&(constant.isPrivate()
+                        ?scope.getId()==owner.getId():scope.isInstanceOf(owner)||owner.isInstanceOf(scope));
+                if(!accessible)return false;
+                // PHP resolves a deferred declaration (and propagates its failure); this is not a read-deprecation site.
+                constant.getValue(env,trace);
+                return true;
+            }
+        }
         Memory value = env.findConstant(name);
         return value != null;
     }
@@ -371,7 +416,7 @@ public class LangFunctions extends FunctionsContainer {
                     : env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
                         ? constant.getValue(env, trace) : constant.getValue();
         } else {
-            Memory value = env.findConstant(name);
+            Memory value = env.readConstant(name, trace);
             if (value == null)
                 return Memory.NULL;
             else
@@ -484,6 +529,7 @@ public class LangFunctions extends FunctionsContainer {
     }
 
     public static Memory get_resource_type(@Reference Memory memory) {
+        memory = memory.toValue();
         if (memory.isObject()) {
             if (((ObjectMemory) memory).value instanceof Resource)
                 return new StringMemory(
@@ -795,7 +841,7 @@ public class LangFunctions extends FunctionsContainer {
     }
 
     public static boolean class_exists(Environment env, String name, boolean autoload) {
-        ClassEntity entity = env.fetchClass(name, autoload);
+        ClassEntity entity = env.fetchClass(PhpClassNames.lookupName(env, name), autoload);
         return entity != null && entity.isClass();
     }
 
@@ -804,7 +850,7 @@ public class LangFunctions extends FunctionsContainer {
     }
 
     public static boolean interface_exists(Environment env, String name, boolean autoload) {
-        ClassEntity entity = env.fetchClass(name, autoload);
+        ClassEntity entity = env.fetchClass(PhpClassNames.lookupName(env, name), autoload);
         return entity != null && entity.isInterface();
     }
 
@@ -813,7 +859,7 @@ public class LangFunctions extends FunctionsContainer {
     }
 
     public static boolean trait_exists(Environment env, String name, boolean autoload) {
-        ClassEntity entity = env.fetchClass(name, autoload);
+        ClassEntity entity = env.fetchClass(PhpClassNames.lookupName(env, name), autoload);
         return entity != null && entity.isTrait();
     }
 
@@ -1071,7 +1117,8 @@ public class LangFunctions extends FunctionsContainer {
 
     public static Memory get_object_vars(Environment env, TraceInfo trace, Memory object) {
         if (expecting(env, trace, 1, object, Memory.Type.OBJECT)) {
-            ObjectMemory o = object.toValue(ObjectMemory.class);
+            ObjectMemory o = new ObjectMemory(php.runtime.PhpLazyObjects.observeUnchecked(env,object.toValue(ObjectMemory.class).value,
+                    php.runtime.PhpLazyObjects.Observation.PROPERTIES));
             ArrayMemory props = o.value.getProperties();
             ClassEntity entity = o.getReflection();
 

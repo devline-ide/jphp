@@ -22,5 +22,6 @@ public class DateExtension extends Extension {
     @Override
     public void onRegister(CompileScope scope) {
         registerFunctions(new DateFunctions());
+        org.develnext.jphp.zend.ext.standard.date.PhpDateProvider.register(scope,this);
     }
 }

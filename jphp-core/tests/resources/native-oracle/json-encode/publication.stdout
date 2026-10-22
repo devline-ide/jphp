@@ -1,0 +1,4 @@
+["callback-throw-no-throwflag","Tjs=",["Exception",0,"encode-publication-callback"],0,"No error",["publication-throw"]]
+["callback-throw-partial-and-throwflag","Tjs=",["Exception",0,"encode-publication-callback"],0,"No error",["publication-throw"]]
+["nonfinite-then-callback-throw-no-throwflag","Tjs=",["Exception",0,"encode-publication-callback"],7,"Inf and NaN cannot be JSON encoded",["publication-throw"]]
+["nonfinite-then-callback-throw-throwflag","Tjs=",["JsonException",7,"Inf and NaN cannot be JSON encoded"],4,"Syntax error",["publication-throw"]]

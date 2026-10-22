@@ -1,0 +1,7 @@
+["list",[["reset",11,0,11],["next",22,1,22],["reset",11,0,11],["end",33,2,33],["reset",11,0,11],["next",22,1,22],["next",33,2,33],["next",false,null,false],["reset",11,0,11],["next",22,1,22]]]
+["map",[["reset",11,"a",11],["next",22,"b",22],["reset",11,"a",11],["end",33,"c",33],["reset",11,"a",11],["next",22,"b",22],["next",33,"c",33],["next",false,null,false],["reset",11,"a",11],["next",22,"b",22]]]
+["holey",[["reset",11,0,11],["next",33,2,33],["reset",11,0,11],["end",33,2,33],["reset",11,0,11],["next",33,2,33],["next",false,null,false],["next",false,null,false],["reset",11,0,11],["next",33,2,33]]]
+["empty",[["reset",false,null,false],["next",false,null,false],["reset",false,null,false],["end",false,null,false],["reset",false,null,false],["next",false,null,false],["next",false,null,false],["next",false,null,false],["reset",false,null,false],["next",false,null,false]]]
+["false-first",[["reset",false,0,false],["next",0,1,0],["reset",false,0,false],["end","",2,""],["reset",false,0,false],["next",0,1,0],["next","",2,""],["next",false,null,false],["reset",false,0,false],["next",0,1,0]]]
+["cow",22,22,"b",22,"b",22]
+["alias",22,"b",22,"b",22]

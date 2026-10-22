@@ -109,6 +109,10 @@ public @interface Reflection {
     }
 
     @Retention(RetentionPolicy.RUNTIME)
+    @Target(TYPE)
+    public @interface InternalInterface {}
+
+    @Retention(RetentionPolicy.RUNTIME)
     @Target({FIELD, METHOD})
     public @interface Property {
         String value() default "";

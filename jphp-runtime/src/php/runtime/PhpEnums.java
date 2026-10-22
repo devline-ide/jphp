@@ -34,17 +34,19 @@ public final class PhpEnums {
         return state.construction;
     }
     public static Memory resolveCase(ConstantEntity declaration, Environment env) {
-        requireUnownedExecution(env);
-        State active=env.getEnumState(declaration.getClazz(),false);
-        if(declaration.getClazz().getEnumBackingType()!=null && (active==null || !active.backingInitializing))
-            backing(env,declaration.getClazz());
-        return createCase(declaration,env);
+        try (var admission=env.enterCallbackDomain()) {
+            requireUnownedExecution(env);
+            State active=env.getEnumState(declaration.getClazz(),false);
+            if(declaration.getClazz().getEnumBackingType()!=null && (active==null || !active.backingInitializing))
+                backing(env,declaration.getClazz());
+            return createCase(declaration,env);
+        }
     }
     private static Memory createCase(ConstantEntity declaration, Environment env) {
         ClassEntity clazz = declaration.getClazz();
         if (clazz == null || !clazz.isEnum() || !declaration.isEnumCase())
             throw new IllegalArgumentException("Expected an enum case declaration");
-        synchronized (env.getClassInitializationLock()) {
+        try(var admission=env.enterCallbackDomain()) {
             State state = env.getEnumState(clazz, true);
             ObjectMemory previous = state.cases.get(declaration.getName());
             if (previous != null) return previous;
@@ -68,12 +70,14 @@ public final class PhpEnums {
         }
     }
     public static Memory cases(Environment env, String className) {
-        requireUnownedExecution(env);
-        ClassEntity clazz = enumClass(env,className);
-        ArrayMemory result = new ArrayMemory();
-        for (ConstantEntity constant : clazz.getConstants())
-            if (constant.isEnumCase() && constant.getClazz() == clazz) result.add(createCase(constant,env));
-        return result.toConstant();
+        try (var admission=env.enterCallbackDomain()) {
+            requireUnownedExecution(env);
+            ClassEntity clazz = enumClass(env,className);
+            ArrayMemory result = new ArrayMemory();
+            for (ConstantEntity constant : clazz.getConstants())
+                if (constant.isEnumCase() && constant.getClazz() == clazz) result.add(createCase(constant,env));
+            return result.toConstant();
+        }
     }
     private static ClassEntity enumClass(Environment env, String className) {
         ClassEntity clazz = env.fetchClass(className,true,php.runtime.common.PhpLanguageProfile.PHP_8_5);
@@ -90,7 +94,7 @@ public final class PhpEnums {
         @Override public boolean equals(Object value) {return value instanceof ByteKey other && Arrays.equals(bytes,other.bytes);}
     }
     private static State backing(Environment env,ClassEntity clazz) {
-        synchronized (env.getClassInitializationLock()) {
+        try(var admission=env.enterCallbackDomain()) {
             State state=env.getEnumState(clazz,true);
             if(state.backingReady)return state;
             if(state.backingInitializing)env.exception(clazz.getTrace(),BaseError.class,"Cannot initialize self-referencing enum %s",clazz.getName());
@@ -112,18 +116,20 @@ public final class PhpEnums {
         }
     }
     public static Memory from(Environment env,String className,Memory[] arguments,boolean nullable) {
-        ClassEntity clazz=enumClass(env,className);
-        String method=nullable?"tryFrom":"from";
-        // The dispatcher prepares the argument under the original caller's strictness before entering this body.
-        Memory value=arguments[0];
-        State state=backing(env,clazz);
-        if(clazz.getEnumBackingType().equals("string") && value.getRealType()==Memory.Type.INT)value=StringMemory.valueOf(Long.toString(value.toLong()));
-        ObjectMemory actual=state.backing.get(key(value));
-        if(actual!=null)return actual;
-        if(nullable)return Memory.NULL;
-        String printed=value.isString()?"\""+value.toString()+"\"":value.toString();
-        env.exception(env.trace(),BaseValueError.class,"%s is not a valid backing value for enum %s",printed,clazz.getName());
-        return Memory.NULL;
+        try (var admission=env.enterCallbackDomain()) {
+            ClassEntity clazz=enumClass(env,className);
+            String method=nullable?"tryFrom":"from";
+            // The dispatcher prepares the argument under the original caller's strictness before entering this body.
+            Memory value=arguments[0];
+            State state=backing(env,clazz);
+            if(clazz.getEnumBackingType().equals("string") && value.getRealType()==Memory.Type.INT)value=StringMemory.valueOf(Long.toString(value.toLong()));
+            ObjectMemory actual=state.backing.get(key(value));
+            if(actual!=null)return actual;
+            if(nullable)return Memory.NULL;
+            String printed=value.isString()?"\""+value.toString()+"\"":value.toString();
+            env.exception(env.trace(),BaseValueError.class,"%s is not a valid backing value for enum %s",printed,clazz.getName());
+            return Memory.NULL;
+        }
     }
     public static boolean generatedMethod(MethodEntity method) {
         if(method==null || method.getClazz()==null || !method.getClazz().isEnum())return false;

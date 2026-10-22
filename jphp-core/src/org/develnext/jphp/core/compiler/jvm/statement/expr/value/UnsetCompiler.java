@@ -59,6 +59,7 @@ public class UnsetCompiler extends BaseExprCompiler<UnsetExprToken> {
                 expr.checkAssignableVar(variable);
                 LocalVariable local = method.getLocalVariable(variable.getName());
 
+                var sessionUnset=method.ownership().unsetLocal(node.instructions,local);
                 if (local.isReference() && method.ownership().runtimeEnabled()) {
                     add(new VarInsnNode(Opcodes.ALOAD, method.ownership().runtimeFrameIndex()));
                     add(new LdcInsnNode(local.index));
@@ -74,10 +75,13 @@ public class UnsetCompiler extends BaseExprCompiler<UnsetExprToken> {
                     expr.writeSysDynamicCall(Memory.class, "manualUnset", void.class, Environment.class);
                 }
                 if (!local.isReference()) {
-                    expr.writePushNull();
+                    if(compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5
+                            && methodStatement.variable(variable).isExplicitValueCapture())expr.writePushMemory(Memory.UNDEFINED);
+                    else expr.writePushNull();
                     expr.writeVarAssign(local, null, false, false);
                 }
 
+                method.ownership().endUnsetLocal(node.instructions,sessionUnset);
                 local.setValue(null);
             } else if (param.isSingle() && param.getSingle() instanceof GetVarExprToken){
                 expr.writeValue((ValueExprToken) param.getSingle(), true);

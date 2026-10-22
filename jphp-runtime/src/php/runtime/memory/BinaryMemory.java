@@ -101,6 +101,6 @@ public class BinaryMemory extends StringMemory {
 
     @Override
     public boolean toBoolean() {
-        return (bytes != null && bytes.length > 0 && bytes[0] != '0');
+        return (bytes != null && bytes.length > 0 && (bytes.length != 1 || bytes[0] != '0'));
     }
 }

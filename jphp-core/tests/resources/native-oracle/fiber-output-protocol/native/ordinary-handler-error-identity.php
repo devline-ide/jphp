@@ -1,0 +1,1 @@
+<?php ob_start(function($s){throw new Exception('handler-primary');});echo 'A';try{ob_end_flush();}catch(Throwable $e){echo '|',$e->getMessage();}echo '|Z';

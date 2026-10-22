@@ -1,0 +1,2 @@
+<?php
+foreach(['ArrayObject','ArrayIterator']as$container){$events=[];set_error_handler(static function($code,$message)use(&$events){$events[]=[$code,$message];return true;});try{$backing=new $container(new DateTime('2024-01-01 UTC'));$result='accepted';}catch(Throwable$error){$result=[get_class($error),$error->getMessage()];}restore_error_handler();echo json_encode([$container,$events,$result],JSON_UNESCAPED_SLASHES),"\n";}

@@ -380,6 +380,13 @@ public final class OwnershipFrameCompiler {
         code.add(new MethodInsnNode(INVOKESTATIC,"php/runtime/PhpRuntimeOwnership","bindStaticLocal","(Lphp/runtime/PhpRuntimeOwnership$Frame;ILjava/lang/String;"+MEMORY+MEMORY+")"+MEMORY,false));
     }
     private static final String RUNTIME="php/runtime/PhpRuntimeOwnership";
+    public LabelNode activeParameterDefault(InsnList code,int index) {
+        if(!enabled())return null;
+        LabelNode fallback=guardActive(code);
+        code.add(new VarInsnNode(ALOAD,entry.index));code.add(new LdcInsnNode(index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,ENTRY,"parameterDefault","(I)"+MEMORY,false));
+        return fallback;
+    }
     public int reserveRuntimeEval(){return 4_000_000+runtimeEvaluationSequence++;}
     public int runtimeFrameIndex(){if(runtimeFrame==null)runtimeFrame=method.addLocalVariable("~runtimeOwnershipFrame",null,Object.class);return runtimeFrame.index;}
     private int importIndex = -1;
@@ -417,6 +424,30 @@ public final class OwnershipFrameCompiler {
     public boolean enabled() {
         return !passiveEmission && !"<init>".equals(method.node.name) && !"<clinit>".equals(method.node.name)
                 && (method.statement != null || method.isInitializer()) && method.getCompiler().getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
+    }
+
+    private final Set<Integer> receiverImports = new LinkedHashSet<>();
+    /** Import only the actual JVM receiver into its planned ADDRESS CV, under the real Session Ticket. */
+    public LabelNode receiverImport(InsnList code, LocalVariable local) {
+        if (!enabled() || runtimeLifecycleEnabled() || method.clazz.isClosure() || method.getGeneratorEntity() != null
+                || method.statement == null || method.statement.isStatic() || !local.name.equals("this")
+                || !local.isOwnershipLocal()) return null;
+        LabelNode fallback = guardActive(code), active = new LabelNode(), end = new LabelNode();
+        code.add(active);
+        code.add(new VarInsnNode(ALOAD, entry.index)); code.add(new LdcInsnNode(local.index));
+        code.add(new VarInsnNode(ALOAD, method.getLocalVariable("~this").index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL, ENTRY, "importReceiver", "(ILphp/runtime/lang/IObject;)" + MEMORY, false));
+        code.add(new VarInsnNode(ASTORE, local.index)); code.add(end);
+        runtimeActiveBranch(active, end);
+        if (!receiverImports.add(local.index)) throw new IllegalStateException("Receiver CV imported twice");
+        return fallback;
+    }
+    /** The active import proved non-null; preserve the complete ordinary error path otherwise. */
+    public void receiverReadGuard(InsnList code, LocalVariable local, LabelNode present) {
+        if (!enabled() || local == null || !receiverImports.contains(local.index)) return;
+        LabelNode ordinary = new LabelNode();
+        code.add(new VarInsnNode(ALOAD, entry.index)); code.add(new JumpInsnNode(IFNONNULL, present));
+        code.add(ordinary); passiveAddressRanges.put(ordinary, present);
     }
 
     void defineEntry(LabelNode start) {
@@ -490,6 +521,55 @@ public final class OwnershipFrameCompiler {
     public void beginPassive() { if (passiveEmission) throw new IllegalStateException("Nested passive frame emission"); passiveEmission = true; }
     public void endPassive(LabelNode start, LabelNode end) { passiveEmission = false; passiveAddressRanges.put(start, end); }
 
+    /** Named actual EVAL and declaration dependency, consumed through the existing CV/SEND/RETURN routes. */
+    public int closureEvaluation(int closureId,boolean cells) {
+        if(!enabled())throw new IllegalStateException("Lexical producer requires an emitted Session frame");
+        int id=1_000_000+evaluations.size();evaluations.add(id);unconsumedEvaluations.add(id);
+        functionDependencies.add((cells?"closure-capture-producer-v2:":"closure-value-producer-v1:")+id+":"+closureId);return id;
+    }
+    public int entryIndex(){if(entry==null)throw new IllegalStateException("Entry local was not defined");return entry.index;}
+    /** Only exact calls emitted by the active producer arm, not a class/name whitelist. */
+    public void closureProducerCall(MethodInsnNode call) {
+        String allocation="php/runtime/PhpOwnershipClosures$SessionAllocation";
+        if(call.getOpcode()!=INVOKEVIRTUAL || !call.owner.equals(allocation)
+                || !(call.name.equals("capture") && call.desc.equals("(II"+MEMORY+"[Lphp/runtime/env/TraceInfo;I)V")
+                    || call.name.equals("captureReference") && call.desc.equals("(II"+MEMORY+")V")
+                    || call.name.equals("complete") && call.desc.equals("()"+MEMORY)))
+            throw new IllegalArgumentException("Not this lexical VALUE producer helper");
+        passiveCalls.add(call);
+    }
+    /** Keep the canonical capture on the active route; the ordinary wrapper/import route is unchanged. */
+    public LabelNode[] captureReferenceHeader(InsnList code,LocalVariable local,int index) {
+        if(!enabled())return null;scratch();imports.put(local.index,new Import(index,true,true));
+        LabelNode fallback=new LabelNode(),active=new LabelNode(),end=new LabelNode();
+        code.add(new VarInsnNode(ASTORE,candidate.index));
+        code.add(new VarInsnNode(ALOAD,entry.index));code.add(new JumpInsnNode(IFNULL,fallback));code.add(active);
+        code.add(new VarInsnNode(ALOAD,entry.index));code.add(new LdcInsnNode(index));code.add(new LdcInsnNode(local.index));
+        code.add(new VarInsnNode(ALOAD,candidate.index));code.add(new InsnNode(ICONST_1));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,ENTRY,"importCapture","(II"+MEMORY+"I)"+MEMORY,false));
+        code.add(new VarInsnNode(ASTORE,local.index));code.add(new JumpInsnNode(GOTO,end));code.add(fallback);
+        code.add(new VarInsnNode(ALOAD,candidate.index));runtimeActiveBranch(active,fallback);
+        return new LabelNode[]{fallback,end};
+    }
+    public void endCaptureReferenceHeader(InsnList code,LabelNode[] branch) {
+        if(branch!=null){code.add(branch[1]);passiveAddressRanges.put(branch[0],branch[1]);}
+    }
+    /** Active-only raw owner unlink; old manualUnset/Authority behavior remains in the fallback. */
+    public LabelNode[] unsetLocal(InsnList code,LocalVariable local) {
+        if(!enabled() || !local.isOwnershipLocal() || !address(local))return null;
+        LabelNode fallback=guardActive(code),active=new LabelNode(),end=new LabelNode();code.add(active);
+        code.add(new VarInsnNode(ALOAD,entry.index));code.add(new LdcInsnNode(local.index));code.add(new VarInsnNode(ALOAD,local.index));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,ENTRY,"unsetLocal","(I"+MEMORY+")V",false));
+        code.add(new JumpInsnNode(GOTO,end));code.add(fallback);runtimeActiveBranch(active,fallback);
+        functionDependencies.add("lexical-cv-unset-v2:"+local.index);return new LabelNode[]{fallback,end};
+    }
+    public void endUnsetLocal(InsnList code,LabelNode[] branch) {
+        if(branch!=null){code.add(branch[1]);passiveAddressRanges.put(branch[0],branch[1]);}
+    }
+    private boolean captureClosureImports() {
+        return method.clazz.isClosure() && method.statement!=null && !method.statement.isThisExists()
+                && method.statement.getStaticLocal().isEmpty() && !method.statement.isGenerator();
+    }
     public int functionFrame(InsnList code, String name, int arity) {
         if (entry == null) { method.reserveEmittedLocals(); entry = method.addLocalVariable("~ownershipEntry", null, Object.class); }
         int id = 1_000_000 + evaluations.size(); evaluations.add(id); unconsumedEvaluations.add(id);
@@ -542,11 +622,11 @@ public final class OwnershipFrameCompiler {
         code.add(new VarInsnNode(ALOAD, entry.index)); code.add(new JumpInsnNode(IFNULL, legacy));
         code.add(new VarInsnNode(ALOAD, entry.index));
         if (evalId >= 0) code.add(new LdcInsnNode(evalId));
-        else if (importIndex >= 0 && !captureImport) code.add(new LdcInsnNode(importIndex));
+        else if (importIndex >= 0 && !address(local)) code.add(new LdcInsnNode(importIndex));
         code.add(new LdcInsnNode(local.index)); code.add(new VarInsnNode(ALOAD, candidate.index));
         code.add(new InsnNode(address(local) ? ICONST_2 : referenceImport && importIndex >= 0 ? ICONST_1 : ICONST_0));
-        String name = evalId >= 0 ? "prepareLocalFromEval" : importIndex >= 0 && !captureImport && !address(local) ? "prepareImportedArgument" : "prepareLocal";
-        String desc = evalId >= 0 || name.equals("prepareImportedArgument") ? "(II" + MEMORY + "I)L" + PUBLICATION + ";" : "(I" + MEMORY + "I)L" + PUBLICATION + ";";
+        String name = evalId >= 0 ? "prepareLocalFromEval" : importIndex >= 0 && !address(local) ? captureImport ? "prepareImportedCapture" : "prepareImportedArgument" : "prepareLocal";
+        String desc = evalId >= 0 || name.equals("prepareImportedArgument") || name.equals("prepareImportedCapture") ? "(II" + MEMORY + "I)L" + PUBLICATION + ";" : "(I" + MEMORY + "I)L" + PUBLICATION + ";";
         // ADDRESS initialization is an address reservation, not an argument import.
         if (importIndex >= 0 && !captureImport && address(local)) throw new IllegalStateException("Address import must use assignLocal");
         code.add(new MethodInsnNode(INVOKEVIRTUAL, ENTRY, name, desc, false));
@@ -979,7 +1059,16 @@ public final class OwnershipFrameCompiler {
         }catch(IOException impossible){throw new IllegalStateException(impossible);}
     }
 
+    // These calls have effects. Their helper validates the defined physical site and publishes actual VALUE custody.
+    private final Set<MethodInsnNode> constantReads=Collections.newSetFromMap(new IdentityHashMap<>());
+    public void constantRead(MethodInsnNode call) {
+        if(call.getOpcode()!=INVOKESTATIC || !call.owner.equals(php.runtime.PhpConstantReads.OWNER)
+                || !call.name.equals("fetch") || !call.desc.equals(php.runtime.PhpConstantReads.DESCRIPTOR))
+            throw new IllegalArgumentException("Constant read lost its typed effect helper");
+        constantReads.add(call);
+    }
     private boolean ordinaryPure(MethodInsnNode call) {
+        if(constantReads.contains(call))return true;
         if(runtimeNamedGlobals.stream().anyMatch(item->item.helper()==call)||runtimeEntryStrings.values().stream().anyMatch(item->item.helper()==call)||runtimeReturnBoundaries.containsKey(call))return true;
         if(runtimeComparisonFallbacks.contains(call))return true;
         if(runtimeLifecycleDiscards.values().stream().anyMatch(item->item.exception()==call))return true;
@@ -1050,21 +1139,22 @@ public final class OwnershipFrameCompiler {
                 out.writeInt(imp == null ? -1 : imp.index); out.writeUTF(imp != null && imp.reference ? "CELL" : "VALUE");
             }
             Set<String> required = new LinkedHashSet<>(); required.add("frame-local-publication-v1"); required.addAll(functionDependencies);
+            if (!receiverImports.isEmpty()) required.add("invocation-receiver-import-v1");
             if(!runtimeEchoes.isEmpty())required.add("literal-buffered-output");
             if (!thrownCustodies.isEmpty()) required.add("php-throwable-custody-v1");
             if (method.statement != null && method.statement.isDynamicLocal()) required.add("empty-tick-handler");
             Set<String> unsupported = new LinkedHashSet<>();
             for (int id : unconsumedEvaluations) unsupported.add("unlowered-eval-consumer:" + id);
-            if (referencePromotion || method.getEntity().isReturnReference() || imports.values().stream().anyMatch(i -> i.reference)) unsupported.add("local-reference-promotion-and-rebind");
+            if (referencePromotion || method.getEntity().isReturnReference() || imports.values().stream().anyMatch(i -> i.reference && !i.capture)) unsupported.add("local-reference-promotion-and-rebind");
             Set<String> names = new HashSet<>();
             for (LocalVariable local : locals) {
                 if (!names.add(local.name)) unsupported.add("multiple-jvm-slots-for-cv:" + local.name);
-                if (local.name.equals("this")) unsupported.add("receiver-local-import");
+                if (local.name.equals("this") && !receiverImports.contains(local.index)) unsupported.add("receiver-local-import");
                 if (method.getCompiler().getScope().superGlobals.contains(local.name)) unsupported.add("global-cell-import:" + local.name);
             }
             if (method.statement != null && method.statement.isGenerator()) unsupported.add("generator-handoff");
             if (method.statement != null && !method.statement.getArguments().isEmpty() && method.statement.getArguments().stream().anyMatch(a -> a.getValue() != null && !a.getValue().isSingle())) unsupported.add("unstaged-default-initializer");
-            if (method.clazz.isClosure()) unsupported.add("closure-self-and-static-import");
+            if (method.clazz.isClosure()) {if(captureClosureImports())required.add(method.statement.getUses().stream().anyMatch(capture->capture.isReference())?"closure-capture-import-v2":"closure-value-import-v1");else unsupported.add("closure-self-and-static-import");}
             if (method.isExternal() || method.statement != null && method.statement.isModuleChunk()) unsupported.add("module-logical-frame");
             for (AbstractInsnNode instruction : method.node.instructions) {
                 if (passiveInstructions.contains(instruction)) continue;
@@ -1103,6 +1193,7 @@ public final class OwnershipFrameCompiler {
     }
 
     private boolean pure(MethodInsnNode call) {
+        if(constantReads.contains(call))return true;
         if (method.typedSources().isObserver(call)) return true;
         if (method.primitiveCells().isDiscardObserver(call)) return true;
         if (passiveCalls.contains(call) && isImmutableByteLiteral(call)) return true;

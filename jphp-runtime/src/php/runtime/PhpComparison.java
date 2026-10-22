@@ -84,7 +84,8 @@ public final class PhpComparison {
                 ObjectMemory left = a.toValue(ObjectMemory.class);
                 ObjectMemory right = b.toValue(ObjectMemory.class);
                 if (left.value == right.value) return 0;
-                if (left.getReflection().getId() != right.getReflection().getId()) return UNORDERED;
+                if (left.getReflection().getId() != right.getReflection().getId()
+                        && !(left.value instanceof php.runtime.lang.support.IPhpNativeDateView date && date.phpDateComparable(right.value))) return UNORDERED;
                 if (left.value instanceof IComparableObject) {
                     if (a.equal(b)) return 0;
                     if (a.smaller(b)) return -1;

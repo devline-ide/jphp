@@ -272,7 +272,10 @@ abstract public class ReflectionFunctionAbstract extends Reflection {
 
     private php.runtime.reflection.support.PhpTypeDeclaration tentativeReturnType() {
         return getEntity() instanceof php.runtime.reflection.MethodEntity
-                ? php.runtime.lang.spl.iterator.ArrayIterator.tentativeReturnType((php.runtime.reflection.MethodEntity) getEntity()) : null;
+                ? ((php.runtime.reflection.MethodEntity)getEntity()).getNativeMethod() != null
+                    && ((php.runtime.reflection.MethodEntity)getEntity()).getNativeMethod().getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayObject.class
+                    ? php.runtime.lang.spl.iterator.ArrayObject.tentativeReturnType((php.runtime.reflection.MethodEntity)getEntity())
+                    : php.runtime.lang.spl.iterator.ArrayIterator.tentativeReturnType((php.runtime.reflection.MethodEntity)getEntity()) : null;
     }
 
     @Signature

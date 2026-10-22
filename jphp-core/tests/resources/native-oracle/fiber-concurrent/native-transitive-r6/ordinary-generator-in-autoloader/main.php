@@ -1,0 +1,2 @@
+<?php
+$GLOBALS['events']=[];function buildRequestedClass($name){$GLOBALS['events'][]='generator-start';eval('class '.$name.' {const X=7;}');yield 1;$GLOBALS['events'][]='generator-end';}spl_autoload_register(function($name){$GLOBALS['events'][]='load:'.$name;foreach(buildRequestedClass($name)as$v)$GLOBALS['events'][]='yield:'.$v;});$GLOBALS['events'][]='value:'.GeneratorBuiltClass::X;echo json_encode($GLOBALS['events']);

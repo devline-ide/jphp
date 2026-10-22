@@ -33,11 +33,18 @@ public class ParameterEntity extends Entity {
     public void setPromoted(boolean value) {promoted=value;}
 
     /** An executable declaration-owned default, never a serialized Closure or PHP constant name. */
-    public record DefaultInitializer(String moduleName, String javaClass, String method, String declarationScope) {
+    public record DefaultInitializer(String moduleName, String javaClass, String method, String declarationScope, Kind kind) {
+        public enum Kind { PER_CALL, CONSTANT_EXPRESSION }
+        public DefaultInitializer(String moduleName, String javaClass, String method, String declarationScope) {
+            this(moduleName, javaClass, method, declarationScope, Kind.PER_CALL);
+        }
+        public boolean constantOnly() { return kind == Kind.CONSTANT_EXPRESSION; }
         public DefaultInitializer {
-            if (moduleName == null || moduleName.isEmpty() || javaClass == null || javaClass.isEmpty()
+            if (kind == null || moduleName == null || moduleName.isEmpty() || javaClass == null || javaClass.isEmpty()
                     || method == null || !method.startsWith("__$parameterDefault"))
                 throw new IllegalArgumentException("Invalid parameter default initializer");
+            if (method.startsWith("__$parameterDefault$constant$") != (kind == Kind.CONSTANT_EXPRESSION))
+                throw new IllegalArgumentException("Parameter default kind disagrees with its generated member");
         }
     }
 
@@ -55,6 +62,21 @@ public class ParameterEntity extends Entity {
             try {return session.invokeInitializer(this,trace);}
             catch (Throwable failure) {return ParameterEntity.<RuntimeException,Memory>raiseOwnershipFailure(failure);}
         }
+        if (init.constantOnly()) {
+            try (var admission = env.enterCallbackDomain()) {
+                var authority = env.getRuntimeOwnership();
+                try (var execution = authority == null ? null : authority.enter()) {
+                    var cached = php.runtime.PhpParameterDefaults.find(this, env);
+                    if (cached != null) return cached.value(env);
+                    Memory raw = evaluateInitializer(env, init);
+                    var published = php.runtime.PhpParameterDefaults.publish(this, env, raw);
+                    return published == null ? raw : published.value(env);
+                }
+            } catch (Throwable failure) { return ParameterEntity.<RuntimeException,Memory>raiseOwnershipFailure(failure); }
+        }
+        return evaluateInitializer(env, init);
+    }
+    private Memory evaluateInitializer(Environment env, DefaultInitializer init) {
         ModuleEntity module = env.getScope().getClassLoader().getModule(init.moduleName());
         if (module == null) throw new CriticalException("Parameter default module is not loaded");
         env.pushCall(trace, null, null, "{parameter-default}", init.declarationScope(), init.declarationScope());

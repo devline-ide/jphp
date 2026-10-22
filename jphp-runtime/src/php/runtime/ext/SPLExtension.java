@@ -28,6 +28,7 @@ public class SPLExtension extends Extension {
         registerClass(scope, RecursiveIterator.class);
         registerClass(scope, SeekableIterator.class);
         registerClass(scope, ArrayIterator.class);
+        registerClass(scope, ArrayObject.class);
         registerClass(scope, MultipleIterator.class);
         registerClass(scope, IteratorIterator.class);
         registerClass(scope, EmptyIterator.class);

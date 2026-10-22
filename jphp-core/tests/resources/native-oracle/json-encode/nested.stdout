@@ -1,0 +1,3 @@
+["nested-json-encode-this","czo1OiJmYWxzZSI7",null,0,"No error",["nested-self-enter",["nested-self-result","YjowOw==",6]]]
+["nested-json-encode-outer-array","czo3OiJbZmFsc2VdIjs=",null,0,"No error",["nested-outer-enter",["nested-outer-result","YjowOw==",6]]]
+["numeric-check-overflow-1e999","czozNzoiWyIxZTk5OSIsIi0xZTk5OSIsIisxZTk5OSIsIiAxZTk5OSAiXSI7",null,0,"No error",[]]

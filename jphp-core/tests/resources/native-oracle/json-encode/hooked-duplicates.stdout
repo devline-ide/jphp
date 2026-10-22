@@ -1,0 +1,15 @@
+{"x":4,"x":1}
+{"0":4,"0":1}
+[[8192,"Creation of dynamic property JDHookPrivate::$x is deprecated"],[8192,"Creation of dynamic property JDHookPrivate::$x is deprecated"]]
+[[8192,"Creation of dynamic property JDHookPrivate::$0 is deprecated"],[8192,"Creation of dynamic property JDHookPrivate::$0 is deprecated"]]
+[]
+{"hook":1,"x":4,"x":1}
+{"hook":1,"0":4,"0":1}
+[[8192,"Creation of dynamic property JDHookVirtual::$x is deprecated"],[8192,"Creation of dynamic property JDHookVirtual::$x is deprecated"]]
+[[8192,"Creation of dynamic property JDHookVirtual::$0 is deprecated"],[8192,"Creation of dynamic property JDHookVirtual::$0 is deprecated"]]
+["get:virtual","get:virtual"]
+{"hook":7,"x":4,"x":1}
+{"hook":7,"0":4,"0":1}
+[[8192,"Creation of dynamic property JDHookBacked::$x is deprecated"],[8192,"Creation of dynamic property JDHookBacked::$x is deprecated"]]
+[[8192,"Creation of dynamic property JDHookBacked::$0 is deprecated"],[8192,"Creation of dynamic property JDHookBacked::$0 is deprecated"]]
+["get:backed","get:backed"]

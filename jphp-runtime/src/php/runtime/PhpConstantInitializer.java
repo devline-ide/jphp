@@ -43,8 +43,9 @@ public final class PhpConstantInitializer {
         finally { state.references.remove(key); }
     }
     public static Memory resolve(ConstantEntity constant, Environment env) {
-        // Reuse class-registration lock order: an expression may recursively fetch/autoload a class.
-        synchronized (env.getClassInitializationLock()) {
+        Memory warm=env.getStatic(constant.getInternalName());
+        if(warm!=null)return warm.toValue();
+        try(var admission=env.enterCallbackDomain()) {
             Memory cached = env.getStatic(constant.getInternalName());
             if (cached != null) return cached.toValue();
             Memory value = constant.validateValue(env, constant.evaluateInitializer(env, constant.getClazz()), constant.getClazz(), false).toImmutable();

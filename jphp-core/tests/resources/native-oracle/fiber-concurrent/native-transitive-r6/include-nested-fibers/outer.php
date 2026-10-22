@@ -1,0 +1,2 @@
+<?php
+$GLOBALS['events'][]='outer-start';$inner=new Fiber(function(){return include __DIR__.'/inner.php';});$GLOBALS['events'][]=$inner->start();Fiber::suspend('outer-park');$inner->resume();$GLOBALS['events'][]='inner-ret:'.$inner->getReturn();$GLOBALS['events'][]='outer-end';return 9;

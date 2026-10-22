@@ -1,0 +1,7 @@
+["mb_trim","mbstring",1,3,"string",[["string","string",false,null],["characters","?string",true,null],["encoding","?string",true,null]]]
+["mb_ltrim","mbstring",1,3,"string",[["string","string",false,null],["characters","?string",true,null],["encoding","?string",true,null]]]
+["mb_rtrim","mbstring",1,3,"string",[["string","string",false,null],["characters","?string",true,null],["encoding","?string",true,null]]]
+["mb_ucfirst","mbstring",1,2,"string",[["string","string",false,null],["encoding","?string",true,null]]]
+["mb_lcfirst","mbstring",1,2,"string",[["string","string",false,null],["encoding","?string",true,null]]]
+["mb_internal_encoding","mbstring",0,1,"string|bool",[["encoding","?string",true,null]]]
+["grapheme_str_split","intl",1,2,"array|false",[["string","string",false,null],["length","int",true,1]]]

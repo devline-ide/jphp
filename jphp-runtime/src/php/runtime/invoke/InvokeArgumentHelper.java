@@ -180,6 +180,9 @@ public class InvokeArgumentHelper {
     private static Memory typeHintArg(Environment env, TraceInfo trace, ParameterEntity param,
                                       Memory arg, int i, String originClassName, String originMethodName, String staticClassName,
                                       boolean internalCall) {
+        // Fiber retains the resolved target; its native body owns callback acquisition and diagnostics.
+        if (i == 0 && "Fiber".equals(originClassName) && "__construct".equals(originMethodName)
+                && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) return arg;
         if (i == 0 && "Closure".equals(originClassName) && "fromCallable".equals(originMethodName)
                 && env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
                 && (arg.isArray() || arg.isString() || arg.isObject())) return arg;
@@ -236,7 +239,8 @@ public class InvokeArgumentHelper {
             return passed;
         }
         java.lang.reflect.Method member = method.getNativeMethod();
-        if (member == null || member.getDeclaringClass() != php.runtime.lang.spl.iterator.ArrayIterator.class
+        if (member == null || (member.getDeclaringClass() != php.runtime.lang.spl.iterator.ArrayIterator.class
+                    && member.getDeclaringClass() != php.runtime.lang.spl.iterator.ArrayObject.class)
                 || env.getModuleManager().getPhpLanguageProfile(trace) != php.runtime.common.PhpLanguageProfile.PHP_8_5)
             return makeArgumentsForTarget(env, args, method, parameters, originClassName, originMethodName, staticClassName, trace, internalCall);
         var bound = BoundArguments.current(env, args, method);
@@ -249,7 +253,7 @@ public class InvokeArgumentHelper {
             String range = minimum == maximum ? "exactly " + count
                     : supplied < minimum ? "at least " + count : "at most " + count;
             env.exception(trace, php.runtime.lang.exception.BaseArgumentCountError.class,
-                    "ArrayIterator::%s() expects %s argument%s, %d given", member.getName(), range,
+                    "%s::%s() expects %s argument%s, %d given", member.getDeclaringClass().getSimpleName(), member.getName(), range,
                     count == 1 ? "" : "s", supplied);
         }
         Memory[] passed = argsToPassed(env, trace, args, parameters);
@@ -267,14 +271,14 @@ public class InvokeArgumentHelper {
                 Memory converted = null;
                 if (!strict && value.isNull() && (type == HintType.INT || type == HintType.STRING)) {
                     env.error(trace == null ? TraceInfo.UNKNOWN : trace, ErrorType.E_DEPRECATED,
-                            "ArrayIterator::%s(): Passing null to parameter #%d ($%s) of type %s is deprecated",
-                            member.getName(), i + 1, parameter.getName(), parameter.getTypeChecker().getSignature());
+                            "%s::%s(): Passing null to parameter #%d ($%s) of type %s is deprecated",
+                            member.getDeclaringClass().getSimpleName(), member.getName(), i + 1, parameter.getName(), parameter.getTypeChecker().getSignature());
                     converted = type == HintType.INT ? php.runtime.memory.LongMemory.valueOf(0) : Memory.CONST_EMPTY_STRING;
                 } else if (parameter.getTypeChecker() != null) {
                     converted = parameter.getTypeChecker().apply(env, value, parameter.isNullableOrDefaultNull(), strict);
                 }
                 if (converted == null) invalidType(env, trace, parameter, i + 1, value,
-                        "ArrayIterator", member.getName(), true);
+                        member.getDeclaringClass().getSimpleName(), member.getName(), true);
                 else {
                     converted = php.runtime.PhpNumericConversions.checkedScalarCoercion(value, converted, env, trace);
                     if (converted.getRealType() == Memory.Type.INT) {

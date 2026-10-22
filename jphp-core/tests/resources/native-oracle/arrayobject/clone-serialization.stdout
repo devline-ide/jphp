@@ -1,0 +1,8 @@
+["clone-array","ok",[{"x":1,"n":{"v":1}},{"x":2,"n":{"v":3}},{"x":1,"n":{"v":1}}],[]]
+["clone-object","ok",[1,1,2],[[8192,"ArrayObject::__construct(): Using an object as a backing array for ArrayObject is deprecated, as it allows violating class constraints and invariants"]]]
+["clone-hook","ok",[1,2,{"x":1}],[]]
+["serialize-four-fields","ok",[[2,{"x":1,"p":3},[],"AoWireIterator"],"x:i:2;a:2:{s:1:\"x\";i:1;s:1:\"p\";i:3;};m:a:0:{}"],[]]
+["serialize-roundtrip","ok",["ArrayObject",2,"AoWireIterator",{"x":1,"p":3},"AoWireIterator"],[]]
+["explicit-unserialize","ok",[3,{"y":2},{"p":4},"AoWireIterator"],[[8192,"Creation of dynamic property ArrayObject::$p is deprecated"]]]
+["legacy-wire-method","ok",["x:i:1;a:1:{s:1:\"x\";i:1;};m:a:0:{}",1,{"x":1}],[]]
+["malformed-state","ok",true,[]]

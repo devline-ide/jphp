@@ -39,6 +39,12 @@ public final class PhpObjectLifecycle {
      * OWNERSHIP_RELEASE preserves the raw failure for the domain's explicit composition policy.
      */
     public static boolean destruct(IObject object, Environment releasingEnvironment, Reason reason) throws Throwable {
+        if(reason!=Reason.MANUAL_UNSET && object instanceof php.runtime.lang.Generator
+                && ((php.runtime.lang.Generator)object).__isBusyInFiber()) {
+            try(var admission=releasingEnvironment.enterCallbackDomainForRetirement()) {
+                return destruct(object,releasingEnvironment,reason,null);
+            }
+        }
         return destruct(object,releasingEnvironment,reason,null);
     }
     /** A certified lifecycle receiver is borrowed from FINALIZING, never staged as an owner. */
@@ -52,7 +58,21 @@ public final class PhpObjectLifecycle {
     private static boolean destruct(IObject object,Environment releasingEnvironment,Reason reason,
             php.runtime.PhpOwnershipObjects.ExecutionEntry entry) throws Throwable {
         Objects.requireNonNull(reason);
+        if (reason == Reason.MANUAL_UNSET && object instanceof php.runtime.lang.Generator
+                && ((php.runtime.lang.Generator)object).__isBusyInFiber()) return false;
+        if (php.runtime.PhpLazyObjects.skipDestructor(object)) return false;
         ClassEntity entity = object.getReflection();
+        if (object instanceof php.runtime.lang.support.IPhpNativeRetirement retirement) {
+            // Ordinary unset has no reference-count proof that other PHP aliases are gone.
+            if(reason==Reason.MANUAL_UNSET)return false;
+            if(entry!=null || reason==Reason.OWNERSHIP_RELEASE)
+                throw new IllegalStateException("Native continuation retirement requires its parked ownership attestation");
+            if(object.isFinalized() || object instanceof php.runtime.lang.BaseObject
+                    && ((php.runtime.lang.BaseObject)object).isPhpConstructionPending())return false;
+            if(object.getEnvironment()!=releasingEnvironment || entity.getNativeClass()!=object.getClass() || entity.methodDestruct!=null)
+                throw new IllegalArgumentException("Native retirement does not match its actual declaration and Environment");
+            retirement.retireNative(releasingEnvironment);object.doFinalize();return true;
+        }
         if (entity.methodDestruct == null || object.isFinalized()
                 || object instanceof php.runtime.lang.BaseObject && ((php.runtime.lang.BaseObject) object).isPhpConstructionPending()) return false;
         object.doFinalize();

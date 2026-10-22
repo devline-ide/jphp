@@ -13,6 +13,28 @@ public final class PhpObjectProperties extends ArrayMemory {
     private Map<String, PropertyEntity> declarations;
     private Set<String> explicitlyUnset;
 
+    /** Engine-only metadata. The same certified TABLE and backing identity are retained. */
+    private static final class LazyDeclarations extends HashMap<String, PropertyEntity> {
+        final php.runtime.PhpLazyObjects.State state;
+        LazyDeclarations(Map<String, PropertyEntity> declared, php.runtime.PhpLazyObjects.State state) {
+            if (declared != null) putAll(declared);
+            this.state = state;
+        }
+    }
+    public php.runtime.PhpLazyObjects.State lazyState() {
+        return declarations instanceof LazyDeclarations ? ((LazyDeclarations) declarations).state : null;
+    }
+    public void installLazyState(php.runtime.PhpLazyObjects.State state) {
+        java.util.Objects.requireNonNull(state).validateTableInstallation(this);
+        if (lazyState() != null) throw new IllegalStateException("Lazy metadata must be detached before replacement");
+        declarations = new LazyDeclarations(declarations, state);
+    }
+    public void detachLazyState(php.runtime.PhpLazyObjects.State state) {
+        if (lazyState() != state) throw new IllegalArgumentException("Foreign lazy table state");
+        state.validateTableDetachment(this);
+        declarations = declarations.isEmpty() ? null : new HashMap<>(declarations);
+    }
+
     public PhpObjectProperties() {
         super(false);
     }
@@ -34,6 +56,26 @@ public final class PhpObjectProperties extends ArrayMemory {
         return isExplicitlyUnset(storageKey) || property != null && property.getDeclaredType() != null
                 && property.getClazz().getModule() != null
                 && property.getClazz().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+    }
+
+    /** SPL's explicit raw own-property loader; ordinary assignment/type/readonly paths stay guarded. */
+    public ReferenceMemory restoreSplArrayObjectProperty(php.runtime.env.Environment env,
+            php.runtime.lang.spl.iterator.ArrayObject owner,String storageKey,Memory value) {
+        rejectUnmanagedOwnershipMutation();
+        if(owner==null || owner.peekProperties()!=this || owner.getEnvironment()!=env
+                || php.runtime.PhpOwnershipExecution.current(env)!=null)
+            throw new IllegalArgumentException("Raw SPL restoration requires its actual ordinary receiver table");
+        PropertyEntity property=declaration(storageKey);
+        if(property==null || property.isStatic() || !property.getSpecificName().equals(storageKey)
+                || !owner.getReflection().isInstanceOf(property.getClazz())
+                || property.getClazz().findProperty(property.getName())!=property)
+            throw new IllegalArgumentException("Raw SPL restoration requires its actual declared own slot");
+        ReferenceMemory address=super.getByScalar(storageKey);
+        if(property.isPhpReadonly() && address!=null && !address.isUndefined())
+            env.exception(php.runtime.lang.exception.BaseError.class,"Cannot modify readonly property %s::$%s",property.getClazz().getName(),property.getName());
+        if(address==null)address=putAsKeyString(storageKey,Memory.UNDEFINED);
+        address.publishSplArrayObjectOwnProperty(this,owner,property,value);
+        return address;
     }
 
     public ReferenceMemory republishDeclared(String storageKey, Memory value) {
@@ -106,7 +148,16 @@ public final class PhpObjectProperties extends ArrayMemory {
         return removed;
     }
 
+    /** Same TABLE/storage allocation; only its prevalidated physical layout and unset metadata change. */
+    public void publishOwnershipLazyReplacement(php.runtime.PhpLazyPropertyTransaction.Prepared placement) {
+        var replacement=placement.consumeRaw(this);
+        map=replacement;_list=null;size=placement.rawSize(this);lastLongIndex=-1;
+        explicitlyUnset=placement.rawUnset(this);foreachIterator=null;
+    }
+
     @Override public void clear() {
+        var lazy = lazyState();
+        if (lazy != null) lazy.validateRawClear(this);
         super.clear();
         if (declarations != null) declarations.clear();
         if (explicitlyUnset != null) explicitlyUnset.clear();

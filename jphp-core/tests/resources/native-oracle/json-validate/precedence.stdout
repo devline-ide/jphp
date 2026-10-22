@@ -1,0 +1,6 @@
+["unclosed",false,3,"Control character error, possibly incorrectly encoded"]
+["high-unclosed",false,10,"Single unpaired UTF-16 surrogate in unicode escape"]
+["utf8-after-root",false,5,"Malformed UTF-8 characters, possibly incorrectly encoded"]
+["depth-before-badbyte",false,1,"Maximum stack depth exceeded"]
+["badbyte-before-close",false,5,"Malformed UTF-8 characters, possibly incorrectly encoded"]
+["non-json-whitespace",false,3,"Control character error, possibly incorrectly encoded"]

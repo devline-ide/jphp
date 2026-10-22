@@ -1,0 +1,3 @@
+["dynamic-class",[true,true]]
+["dynamic-global-from-class",["Error","Cannot access \"self\" when no class scope is active"]]
+["bound-closure",[true,true]]

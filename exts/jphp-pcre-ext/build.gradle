@@ -1,0 +1,155 @@
+dependencies {
+    api project(':jphp-runtime')
+    testImplementation project(':jphp-core')
+    testImplementation project(':exts:jphp-zend-ext')
+    testImplementation project.project(':jphp-core').sourceSets.test.output
+    testImplementation 'junit:junit:4.13.2'
+}
+
+// A fixed upstream source archive, not a system PCRE or a machine-local binary dependency.
+def pcreVersion = '10.49'
+def sourceSha256 = '40fa9173e167648fb872beaaeab667c8778eb37fabeefffa99a7753edb1a9479'
+def digest = { File file ->
+    def sha = java.security.MessageDigest.getInstance('SHA-256')
+    file.withInputStream { input ->
+        byte[] buffer = new byte[16384]
+        int count
+        while ((count = input.read(buffer)) != -1) sha.update(buffer, 0, count)
+    }
+    sha.digest().encodeHex().toString()
+}
+def osName = System.getProperty('os.name').toLowerCase(Locale.ROOT)
+def hostOS = osName.startsWith('windows') ? 'windows' : osName.contains('mac') ? 'macos' : osName.contains('linux') ? 'linux' : 'unsupported'
+def hostArch = System.getProperty('os.arch') in ['amd64', 'x86_64'] ? 'x86_64' : System.getProperty('os.arch') in ['arm64', 'aarch64'] ? 'aarch64' : 'unsupported'
+def classifier = "${hostOS}-${hostArch}"
+def nativeFilename = hostOS == 'windows' ? 'pcre2-8.dll' : hostOS == 'macos' ? 'libpcre2-8.dylib' : 'libpcre2-8.so'
+def overrideLibrary = providers.gradleProperty('pcreNativeLibrary')
+def overrideSha = providers.gradleProperty('pcreNativeSha256')
+def overrideLicense = providers.gradleProperty('pcreNativeLicense')
+def explicitNative = overrideLibrary.isPresent() || overrideSha.isPresent() || overrideLicense.isPresent()
+if (explicitNative && !(overrideLibrary.isPresent() && overrideSha.isPresent() && overrideLicense.isPresent()))
+    throw new GradleException('PCRE native overrides require library, SHA-256 and official license together')
+def suppliedSource = providers.gradleProperty('pcreSourceArchive').map { file(it) }
+def sourceArchive = layout.buildDirectory.file("downloads/pcre2-${pcreVersion}.zip").map { it.asFile }
+def sourceDirectory = layout.buildDirectory.dir('native-source')
+def nativeDirectory = layout.buildDirectory.dir('native-build')
+def nativeLibrary = explicitNative ? overrideLibrary.map { file(it) } : nativeDirectory.map { it.file((hostOS == 'windows' ? 'Release/' : '') + nativeFilename).asFile }
+def nativeLicense = explicitNative ? overrideLicense.map { file(it) } : sourceDirectory.map { it.file('LICENCE.md').asFile }
+def generatedManifest = layout.buildDirectory.dir('generated/native-manifest')
+def cmake = providers.gradleProperty('pcreCmakeExecutable').orElse('cmake')
+
+tasks.register('fetchPcreSource') {
+    inputs.property('version', pcreVersion)
+    inputs.property('sha256', sourceSha256)
+    inputs.file(suppliedSource).optional().withPropertyName('suppliedSourceArchive')
+    outputs.file(sourceArchive)
+    doLast {
+        File archive = sourceArchive.get()
+        if (suppliedSource.isPresent()) {
+            File source = suppliedSource.get()
+            if (!source.isFile() || digest(source) != sourceSha256) throw new GradleException('Declared PCRE2 source archive is missing or its hash differs')
+            archive.parentFile.mkdirs()
+            java.nio.file.Files.copy(source.toPath(), archive.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+        } else if (!archive.isFile()) {
+            archive.parentFile.mkdirs()
+            def connection = new URI("https://github.com/PCRE2Project/pcre2/releases/download/pcre2-${pcreVersion}/pcre2-${pcreVersion}.zip").toURL().openConnection()
+            connection.connectTimeout = 30000
+            connection.readTimeout = 60000
+            connection.inputStream.withCloseable { input -> archive.withOutputStream { output -> input.transferTo(output) } }
+        }
+        if (digest(archive) != sourceSha256) throw new GradleException('PCRE2 source archive hash mismatch')
+    }
+}
+def extractSource = tasks.register('extractPcreSource', Sync) {
+    dependsOn 'fetchPcreSource'
+    from(sourceArchive.map { zipTree(it) })
+    into sourceDirectory
+    eachFile { details ->
+        def segments = details.relativePath.segments
+        if (segments[0] != "pcre2-${pcreVersion}") throw new GradleException('Unexpected PCRE2 source root')
+        if (segments.length > 1) details.relativePath = new org.gradle.api.file.RelativePath(!details.directory, segments.drop(1) as String[])
+        else details.exclude()
+    }
+    includeEmptyDirs = false
+}
+def configureNative = tasks.register('configurePcreNative', Exec) {
+    dependsOn extractSource
+    inputs.dir(sourceDirectory)
+    inputs.property('classifier', classifier)
+    inputs.property('cmake', cmake)
+    outputs.file(nativeDirectory.map { it.file('CMakeCache.txt') })
+    doFirst {
+        if (hostOS == 'unsupported' || hostArch == 'unsupported') throw new GradleException("Unsupported PCRE2 build host: ${classifier}")
+        def args = [cmake.get(), '-S', sourceDirectory.get().asFile.absolutePath, '-B', nativeDirectory.get().asFile.absolutePath,
+            '-DBUILD_SHARED_LIBS=ON', '-DBUILD_STATIC_LIBS=OFF', '-DPCRE2_BUILD_PCRE2_8=ON', '-DPCRE2_BUILD_PCRE2_16=OFF',
+            '-DPCRE2_BUILD_PCRE2_32=OFF', '-DPCRE2_SUPPORT_UNICODE=ON', '-DPCRE2_SUPPORT_JIT=ON', '-DPCRE2_NEWLINE=LF',
+            '-DPCRE2_BUILD_TESTS=OFF', '-DPCRE2_BUILD_PCRE2GREP=OFF', '-DCMAKE_BUILD_TYPE=Release']
+        if (hostOS == 'windows') args += ['-A', hostArch == 'x86_64' ? 'x64' : 'ARM64', '-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreaded']
+        commandLine args
+    }
+}
+def compileNative = tasks.register('compilePcreNative', Exec) {
+    dependsOn configureNative
+    inputs.dir(sourceDirectory)
+    inputs.file(nativeDirectory.map { it.file('CMakeCache.txt') })
+    outputs.file(nativeLibrary)
+    doFirst { commandLine cmake.get(), '--build', nativeDirectory.get().asFile.absolutePath, '--config', 'Release', '--parallel', '2', '--target', 'pcre2-8-shared' }
+}
+def compileProbe = tasks.register('compileNativeProbe', JavaCompile) {
+    source 'build-support/PcreNativeConfig.java'
+    classpath = files()
+    javaCompiler = javaToolchains.compilerFor { languageVersion = JavaLanguageVersion.of(25) }
+    destinationDirectory = layout.buildDirectory.dir('classes/native-probe')
+    options.release = 25
+    options.encoding = 'UTF-8'
+}
+def prepareManifest = tasks.register('prepareNativeManifest', JavaExec) {
+    dependsOn compileProbe
+    if (!explicitNative) dependsOn compileNative
+    inputs.file(nativeLibrary).withPropertyName('nativeLibrary')
+    inputs.file(nativeLicense).withPropertyName('nativeLicense')
+    inputs.property('classifier', classifier)
+    inputs.property('expectedSha', overrideSha.orElse('source-built'))
+    outputs.dir generatedManifest
+    classpath = files(compileProbe.flatMap { it.destinationDirectory })
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(25) }
+    mainClass = 'org.develnext.jphp.pcre.build.PcreNativeConfig'
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    systemProperty 'java.awt.headless', 'true'
+    doFirst {
+        def library = nativeLibrary.get()
+        setArgs([library.absolutePath, explicitNative ? overrideSha.get() : digest(library), nativeLicense.get().absolutePath,
+            classifier, generatedManifest.get().file('META-INF/jphp-pcre/native.properties').asFile.absolutePath])
+    }
+}
+sourceSets.main.resources.srcDir prepareManifest
+
+def prepareCompanions = tasks.register('prepareNativeCompanions', Sync) {
+    dependsOn prepareManifest
+    // A normal project dependency resolves build/libs/JAR; companions must be beside THAT JAR too.
+    into layout.buildDirectory.dir("libs/native/${classifier}")
+    from(nativeLibrary) { rename { nativeFilename } }
+    from(nativeLicense) { rename { 'LICENCE-PCRE2.md' } }
+}
+tasks.named('jar') { dependsOn prepareCompanions }
+
+tasks.register('assembleNativeDistribution', Sync) {
+    dependsOn tasks.named('jar')
+    into layout.buildDirectory.dir('native-distribution/lib')
+    from(tasks.named('jar'))
+    from(prepareCompanions) { into "native/${classifier}" }
+}
+def nativeBundle = tasks.register('nativeBundle', Zip) {
+    dependsOn tasks.named('assembleNativeDistribution')
+    archiveClassifier = "native-${classifier}"
+    from(layout.buildDirectory.dir('native-distribution/lib'))
+}
+publishing.publications.named('mavenJava') { artifact nativeBundle }
+
+def packagedTestJar = providers.provider { layout.buildDirectory.file("native-distribution/lib/${tasks.named('jar').get().archiveFileName.get()}").get().asFile }
+tasks.named('test') {
+    dependsOn 'assembleNativeDistribution'
+    classpath = files(sourceSets.test.output, packagedTestJar) + configurations.testRuntimeClasspath
+    jvmArgs '--enable-native-access=ALL-UNNAMED'
+    systemProperty 'java.awt.headless', 'true'
+}

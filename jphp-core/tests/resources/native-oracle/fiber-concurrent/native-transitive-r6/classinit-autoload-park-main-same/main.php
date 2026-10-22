@@ -1,0 +1,2 @@
+<?php
+$e=[];spl_autoload_register(function($name)use(&$e){$e[]='load:'.$name;Fiber::suspend('park');eval('class '.$name.' {const X=7;}');});class SuspendedSameInit {const X=NeededSameInit::X;}$f=new Fiber(function(){return SuspendedSameInit::X;});$e[]=$f->start();try{$e[]='same:'.SuspendedSameInit::X;}catch(Throwable $x){$e[]=$x::class.':'.$x->getMessage();}$f->resume();$e[]='ret:'.$f->getReturn();$e[]='after:'.SuspendedSameInit::X;echo json_encode($e);

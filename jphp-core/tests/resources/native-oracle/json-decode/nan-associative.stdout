@@ -1,0 +1,2 @@
+["nan-associative","YTowOnt9",0,"No error",[[2,"unexpected NAN value was coerced to bool"]],null]
+["nan-associative-handler-throws","Tjs=",4,"Syntax error",[[2,"unexpected NAN value was coerced to bool"]],["Exception","nan-bool-handler"]]

@@ -1,0 +1,2 @@
+<?php
+error_reporting(-1);$events=[];set_error_handler(function($n,$s)use(&$events){$events[]='warn:'.$n.':'.$s;return true;});$events[]='before';$a=E_STRICT;$events[]='direct:'.$a;$b=constant('E_STRICT');$events[]='dynamic:'.$b;$events[]='defined:'.(defined('E_STRICT')?'yes':'no');$flat=get_defined_constants();$group=get_defined_constants(true);$reflection=(new ReflectionExtension('Core'))->getConstants();$events[]='catalog:'.$flat['E_STRICT'].':'.$group['Core']['E_STRICT'].':'.$reflection['E_STRICT'];echo serialize($events);

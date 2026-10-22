@@ -12,7 +12,50 @@ import java.util.Set;
 import java.util.Stack;
 
 public class ConcurrentEnvironment extends Environment {
-    private ThreadLocal<Stack<OutputBuffer>> outputBuffers;
+    private static final class OutputLineage {
+        final Stack<OutputBuffer> buffers=new Stack<>();
+        int handlerDepth;
+        OutputLineage(OutputBuffer root) {buffers.push(root);}
+    }
+    private volatile ThreadLocal<OutputLineage> outputBuffers;
+    private final ThreadLocal<FiberState> fiberState=new ThreadLocal<>();
+    private final ThreadLocal<OutputLineage> generatorOutput=new ThreadLocal<>();
+    Object captureGeneratorOutput(){return outputLineage();}
+    final class GeneratorOutputBinding implements AutoCloseable {
+        private final Thread owner=Thread.currentThread();private final OutputLineage previous;private boolean closed;
+        GeneratorOutputBinding(Object context){previous=generatorOutput.get();generatorOutput.set((OutputLineage)context);}
+        @Override public void close(){if(closed)return;if(owner!=Thread.currentThread())throw new IllegalStateException("Foreign Generator output restoration");
+            if(previous==null)generatorOutput.remove();else generatorOutput.set(previous);closed=true;}
+    }
+    GeneratorOutputBinding bindGeneratorOutput(Object context){return new GeneratorOutputBinding(context);}
+
+    FiberState activeFiberState() {return fiberState==null?null:fiberState.get();}
+    void installFiberState(FiberState state) {if(state==null)fiberState.remove();else fiberState.set(state);}
+    FiberState captureFiberState() {
+        FiberState active=activeFiberState();
+        return active!=null?active:new FiberState(this,callStack.get(),super.getErrorFlags(),silentFlags.get(),outputLineage());
+    }
+    private OutputLineage outputLineage() {
+        FiberState active=activeFiberState();
+        if(active!=null)return (OutputLineage)active.outputContext;
+        OutputLineage delegated=generatorOutput==null?null:generatorOutput.get();if(delegated!=null)return delegated;
+        if(outputBuffers==null)synchronized(this) {
+            if(outputBuffers==null)outputBuffers=ThreadLocal.withInitial(()->new OutputLineage(getDefaultBuffer()));
+        }
+        return outputBuffers.get();
+    }
+    private Stack<Integer> currentSilentFlags() {
+        FiberState active=activeFiberState();return active==null?silentFlags.get():active.silent;
+    }
+    @Override public int getErrorFlags() {
+        FiberState active=activeFiberState();return active==null?super.getErrorFlags():active.errorFlags;
+    }
+    @Override public boolean isOutputHandlerActive() {return outputLineage().handlerDepth>0;}
+    @Override public void changeOutputHandlerDepth(int delta) {
+        OutputLineage lineage=outputLineage();
+        if(lineage.handlerDepth+delta<0)throw new IllegalStateException("Unbalanced output handler depth");
+        lineage.handlerDepth+=delta;
+    }
 
     private ThreadLocal<Stack<Integer>> silentFlags = new ThreadLocal<Stack<Integer>>(){
         @Override
@@ -45,65 +88,43 @@ public class ConcurrentEnvironment extends Environment {
     }
 
     @Override
-    public Stack<OutputBuffer> getOutputBuffers() {
-        if (outputBuffers == null) {
-            synchronized (this) {
-                outputBuffers = new ThreadLocal<Stack<OutputBuffer>>(){
-                    @Override
-                    protected Stack<OutputBuffer> initialValue() {
-                        Stack stack = new Stack<OutputBuffer>();
-                        stack.push(getDefaultBuffer());
-                        return stack;
-                    }
-                };
-            }
-        }
-        return outputBuffers.get();
-    }
+    public Stack<OutputBuffer> getOutputBuffers() {return outputLineage().buffers;}
 
     @Override
     public void __replaceCallStack(CallStack stack) {
-        callStack.set(stack);
+        FiberState active=activeFiberState();
+        if(active==null)callStack.set(stack);else active.stack=stack;
     }
 
     @Override
     public CallStack getCallStack() {
-        return callStack.get();
+        FiberState active=activeFiberState();return active==null?callStack.get():active.stack;
     }
 
     @Override
     public void addIncludePath(String value) {
-        synchronized (this){
-            super.addIncludePath(value);
-        }
+        super.addIncludePath(value);
     }
 
     @Override
     public ClassEntity autoloadCall(String name, String lowerName) {
-        synchronized (this) {
-            return super.autoloadCall(name, lowerName);
-        }
+        // PHP callbacks may suspend; metadata/root-sink locks live below this boundary.
+        return super.autoloadCall(name, lowerName);
     }
 
     @Override
     public void setIncludePaths(Set<String> includePaths) {
-        synchronized (this) {
-            super.setIncludePaths(includePaths);
-        }
+        super.setIncludePaths(includePaths);
     }
 
     @Override
     public boolean defineConstant(String name, Memory value, boolean caseSensitise) {
-        synchronized (this) {
-            return super.defineConstant(name, value, caseSensitise);
-        }
+        return super.defineConstant(name,value,caseSensitise);
     }
 
     @Override
     public Memory setConfigValue(String name, Memory value) {
-        synchronized (this) {
-            return super.setConfigValue(name, value);
-        }
+        return super.setConfigValue(name,value);
     }
 
     @Override
@@ -115,30 +136,28 @@ public class ConcurrentEnvironment extends Environment {
 
     @Override
     public void setUserValue(String name, Object value) {
-        synchronized (this) {
-            super.setUserValue(name, value);
-        }
+        super.setUserValue(name,value);
     }
 
     @Override
     public void setErrorFlags(int errorFlags) {
-        synchronized (this) {
-            super.setErrorFlags(errorFlags);
-        }
+        FiberState active=activeFiberState();
+        if(active!=null){active.errorFlags=errorFlags;return;}
+        synchronized (this) {super.setErrorFlags(errorFlags);}
     }
 
     public void __pushSilent(){
-        silentFlags.get().push(getErrorFlags());
+        currentSilentFlags().push(getErrorFlags());
         setErrorFlags(0);
     }
 
     public void __popSilent(){
-        Integer flags = silentFlags.get().pop();
+        Integer flags = currentSilentFlags().pop();
         setErrorFlags(flags);
     }
 
     public void __clearSilent(){
-        Stack<Integer> silents = silentFlags.get();
+        Stack<Integer> silents = currentSilentFlags();
         Integer flags = null;
         while (!silents.empty())
             flags = silents.pop();
@@ -150,30 +169,24 @@ public class ConcurrentEnvironment extends Environment {
 
     @Override
     public void __defineFunction(TraceInfo trace, String moduleIndex, int index) {
-        synchronized (this) {
-            super.__defineFunction(trace, moduleIndex, index);
-        }
+        super.__defineFunction(trace,moduleIndex,index);
     }
 
     @Override
     public void registerModule(ModuleEntity module) {
-        synchronized (this) {
-            super.registerModule(module, true);
-        }
+        super.registerModule(module,true);
     }
 
     @Override
     public ModuleEntity importCompiledModule(Context context, boolean debugInformation) throws Throwable {
-        synchronized (this) {
-            return super.importCompiledModule(context, debugInformation);
-        }
+        // Compilation/restoration may autoload PHP; scope metadata is synchronized by Environment.
+        return super.importCompiledModule(context, debugInformation);
     }
 
     @Override
     public ModuleEntity importModule(Context context) throws Throwable {
-        synchronized (this) {
-            return super.importModule(context);
-        }
+        // Compilation/restoration may autoload PHP; scope metadata is synchronized by Environment.
+        return super.importModule(context);
     }
 
     @Override
@@ -206,29 +219,25 @@ public class ConcurrentEnvironment extends Environment {
 
     @Override
     public void echo(byte[] bytes, int length) {
-        synchronized (this) {
-            super.echo(bytes, length);
-        }
+        // PHP callbacks may suspend; metadata/root-sink locks live below this boundary.
+        super.echo(bytes, length);
     }
 
     @Override
     public void echo(Memory value) {
-        synchronized (this) {
-            super.echo(value);
-        }
+        // PHP callbacks may suspend; metadata/root-sink locks live below this boundary.
+        super.echo(value);
     }
 
     @Override
     public void echo(String value) {
-        synchronized (this) {
-            super.echo(value);
-        }
+        // PHP callbacks may suspend; metadata/root-sink locks live below this boundary.
+        super.echo(value);
     }
 
     @Override
     public void flushAll() throws Throwable {
-        synchronized (this) {
-            super.flushAll();
-        }
+        // PHP callbacks may suspend; metadata/root-sink locks live below this boundary.
+        super.flushAll();
     }
 }

@@ -103,4 +103,14 @@ public class PhpLegacyHexBytesTest {
             assertEquals("733a323a22c383c2a9223b",HexFormat.of().formatHex(result.getBinaryBytes(StandardCharsets.UTF_8)));
         });
     }
+    @Test public void outputBufferProducedBytesUseFullPhpTruthValueAcrossProfiles() throws Throwable {
+        String raw=new String(resource("output_buffer_truth.php"),StandardCharsets.UTF_8);
+        assertTrue("pinned PHP framing",raw.startsWith("<?php"));
+        byte[] expected=resource("output_buffer_truth.stdout");
+        assertEquals("native stderr",0,resource("output_buffer_truth.stderr").length);
+        assertEquals("complete native truth rows",8,new String(expected,StandardCharsets.UTF_8).lines().count());
+        for(var profile:new PhpLanguageProfile[]{PhpLanguageProfile.JPHP_LEGACY,PhpLanguageProfile.PHP_8_5}) {
+            modes(raw.substring(5),profile,(result,output)->assertArrayEquals("native output-buffer truth "+profile,expected,output));
+        }
+    }
 }

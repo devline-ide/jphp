@@ -65,14 +65,17 @@ public class ParameterDumper extends Dumper<ParameterEntity> {
             var bytes = new java.io.ByteArrayOutputStream();
             var metadata = new DumpOutputStream(bytes);
             metadata.writeInt(0x5044494E); // PDIN: ABI8 executable parameter default descriptor.
-            metadata.writeInt(entity.isPromoted() ? 2 : 1);
+            metadata.writeInt(initializer != null && initializer.constantOnly() ? 3 : entity.isPromoted() ? 2 : 1);
             metadata.writeRawData(type);
-            if (entity.isPromoted()) {metadata.writeBoolean(true);metadata.writeBoolean(initializer != null);}
+            if (initializer != null && initializer.constantOnly()) {
+                metadata.writeBoolean(entity.isPromoted()); metadata.writeBoolean(true);
+            } else if (entity.isPromoted()) {metadata.writeBoolean(true);metadata.writeBoolean(initializer != null);}
             if (initializer != null) {
                 metadata.writeName(initializer.moduleName());
                 metadata.writeName(initializer.javaClass());
                 metadata.writeName(initializer.method());
                 metadata.writeName(initializer.declarationScope());
+                if (initializer.constantOnly()) metadata.writeEnum(initializer.kind());
             }
             print.writeRawData(bytes.toByteArray());
         }
@@ -117,14 +120,25 @@ public class ParameterDumper extends Dumper<ParameterEntity> {
         byte[] type = metadata;
         if (metadata.length >= 4 && raw.readInt() == 0x5044494E) {
             int version=raw.readInt();
-            if (version != 1 && version != 2) throw new php.runtime.loader.dump.io.DumpException("Unsupported parameter initializer version");
+            if (version != 1 && version != 2 && version != 3) throw new php.runtime.loader.dump.io.DumpException("Unsupported parameter initializer version");
             type = raw.readRawData();
-            if (version==2) entity.setPromoted(raw.readBoolean());
-            boolean hasInitializer=version==1 || raw.readBoolean();
-            try { if (hasInitializer) initializer = new ParameterEntity.DefaultInitializer(raw.readName(), raw.readName(), raw.readName(), raw.readName()); }
+            if (version==2 || version==3) entity.setPromoted(hookFlag(raw,version==3));
+            boolean hasInitializer=version==1 || hookFlag(raw,version==3);
+            try {
+                if (hasInitializer) {
+                    String module=raw.readName(), clazz=raw.readName(), method=raw.readName(), scope=raw.readName();
+                    int kindCode=version==3 ? raw.readInt() : 0;
+                    if (kindCode != (version==3 ? 1 : 0))
+                        throw new IllegalArgumentException("Invalid constant-only parameter default kind");
+                    var kind=ParameterEntity.DefaultInitializer.Kind.values()[kindCode];
+                    if (version==3 && kind!=ParameterEntity.DefaultInitializer.Kind.CONSTANT_EXPRESSION)
+                        throw new IllegalArgumentException("Invalid constant-only parameter default kind");
+                    initializer = new ParameterEntity.DefaultInitializer(module,clazz,method,scope,kind);
+                } else if (version==3) throw new IllegalArgumentException("Constant-only parameter default has no initializer");
+            }
             catch (IllegalArgumentException invalid) { throw new php.runtime.loader.dump.io.DumpException(invalid.getMessage()); }
             if (raw.available() != 0) throw new php.runtime.loader.dump.io.DumpException("Invalid parameter initializer size");
-            if (initializer != null && (entity.getDefaultValue() == null || !entity.getDefaultValue().isNull() || entity.getDefaultValueConstName() != null))
+            if (initializer != null && (entity.getDefaultValue() == null || !entity.getDefaultValue().isNull() || entity.getDefaultValueConstName() != null && !initializer.constantOnly()))
                 throw new php.runtime.loader.dump.io.DumpException("Invalid parameter initializer placeholder");
         }
         if(hook && (initializer!=null || entity.isPromoted()))throw new php.runtime.loader.dump.io.DumpException("Hook parameter cannot be promoted or initialized");

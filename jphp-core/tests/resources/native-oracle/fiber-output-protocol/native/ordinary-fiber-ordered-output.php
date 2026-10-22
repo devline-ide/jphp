@@ -1,0 +1,1 @@
+<?php ob_implicit_flush(true);$f=new Fiber(function(){echo 'A';Fiber::suspend();echo 'C';});$f->start();echo 'B';$f->resume();

@@ -89,6 +89,7 @@ public final class PhpTypedSourcePlan {
             if(cellBridge(ops,unset,method,"unset","(Lphp/runtime/PhpRuntimeOwnership$Frame;I"+M+"Lphp/runtime/env/Environment;"+META+")V"))unsetCv-=4;
             else if(!exactInvoke(ops.get(unset),"php/runtime/PhpRuntimeOwnership","unsetLocal","(Lphp/runtime/PhpRuntimeOwnership$Frame;I"+M+"Lphp/runtime/env/Environment;)V"))continue;
             if(assignmentCv<0 || unsetCv<0 || !load(ops.get(assignmentCv),created.local()) || !load(ops.get(unsetCv),created.local()))continue;
+            int sessionUnset=sessionUnset(ops,labels,method,unset,released.at(),created.local());
             int pop=published.at()+1;
             if(ops.get(pop).opcode()!=Opcode.POP) {
                 discard=pop+5;
@@ -114,8 +115,8 @@ public final class PhpTypedSourcePlan {
                 if(at<first || at>last)continue;
                 if(op instanceof StoreInstruction store && store.typeKind()==TypeKind.REFERENCE && store.slot()==created.local())closed=false;
                 if(Set.of(Opcode.AASTORE,Opcode.PUTFIELD,Opcode.PUTSTATIC,Opcode.ARETURN,Opcode.ATHROW,Opcode.INVOKEDYNAMIC,Opcode.DUP2,Opcode.DUP_X1,Opcode.DUP_X2,Opcode.DUP2_X1,Opcode.DUP2_X2).contains(op.opcode()) || at!=first && op.opcode()==Opcode.DUP && !(at>published.at() && cellDiscard(ops,at+5,method)))closed=false;
-                if(op instanceof InvokeInstruction call && !safeCall(ops,method,call,at,assignment,published.at(),unset,discard))closed=false;
-                if(load(op,created.local()) && at!=assignmentCv && at!=published.at()-7 && at!=released.at()-7 && at!=unsetCv) {
+                if(op instanceof InvokeInstruction call && at!=sessionUnset && !safeCall(ops,method,call,at,assignment,published.at(),unset,discard))closed=false;
+                if(load(op,created.local()) && at!=assignmentCv && at!=published.at()-7 && at!=released.at()-7 && at!=unsetCv && at!=sessionUnset-1) {
                     String key=propertyUse(ops,at,last);if(key==null)closed=false;else properties.add(key);
                 }
             }
@@ -126,6 +127,27 @@ public final class PhpTypedSourcePlan {
             if(closed && !properties.isEmpty())result.put(created.id(),new Draft(created.id(),created.local(),created.declaration(),List.copyOf(properties),offsets[created.at()],offsets[published.at()],offsets[released.at()]));
         }
         return Map.copyOf(result);
+    }
+    /** The active Session arm may skip only this exact ordinary unset/released-observer sibling. */
+    private static int sessionUnset(List<Instruction> ops,Map<Label,Integer> labels,MethodModel method,int unset,int released,int local) {
+        int at=unset-10;
+        if(at<5 || released!=unset+8 || released+1>=ops.size()
+                || !cellBridge(ops,unset,method,"unset","(Lphp/runtime/PhpRuntimeOwnership$Frame;I"+M+"Lphp/runtime/env/Environment;"+META+")V")
+                || !(ops.get(at-5) instanceof LoadInstruction entry) || entry.typeKind()!=TypeKind.REFERENCE
+                || !load(ops.get(at-3),entry.slot()) || !Objects.equals(constant(ops.get(at-2)),local) || !load(ops.get(at-1),local)
+                || !(ops.get(at) instanceof InvokeInstruction call) || call.opcode()!=Opcode.INVOKEVIRTUAL
+                || !call.owner().asInternalName().equals("php/runtime/PhpOwnershipExecution$Entry") || !call.name().equalsString("unsetLocal")
+                || !call.type().equalsString("(I"+M+")V")
+                || !(ops.get(at-4) instanceof BranchInstruction guard) || guard.opcode()!=Opcode.IFNULL || !Objects.equals(labels.get(guard.target()),at+2)
+                || !(ops.get(at+1) instanceof BranchInstruction end) || end.opcode()!=Opcode.GOTO || !Objects.equals(labels.get(end.target()),released+1)
+                || !(ops.get(at+2) instanceof LoadInstruction frame) || frame.typeKind()!=TypeKind.REFERENCE
+                || !Objects.equals(constant(ops.get(at+3)),local) || !load(ops.get(at+4),local)
+                || !method.methodType().stringValue().startsWith("(Lphp/runtime/env/Environment;")
+                || !load(ops.get(at+5),(method.flags().flagsMask()&8)==0?1:0))return -1;
+        for(int pos=0;pos<ops.size();pos++)if(ops.get(pos) instanceof BranchInstruction jump) {
+            Integer target=labels.get(jump.target());if(target==null || target>at-5 && target<=released && pos!=at-4)return -1;
+        }
+        return at;
     }
     private static boolean safeCall(List<Instruction> ops,MethodModel method,InvokeInstruction call,int at,int assignment,int publication,int unset,int discard) {
         String owner=call.owner().asInternalName(),name=call.name().stringValue();

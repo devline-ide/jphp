@@ -36,8 +36,12 @@ public class ReflectionProperty extends Reflection implements Reflector {
 
     public void setEntity(PropertyEntity entity) {
         this.entity = entity;
-        getProperties().put("name", new StringMemory(entity.getName()));
-        getProperties().put("class", new StringMemory(entity.getClazz().getName()));
+        if(getOwnershipObject()==null) {
+            getProperties().put("name",new StringMemory(entity.getName()));getProperties().put("class",new StringMemory(entity.getClazz().getName()));
+        } else {
+            php.runtime.PhpOwnershipReflectionCalls.publishMetadata(this,"name",new StringMemory(entity.getName()));
+            php.runtime.PhpOwnershipReflectionCalls.publishMetadata(this,"class",new StringMemory(entity.getClazz().getName()));
+        }
     }
 
     @php.runtime.annotation.Reflection.Signature({
@@ -186,20 +190,49 @@ public class ReflectionProperty extends Reflection implements Reflector {
                     ObjectMemory.valueOf(new ReflectionMethod(env,hook.method())));
         return result.toConstant();
     }
-    @Signature(@Arg(value="object",type=HintType.OBJECT))
+    private php.runtime.lang.IObject lazyReceiver(Environment env,Memory memory) {
+        return php.runtime.PhpLazyObjects.requireReceiver(env,entity.getClazz(),memory,"property");
+    }
+    @Signature(value=@Arg(value="object",type=HintType.OBJECT),result=@Arg(type=HintType.BOOLEAN))
+    public Memory isLazy(Environment env,Memory...args) {
+        return php.runtime.PhpLazyObjects.isLazy(lazyReceiver(env,args[0]),entity)?Memory.TRUE:Memory.FALSE;
+    }
+    @Signature(value=@Arg(value="object",type=HintType.OBJECT),returnType="void")
+    public Memory skipLazyInitialization(Environment env,Memory...args) throws Throwable {
+        var object=lazyReceiver(env,args[0]);
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null)php.runtime.PhpLazyObjects.skipManaged(env,object,entity,Memory.NULL,false,
+                php.runtime.PhpOwnershipReflectionCalls.current(env,this,"skipLazyInitialization",args));
+        else php.runtime.PhpLazyObjects.skip(env,object,entity,Memory.NULL,false);return Memory.NULL;
+    }
+    @Signature(value={@Arg(value="object",type=HintType.OBJECT),@Arg(value="value",type=HintType.MIXED)},returnType="void")
+    public Memory setRawValueWithoutLazyInitialization(Environment env,Memory...args) throws Throwable {
+        var object=lazyReceiver(env,args[0]);
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null)php.runtime.PhpLazyObjects.skipManaged(env,object,entity,args[1],true,
+                php.runtime.PhpOwnershipReflectionCalls.current(env,this,"setRawValueWithoutLazyInitialization",args));
+        else php.runtime.PhpLazyObjects.skip(env,object,entity,args[1],true);return Memory.NULL;
+    }
+
+    @Signature(value=@Arg(value="object",type=HintType.OBJECT),result=@Arg(type=HintType.MIXED))
     public Memory getRawValue(Environment env, Memory... args) throws Throwable {
+        if(php.runtime.PhpOwnershipExecution.current(env)!=null)return php.runtime.PhpLazyObjects.managedRawValue(env,lazyReceiver(env,args[0]),entity,
+                php.runtime.PhpOwnershipReflectionCalls.current(env,this,"getRawValue",args));
         if(entity.getPhpHooks()==null) return getValue(env,args);
         var object=args[0].toValue(ObjectMemory.class);
         if(!object.getReflection().isInstanceOf(entity.getClazz())) exception(env,
                 "Given object is not an instance of the class this property was declared in");
         if(entity.getPhpHooks().isVirtual()) php.runtime.PhpPropertyHookAccess.error(env,env.trace(),
                 "Must not read from virtual property %s::$%s",entity);
-        return entity.readInitialized(env,env.trace(),object.getProperties().getByScalar(entity.getSpecificName())).toImmutable();
+        var backing=php.runtime.PhpLazyObjects.backing(env,object.value,entity.getSpecificName());
+        return entity.readInitialized(env,env.trace(),backing.getProperties().getByScalar(entity.getSpecificName())).toImmutable();
     }
-    @Signature({@Arg(value="object",type=HintType.OBJECT),@Arg("value")})
+    @Signature(value={@Arg(value="object",type=HintType.OBJECT),@Arg(value="value",type=HintType.MIXED)},returnType="void")
     public Memory setRawValue(Environment env, Memory... args) throws Throwable {
         var context=php.runtime.PhpPropertyWriteContext.enter(env,env.trace(),false);
         try {
+            if(php.runtime.PhpOwnershipExecution.current(env)!=null) {
+                php.runtime.PhpLazyObjects.managedRawAssign(env,lazyReceiver(env,args[0]),entity,args[1],
+                        php.runtime.PhpOwnershipReflectionCalls.current(env,this,"setRawValue",args));return Memory.NULL;
+            }
             if(entity.getPhpHooks()!=null && entity.getPhpHooks().isVirtual())
                 php.runtime.PhpPropertyHookAccess.error(env,env.trace(),entity.getPhpHooks().set()==null
                         ? "Property %s::$%s is read-only" : "Must not write to virtual property %s::$%s",entity);

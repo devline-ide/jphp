@@ -1,0 +1,9 @@
+core	19
+operations	20
+clone-diff	8
+subclass-export	2
+subclass-iterator-export	2
+backing-warning	2
+uninitialized-view	12
+profile	9
+format-recovery	4

@@ -12,6 +12,15 @@ package php.runtime.util.generator;
  * object immediately on collection.
  */
 public interface Collector<T> {
+    /** Optional execution ownership transferred for one consumer request, never across a yield. */
+    interface ExecutionContext {
+        void enter();
+        void close();
+        default void restoreCaller() {}
+    }
+
+    default ExecutionContext executionContext() { return null; }
+
 
     /**
      * Perform the collection operation.

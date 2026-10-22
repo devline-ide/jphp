@@ -1,0 +1,2 @@
+<?php
+$GLOBALS['events']=[];$f=new Fiber(function(){return include __DIR__.'/parked.php';});$GLOBALS['events'][]=$f->start();$GLOBALS['events'][]='other-ret:'.(include __DIR__.'/other.php');try{$f->resume();}catch(Throwable $x){$GLOBALS['events'][]='caught:'.$x->getMessage();}$GLOBALS['events'][]='once-ret:'.(int)(include_once __DIR__.'/parked.php');try{include __DIR__.'/parked.php';}catch(Throwable $x){$GLOBALS['events'][]='again:'.$x->getMessage();}echo json_encode($GLOBALS['events']);

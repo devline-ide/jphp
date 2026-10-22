@@ -1,0 +1,2 @@
+<?php
+$e=[];error_reporting(1);$f=new Fiber(function()use(&$e){$e[]='f0:'.error_reporting();error_reporting(2);Fiber::suspend();$e[]='f1:'.error_reporting();return error_reporting();});$f->start();$e[]='m0:'.error_reporting();error_reporting(4);$f->resume();$e[]='m1:'.error_reporting();$e[]='ret:'.$f->getReturn();echo json_encode($e);

@@ -1,0 +1,22 @@
+{
+  "status": "ACTUAL_PINNED_PHP85_CAPTURE_NULL_GLOBAL7_WARNING2_MATCH",
+  "php": "F:\\ReWork\\ozl.devline.ide\\build\\jphp-tools-20261013\\php85\\php.exe",
+  "phpSHA256": "d256e5d6bfd86905f336bf39b2f4a68d3fde0faabbce3080330de9600cd8e6c4",
+  "sourceSHA256": "2b8efeaff3241b05bbc959145fcf829e19bb1dcb2e21a9a5b3058895287809cf",
+  "stdoutSHA256": "43d727e658b0e33bfabf33152b346b60a3266148116c00844639a6df5f2f94f0",
+  "stderrSHA256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "actual": [
+    null,
+    7,
+    [],
+    [
+      [
+        2,
+        "Undefined variable $activeMissing"
+      ]
+    ]
+  ],
+  "earlierManagedValueCapture": "prior=[] before missing VALUE capture",
+  "hostExceptionIdentityIsNotNativeExpectation": true,
+  "JavaExecuted": false
+}

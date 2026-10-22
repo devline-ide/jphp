@@ -1,0 +1,2 @@
+<?php
+$e=[];ob_start();echo 'A';$original=new RuntimeException('same');$f=new Fiber(function()use($original){ob_start();echo 'F';Fiber::suspend();throw $original;});$f->start();$e[]='park-level:'.ob_get_level();echo 'M';try{$f->resume();}catch(Throwable $x){$e[]=$x===$original?'same':'changed';}$e[]='end-level:'.ob_get_level();$e[]='inner:'.ob_get_clean();$e[]='outer:'.ob_get_clean();echo json_encode($e);

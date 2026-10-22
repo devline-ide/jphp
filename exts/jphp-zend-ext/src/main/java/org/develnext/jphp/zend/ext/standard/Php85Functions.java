@@ -128,6 +128,18 @@ public class Php85Functions extends FunctionsContainer {
         return value == null ? Memory.NULL : value.toImmutable();
     }
 
+    @Signature(value = @Arg(value = "array", type = HintType.ARRAY, readOnly = true), returnType = "int|string|null")
+    public static Memory array_key_first(Environment env, TraceInfo trace, @php.runtime.annotation.Runtime.Reference Memory... args) {
+        Memory key = array(env, trace, "array_key_first", args).peekFirstKey();
+        return key == null ? Memory.NULL : key;
+    }
+
+    @Signature(value = @Arg(value = "array", type = HintType.ARRAY, readOnly = true), returnType = "int|string|null")
+    public static Memory array_key_last(Environment env, TraceInfo trace, @php.runtime.annotation.Runtime.Reference Memory... args) {
+        Memory key = array(env, trace, "array_key_last", args).peekKey();
+        return key == null ? Memory.NULL : key;
+    }
+
     private static void arity(Environment env, TraceInfo trace, String function, Memory[] args, int count) {
         int supplied = args == null ? 0 : args.length;
         if (supplied != count) env.exception(trace, BaseArgumentCountError.class,

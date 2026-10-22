@@ -646,9 +646,13 @@ public class FunctionGenerator extends Generator<FunctionStmtToken> {
 
                             if (analyzer.getFunction() != null) {
                                 analyzer.getFunction().variable(argument.getName()).setUsed(true);
+                                if(isPhp8() && !argument.isReference())
+                                    analyzer.getFunction().variable(argument.getName()).setExplicitValueCapture(true);
                             }
 
-                            uses.add(argument.getName());
+                            // A VALUE read does not declare its source CV or create a dynamic-table slot.
+                            if(!isPhp8() || argument.isReference()
+                                    || analyzer.getFunction()!=null && analyzer.getFunction().isAutoUses())uses.add(argument.getName());
                         }
 
                         analyzer.getScope().addVariables(uses);

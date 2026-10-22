@@ -1,0 +1,8 @@
+["good-with-other-unresolved",true]
+["missing-with-other-unresolved",false]
+["inaccessible-unresolved",false]
+["trait-public",false]
+["enum-case",true]
+["unknown-pseudo",false]
+["unknown-empty",false]
+["autoload",["NotLoaded","NotLoaded"]]

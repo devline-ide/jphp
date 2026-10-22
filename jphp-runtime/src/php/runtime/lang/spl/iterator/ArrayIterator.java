@@ -35,7 +35,7 @@ import static php.runtime.annotation.Reflection.*;
 /** SPL's mutable storage iterator. Cursor state belongs to the iterator, not its backing array. */
 @Name("ArrayIterator")
 public class ArrayIterator extends BaseObject implements SeekableIterator, ArrayAccess, Countable, Serializable,
-        ICloneableObject<ArrayIterator> {
+        ICloneableObject<ArrayIterator>, SplArrayAccess {
     public static final int STD_PROP_LIST = 1;
     public static final int ARRAY_AS_PROPS = 2;
     private static final class Storage {
@@ -66,6 +66,9 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
     }
 
     private Storage storage = new Storage();
+    private ArrayObject aggregateOwner;
+    private ArrayIterator storageOwner;
+    private Storage backingStorage() { return aggregateOwner != null ? aggregateOwner.nativeBacking().backingStorage() : storageOwner != null ? storageOwner.backingStorage() : storage; }
     private long flags;
     private int position;
 
@@ -73,32 +76,81 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
     public ArrayIterator(Environment env, ClassEntity clazz) { super(env, clazz); }
 
     private void writable(Environment env) {
-        if (storage.sorting != 0) env.exception(BaseError.class, "Modification of ArrayObject during sorting is prohibited");
+        if (backingStorage().sorting != 0) env.exception(BaseError.class, "Modification of ArrayObject during sorting is prohibited");
     }
     private void backing(Environment env, Memory raw, String method) {
-        Memory value = raw.toValue();
+        Memory value=raw.toValue();
+        if(value instanceof ObjectMemory date && date.value instanceof php.runtime.lang.support.IPhpNativeDateView && PhpClassNames.isModern(env))
+            env.error(env.trace()==null?TraceInfo.UNKNOWN:env.trace(),ErrorType.E_DEPRECATED,
+                    "ArrayIterator::%s(): Using an object as a backing array for ArrayIterator is deprecated, as it allows violating class constraints and invariants",method);
+        rejectDateBacking(env,value,"ArrayIterator");
+        aggregateOwner = null; storageOwner = null;
         if (value.isArray()) {
             Storage fresh = new Storage(); fresh.array = value.toValue(ArrayMemory.class).duplicate(); storage = fresh;
         } else if (value.isObject()) {
             if (PhpClassNames.isModern(env)) env.error(env.trace() == null ? TraceInfo.UNKNOWN : env.trace(), ErrorType.E_DEPRECATED,
                     "ArrayIterator::%s(): Using an object as a backing array for ArrayIterator is deprecated, as it allows violating class constraints and invariants", method);
             IObject object = value.toValue(ObjectMemory.class).value;
-            if (object instanceof ArrayIterator) storage = ((ArrayIterator)object).storage;
+            if (object instanceof ArrayObject) { requireAcyclicBacking(((ArrayObject)object).nativeBacking()); aggregateOwner = (ArrayObject)object; storage = aggregateOwner.nativeBacking().backingStorage(); }
+            else if (object instanceof ArrayIterator) storage = ((ArrayIterator)object).backingStorage();
             else { Storage fresh = new Storage(); fresh.object = value; fresh.array = object.getProperties(); storage = fresh; }
         } else env.exception(InvalidArgumentException.class, "Passed variable is not an array or object");
         position = 0;
     }
+    private static void rejectDateBacking(Environment env,Memory raw,String container) {
+        if(raw instanceof ObjectMemory object && object.value instanceof php.runtime.lang.support.IPhpNativeDateView)
+            env.exception(InvalidArgumentException.class,"Overloaded object of type %s is not compatible with %s",object.value.getReflection().getName(),container);
+    }
+    private void requireAcyclicBacking(ArrayIterator owner) {
+        var visited=new java.util.IdentityHashMap<ArrayIterator,Boolean>();
+        for(ArrayIterator current=owner;current!=null;current=current.aggregateOwner!=null?current.aggregateOwner.nativeBacking():current.storageOwner) {
+            if(current==this || visited.put(current,Boolean.TRUE)!=null)
+                throw new IllegalArgumentException("Circular SPL backing is not supported");
+        }
+    }
+    @Ignore public void nativeWritable(Environment env) { writable(env); }
+    @Ignore public void nativeAttachAggregate(ArrayObject owner, long flags) { requireAcyclicBacking(owner.nativeBacking());aggregateOwner=owner;storageOwner=null;this.flags=flags;position=0; }
+    @Ignore public Memory nativeObjectBacking() { return aggregateOwner!=null ? ObjectMemory.valueOf(aggregateOwner) : storageOwner!=null ? ObjectMemory.valueOf(storageOwner) : storage.object; }
+    @Ignore public ArrayMemory nativeDetachedCopy() {
+        ArrayMemory result=new ArrayMemory();var entries=backingStorage().array.foreachIterator(false,false);
+        while(entries.next())if(!entries.getValue().isUndefined()) {
+            Memory value=entries.getValue();result.insertBucket(entries.getKey(),value.isReference()?value:value.toImmutable());
+        }
+        return result;
+    }
+    @Ignore public void nativeCloneBackingFrom(Environment env,ArrayIterator original) {
+        writable(env);Storage detached=new Storage();detached.array=original.nativeDetachedCopy();
+        aggregateOwner=null;storageOwner=null;storage=detached;position=0;
+    }
+    @Ignore public void nativeRestoreBacking(Environment env,ArrayMemory restored) {
+        writable(env);Storage next=new Storage();next.array=restored;
+        aggregateOwner=null;storageOwner=null;storage=next;position=0;
+    }
+    @Ignore public void nativeReplaceBacking(Environment env,Memory raw,ArrayMemory selfProperties) {
+        writable(env);Memory value=raw.toValue();rejectDateBacking(env,value,"ArrayObject");aggregateOwner=null;storageOwner=null;Storage next=new Storage();
+        if(selfProperties!=null){next.array=selfProperties;next.object=raw;}
+        else if(value.isArray()) {
+            var entries=value.toValue(ArrayMemory.class).foreachIterator(false,false);
+            while(entries.next()){Memory entry=entries.getValue();next.array.insertBucket(entries.getKey(),entry.isReference()?entry:entry.toImmutable());}
+        } else if(value.isObject()) {
+            var object=value.toValue(ObjectMemory.class).value;
+            if(object instanceof ArrayObject){requireAcyclicBacking(((ArrayObject)object).nativeBacking());aggregateOwner=(ArrayObject)object;position=0;return;}
+            if(object instanceof ArrayIterator){requireAcyclicBacking((ArrayIterator)object);storageOwner=(ArrayIterator)object;position=0;return;}
+            next.array=object.getProperties();next.object=value;
+        } else throw new IllegalArgumentException("ArrayObject backing requires array or object");
+        storage=next;position=0;
+    }
     private ArrayList<Object> keys(boolean all) {
         // ARRAY storage has no external structural publisher. Clones share this cache.
         // OBJECT properties may change independently and require a live public-key scan.
-        if (storage.object.isNull() && storage.keys != null) return storage.keys;
+        if (backingStorage().object.isNull() && backingStorage().keys != null) return backingStorage().keys;
         ArrayList<Object> result = new ArrayList<>();
-        ForeachIterator iterator = storage.array.foreachIterator(false, false);
+        ForeachIterator iterator = backingStorage().array.foreachIterator(false, false);
         while (iterator.next()) {
             String key = iterator.getKey().toString();
-            if (!iterator.getValue().isUndefined() && (all || storage.object.isNull() || key.indexOf('\0') < 0)) result.add(iterator.getKey());
+            if (!iterator.getValue().isUndefined() && (all || backingStorage().object.isNull() || key.indexOf('\0') < 0)) result.add(iterator.getKey());
         }
-        if (storage.object.isNull()) storage.keys = result;
+        if (backingStorage().object.isNull()) backingStorage().keys = result;
         return result;
     }
     private Object cursor() { ArrayList<Object> keys = keys(false); return position < keys.size() ? keys.get(position) : null; }
@@ -122,7 +174,7 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
     @Ignore public Memory propertySet(Environment env, String key, Memory value) { return offsetSet(env, StringMemory.valueOf(key), value); }
     @Ignore public Memory propertyUnset(Environment env, String key) { return offsetUnset(env, StringMemory.valueOf(key)); }
     @Ignore public Memory propertyIsset(Environment env, String key) {
-        ReferenceMemory value = storage.array.getByScalar(key); return value != null && !value.isNull() && !value.isUndefined() ? Memory.TRUE : Memory.NULL;
+        ReferenceMemory value = backingStorage().array.getByScalar(key); return value != null && !value.isNull() && !value.isUndefined() ? Memory.TRUE : Memory.NULL;
     }
 
     @Signature({@Arg(value="array", optional=@Optional(value="", type=HintType.ARRAY)), @Arg(value="flags", type=HintType.INT, optional=@Optional(value="0", type=HintType.INT))})
@@ -136,7 +188,7 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
         backing(env, value, "__construct"); flags = args.length > 1 ? args[1].toLong() : 0; return Memory.NULL;
     }
     @Signature public Memory current(Environment env, Memory... args) {
-        Object key = cursor(); return key == null ? Memory.NULL : storage.array.getByScalar(key).toValue();
+        Object key = cursor(); return key == null ? Memory.NULL : backingStorage().array.getByScalar(key).toValue();
     }
     @Signature public Memory key(Environment env, Memory... args) { return keyMemory(cursor()); }
     @Signature public Memory valid(Environment env, Memory... args) { return cursor() == null ? Memory.FALSE : Memory.TRUE; }
@@ -152,47 +204,58 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
     @Signature public Memory count(Environment env, Memory... args) { return LongMemory.valueOf(keys(false).size()); }
     @Signature public Memory getFlags(Environment env, Memory... args) { return LongMemory.valueOf(flags); }
     @Signature(@Arg(value="flags",type=HintType.INT)) public Memory setFlags(Environment env, Memory... args) { flags = args[0].toLong(); return Memory.NULL; }
-    @Signature public Memory getArrayCopy(Environment env, Memory... args) { return storage.array.duplicate(); }
+    @Signature public Memory getArrayCopy(Environment env, Memory... args) {
+        if (!backingStorage().object.isNull() && PhpClassNames.isModern(env)) {
+            ArrayMemory copy = new ArrayMemory();
+            ForeachIterator entries = backingStorage().array.foreachIterator(false, false);
+            while (entries.next()) {
+                Memory value = entries.getValue();
+                if (!value.isUndefined()) copy.insertBucket(entries.getKey(), value.isReference() ? value : value.toImmutable());
+            }
+            return copy;
+        }
+        return backingStorage().array.duplicate();
+    }
     @Signature(@Arg("key")) public Memory offsetExists(Environment env, Memory... args) {
-        ReferenceMemory value = storage.array.getByScalar(offset(env,args[0],"exists")); return value != null && !value.isUndefined() ? Memory.TRUE : Memory.FALSE;
+        ReferenceMemory value = backingStorage().array.getByScalar(offset(env,args[0],"exists")); return value != null && !value.isUndefined() ? Memory.TRUE : Memory.FALSE;
     }
     @Signature(@Arg("key")) public Memory offsetGet(Environment env, Memory... args) {
-        Object key = offset(env,args[0],"get"); ReferenceMemory value = storage.array.getByScalar(key);
+        Object key = offset(env,args[0],"get"); ReferenceMemory value = backingStorage().array.getByScalar(key);
         return value == null || value.isUndefined() ? missing(env,key) : value;
     }
     @Ignore public Memory offsetAddress(Environment env, Memory key) {
         writable(env);
         Object normalized = key.isNull() ? null : offset(env,key,"get");
-        boolean fresh = normalized == null || storage.array.getByScalar(normalized) == null;
-        ReferenceMemory result = normalized == null ? (ReferenceMemory) storage.array.refOfPush(env.trace())
-                : storage.array.getByScalarOrCreate(normalized, Memory.NULL);
-        if (fresh && storage.keys != null) storage.keys.add(normalized == null ? ArrayMemory.toKey(storage.array.peekKey()) : normalized);
+        boolean fresh = normalized == null || backingStorage().array.getByScalar(normalized) == null;
+        ReferenceMemory result = normalized == null ? (ReferenceMemory) backingStorage().array.refOfPush(env.trace())
+                : backingStorage().array.getByScalarOrCreate(normalized, Memory.NULL);
+        if (fresh && backingStorage().keys != null) backingStorage().keys.add(normalized == null ? ArrayMemory.toKey(backingStorage().array.peekKey()) : normalized);
         return result;
     }
     @Ignore public Memory offsetIsset(Environment env, Memory key) {
-        ReferenceMemory value = storage.array.getByScalar(offset(env,key,"exists"));
+        ReferenceMemory value = backingStorage().array.getByScalar(offset(env,key,"exists"));
         return value == null || value.isNull() || value.isUndefined() ? Memory.NULL : Memory.TRUE;
     }
     @Signature({@Arg("key"),@Arg("value")}) public Memory offsetSet(Environment env, Memory... args) {
         writable(env);
         Object key = args[0].isNull() ? null : offset(env,args[0],"set");
-        boolean fresh = key == null || storage.array.getByScalar(key) == null;
-        if (key == null) storage.array.add(args[1].toImmutable());
-        else storage.array.put(key, args[1].toImmutable());
-        if (fresh && storage.keys != null) storage.keys.add(key == null ? ArrayMemory.toKey(storage.array.peekKey()) : key);
+        boolean fresh = key == null || backingStorage().array.getByScalar(key) == null;
+        if (key == null) backingStorage().array.add(args[1].toImmutable());
+        else backingStorage().array.put(key, args[1].toImmutable());
+        if (fresh && backingStorage().keys != null) backingStorage().keys.add(key == null ? ArrayMemory.toKey(backingStorage().array.peekKey()) : key);
         return Memory.NULL;
     }
     @Signature(@Arg("key")) public Memory offsetUnset(Environment env, Memory... args) {
         writable(env); Object key = offset(env,args[0],"unset"); int index = keys(false).indexOf(key);
-        storage.array.remove(keyMemory(key));
-        if (storage.keys != null && index >= 0) storage.keys.remove(index);
+        backingStorage().array.remove(keyMemory(key));
+        if (backingStorage().keys != null && index >= 0) backingStorage().keys.remove(index);
         if (index >= 0 && index < position) position--; return Memory.NULL;
     }
     @Signature(@Arg("value")) public Memory append(Environment env, Memory... args) { return offsetSet(env,Memory.NULL,args[0]); }
 
     private Memory sort(Environment env, Memory argument, boolean byKey, int mode, boolean callback) throws Throwable {
         ArrayList<Object> ordered = new ArrayList<>(keys(true)); HashMap<Object,ReferenceMemory> values = new HashMap<>();
-        for (Object key:ordered) values.put(key,storage.array.getByScalar(key));
+        for (Object key:ordered) values.put(key,backingStorage().array.getByScalar(key));
         php.runtime.invoke.PhpCallFrame invoker = null;
         if (callback) {
             try { invoker = php.runtime.invoke.PhpCallFrame.acquireInternalRetainedCallable(argument, env, env.trace()); }
@@ -203,7 +266,7 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
         }
         final php.runtime.invoke.PhpCallFrame selected = invoker;
         final boolean[] warnedBoolean = {false};
-        storage.sorting++;
+        backingStorage().sorting++;
         try {
             Throwable comparisonFailure = null;
             try {
@@ -231,17 +294,17 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
                 } catch (Throwable failure) { return ArrayIterator.<RuntimeException,Integer>raise(failure); }
             });
             } catch (Throwable failure) { comparisonFailure = failure; }
-            if (storage.object.isNull()) {
+            if (backingStorage().object.isNull()) {
                 ArrayMemory array = new ArrayMemory();
-                for (Object key:ordered) array.put(key,values.get(key).getValue()); storage.array = array; storage.keys = ordered;
+                for (Object key:ordered) array.put(key,values.get(key).getValue()); backingStorage().array = array; backingStorage().keys = ordered;
             } else {
-                ForeachIterator hidden = storage.array.foreachIterator(false, false);
+                ForeachIterator hidden = backingStorage().array.foreachIterator(false, false);
                 while (hidden.next()) if (hidden.getValue().isUndefined()) ordered.add(hidden.getKey());
-                storage.array.reorderKeys(ordered);
+                backingStorage().array.reorderKeys(ordered);
             }
             if (comparisonFailure != null) throw comparisonFailure;
             return Memory.TRUE;
-        } finally { storage.sorting--; }
+        } finally { backingStorage().sorting--; }
     }
     private static <T extends Throwable,R> R raise(Throwable failure) throws T { throw (T)failure; }
     @Signature(@Arg(value="flags",type=HintType.INT,optional=@Optional(value="0",type=HintType.INT))) public Memory asort(Environment env, Memory... args) throws Throwable {return sort(env,Memory.NULL,false,args[0].toInteger(),false);}
@@ -252,10 +315,10 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
     @Signature(@Arg(value="callback",type=HintType.CALLABLE)) public Memory uksort(Environment env, Memory... args) throws Throwable {return sort(env,args[0],true,0,true);}
 
     @Signature public Memory __debugInfo(Environment env, Memory... args) {
-        ArrayMemory result = getProperties().duplicate(); result.put("\0ArrayIterator\0storage", storage.object.isNull() ? getArrayCopy(env) : storage.object); return result;
+        ArrayMemory result = getProperties().duplicate(); result.put("\0ArrayIterator\0storage", backingStorage().object.isNull() ? getArrayCopy(env) : backingStorage().object); return result;
     }
     @Signature public Memory __serialize(Environment env, Memory... args) {
-        ArrayMemory result = new ArrayMemory(); result.add(LongMemory.valueOf(flags)); result.add(storage.object.isNull() ? getArrayCopy(env) : storage.object);
+        ArrayMemory result = new ArrayMemory(); result.add(LongMemory.valueOf(flags)); result.add(backingStorage().object.isNull() ? getArrayCopy(env) : backingStorage().object);
         result.add(getProperties().duplicate()); result.add(Memory.NULL); return result;
     }
     @Signature(@Arg(value="data",type=HintType.ARRAY)) public Memory __unserialize(Environment env, Memory... args) {
@@ -275,7 +338,7 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
     }
     private String wire(Environment env,Memory value) {StringBuilder buffer=new StringBuilder();new Serializer(env,env.trace(),buffer).write(value);return buffer.toString();}
     @Signature public Memory serialize(Environment env, Memory... args) {
-        return StringMemory.valueOf("x:"+wire(env,LongMemory.valueOf(flags))+wire(env,storage.object.isNull()?getArrayCopy(env):storage.object)+";m:"+wire(env,getProperties()));
+        return StringMemory.valueOf("x:"+wire(env,LongMemory.valueOf(flags))+wire(env,backingStorage().object.isNull()?getArrayCopy(env):backingStorage().object)+";m:"+wire(env,getProperties()));
     }
     private static final class Parser extends Deserializer {
         Parser(Environment env){super(env,env.trace());}
@@ -296,7 +359,7 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
         return Memory.NULL;
     }
     @Ignore @Override public ArrayIterator __clone(Environment env, TraceInfo trace) {
-        ArrayIterator copy=getReflection().newObjectWithoutConstruct(env); copy.storage=storage;copy.flags=flags;copy.position=0;copy.getProperties().putAll(getProperties());return copy;
+        ArrayIterator copy=getReflection().newObjectWithoutConstruct(env); copy.storage=storage;copy.aggregateOwner=aggregateOwner;copy.storageOwner=storageOwner;copy.flags=flags;copy.position=0;copy.getProperties().putAll(getProperties());return copy;
     }
     @Ignore @Override public ForeachIterator getNewIterator(Environment env) {return internalIterator(env,false,false);}
     @Ignore @Override public ForeachIterator getNewIterator(Environment env, boolean refs, boolean keyRefs) {return internalIterator(env,refs,keyRefs);}
@@ -318,7 +381,7 @@ public class ArrayIterator extends BaseObject implements SeekableIterator, Array
                 if(!env.invokeMethodNoThrow(ArrayIterator.this,"valid").toBoolean())return false;
                 if(fetchValue){
                     currentKey=env.invokeMethodNoThrow(ArrayIterator.this,"key");
-                    currentValue=references?storage.array.getByScalar(cursor()):env.invokeMethodNoThrow(ArrayIterator.this,"current").toImmutable();
+                    currentValue=references?backingStorage().array.getByScalar(cursor()):env.invokeMethodNoThrow(ArrayIterator.this,"current").toImmutable();
                 }
                 return true;
             }

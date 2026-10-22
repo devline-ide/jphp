@@ -1,0 +1,2 @@
+<?php
+error_reporting(-1);$events=[];$sentinel=new RuntimeException('native-deprecation-stop');$value='unchanged';set_error_handler(function($n,$s)use(&$events,$sentinel){$events[]='warn:'.$n.':'.$s;throw $sentinel;});try{$value=constant('E_STRICT');$events[]='wrong-after';}catch(Throwable $e){$events[]=$e===$sentinel?'same':'different';}finally{$events[]='finally';}restore_error_handler();$events[]='value:'.$value;echo serialize($events);

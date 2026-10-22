@@ -583,6 +583,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                     expressionCompiler.writePushDup();
                     expressionCompiler.writePushGetFromArray(i, Memory.class);
                     ownership.importing(i, true, argument.isReference());
+                    LabelNode[] sessionCapture=argument.isReference()?ownership.captureReferenceHeader(node.instructions,local,i):null;
 
                     if (statement.isDynamicLocal()) {
                         expressionCompiler.writeVarAssign(local, argument.getName(), false, false);
@@ -597,6 +598,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                         expressionCompiler.writeVarStore(local, false, false);
                     }
 
+                    ownership.endCaptureReferenceHeader(node.instructions,sessionCapture);
                     ownership.endImport();
                     local.pushLevel();
                     i++;
@@ -631,7 +633,16 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
 
                     if (argument.getValue() == null)
                         expressionCompiler.writePushNull();
-                    else
+                    else if (compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5
+                            && entity.getParameters()[i].getDefaultInitializer()!=null && ownership.enabled()) {
+                        LabelNode passive=ownership.activeParameterDefault(node.instructions,i), joined=new LabelNode();
+                        expressionCompiler.stackPush(Memory.Type.REFERENCE);
+                        node.instructions.add(new JumpInsnNode(Opcodes.GOTO,joined));node.instructions.add(passive);
+                        expressionCompiler.stackPop();ownership.beginPassive();
+                        try {expressionCompiler.writeExpression(argument.getValue(),true,false);}
+                        finally {ownership.endPassive(passive,joined);}
+                        node.instructions.add(joined);
+                    } else
                         expressionCompiler.writeExpression(argument.getValue(), true, false);
 
                     expressionCompiler.writeVarAssign(local, argument.getName(), false, false);
@@ -647,10 +658,10 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
         }
     }
 
-    private ParameterEntity.DefaultInitializer writeParameterInitializer(ExprStmtToken value) {
+    private ParameterEntity.DefaultInitializer writeParameterInitializer(ExprStmtToken value, boolean constantOnly) {
         MethodNode initializer = new MethodNodeImpl();
         initializer.access = Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC;
-        initializer.name = "__$parameterDefault" + clazz.entity.nextMethodIndex();
+        initializer.name = (constantOnly ? "__$parameterDefault$constant$" : "__$parameterDefault") + clazz.entity.nextMethodIndex();
         initializer.desc = Type.getMethodDescriptor(Type.getType(Memory.class), Type.getType(Environment.class));
         MethodStmtCompiler method = new MethodStmtCompiler(clazz, initializer);
         method.setInitializer(true);
@@ -665,7 +676,8 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
         method.writeFooter();
         clazz.node.methods.add(initializer);
         return new ParameterEntity.DefaultInitializer(compiler.getModule().getInternalName(), clazz.node.name.replace('/', '.'),
-                initializer.name, clazz.isSystem() ? null : clazz.entity.getName());
+                initializer.name, clazz.isSystem() ? null : clazz.entity.getName(), constantOnly
+                        ? ParameterEntity.DefaultInitializer.Kind.CONSTANT_EXPRESSION : ParameterEntity.DefaultInitializer.Kind.PER_CALL);
     }
 
     private void writePropertyWriteContext() {
@@ -808,15 +820,16 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                 ExprStmtToken value = argument.getValue();
 
                 if (value != null) {
-                    Memory defaultValue = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
-                            ? PhpConstantExpression.checkParameter(value, expressionStmtCompiler)
+                    boolean modernDefault = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
+                    var analyzedDefault = modernDefault ? PhpConstantExpression.analyzeParameter(value, expressionStmtCompiler) : null;
+                    Memory defaultValue = modernDefault ? analyzedDefault.value()
                             : expressionStmtCompiler.writeExpression(value, true, true, false);
 
                     // try detect constant
                     if (value.isSingle()) {
                         if (value.getSingle() instanceof NameToken){
                             parameter.setDefaultValueConstName(((NameToken) value.getSingle()).getName());
-                            if (defaultValue == null) {
+                            if (defaultValue == null && !modernDefault) {
                                 defaultValue = (new ConstantMemory(((NameToken) value.getSingle()).getName()));
                                 parameter.setMutable(true);
                             }
@@ -824,7 +837,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                             StaticAccessExprToken access = (StaticAccessExprToken)value.getSingle();
 
                             if (access.getClazz() instanceof NameToken && access.getField() instanceof NameToken){
-                                if (defaultValue == null)
+                                if (defaultValue == null && !modernDefault)
                                     defaultValue = (new ClassConstantMemory(
                                             ((NameToken) access.getClazz()).getName(),
                                             ((NameToken) access.getField()).getName()
@@ -839,12 +852,9 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
                         }
                     }
 
-                    if (defaultValue == null && compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
-                        defaultValue = PhpConstantExpression.checkParameter(value, expressionStmtCompiler);
-                        if (defaultValue == null) {
-                            parameter.setDefaultInitializer(writeParameterInitializer(value));
-                            defaultValue = Memory.NULL;
-                        }
+                    if (defaultValue == null && modernDefault) {
+                        parameter.setDefaultInitializer(writeParameterInitializer(value, analyzedDefault.constantOnly()));
+                        defaultValue = Memory.NULL;
                     }
                     if (defaultValue == null)
                         compiler.getEnvironment().error(

@@ -1,0 +1,2 @@
+<?php
+foreach(['mb_trim','mb_ltrim','mb_rtrim','mb_ucfirst','mb_lcfirst','mb_internal_encoding','grapheme_str_split'] as $name){$f=new ReflectionFunction($name);$params=[];foreach($f->getParameters() as $p)$params[]=[$p->getName(),(string)$p->getType(),$p->isOptional(),$p->isDefaultValueAvailable()?$p->getDefaultValue():null];echo json_encode([$name,$f->getExtensionName(),$f->getNumberOfRequiredParameters(),$f->getNumberOfParameters(),(string)$f->getReturnType(),$params],JSON_UNESCAPED_SLASHES),"\n";}

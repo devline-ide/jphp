@@ -1,0 +1,16 @@
+engine:["8.5.11","10.44 2024-06-07",true,"1000000","100000"]
+frameless-unset-direct3:{"case":"unset:direct3","result":{"first":"x"},"inputAfter":{"first":"<Stringable>"},"events":["unset"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-unset-direct4:{"case":"unset:direct4","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>"},"events":["unset"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-unset-direct5:{"case":"unset:direct5","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>"},"events":["unset"],"count":2,"error":0,"warnings":[],"exception":null}
+frameless-unset-dynamic3:{"case":"unset:dynamic3","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>"},"events":["unset"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-unset-filter3:{"case":"unset:filter3","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>"},"events":["unset"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-replace-direct3:{"case":"replace:direct3","result":{"first":"x","tail":"b"},"inputAfter":{"first":"<Stringable>","tail":"b"},"events":["replace"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-replace-direct4:{"case":"replace:direct4","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"b"},"events":["replace"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-replace-direct5:{"case":"replace:direct5","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"b"},"events":["replace"],"count":2,"error":0,"warnings":[],"exception":null}
+frameless-replace-dynamic3:{"case":"replace:dynamic3","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"b"},"events":["replace"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-replace-filter3:{"case":"replace:filter3","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"b"},"events":["replace"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-append-direct3:{"case":"append:direct3","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"a","added":"a"},"events":["append"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-append-direct4:{"case":"append:direct4","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"a","added":"a"},"events":["append"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-append-direct5:{"case":"append:direct5","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"a","added":"a"},"events":["append"],"count":2,"error":0,"warnings":[],"exception":null}
+frameless-append-dynamic3:{"case":"append:dynamic3","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"a","added":"a"},"events":["append"],"count":777,"error":0,"warnings":[],"exception":null}
+frameless-append-filter3:{"case":"append:filter3","result":{"first":"x","tail":"x"},"inputAfter":{"first":"<Stringable>","tail":"a","added":"a"},"events":["append"],"count":777,"error":0,"warnings":[],"exception":null}

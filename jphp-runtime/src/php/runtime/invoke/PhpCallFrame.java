@@ -277,6 +277,11 @@ public final class PhpCallFrame implements AutoCloseable {
         }
         @Override protected Memory invoke(Memory...args)throws Throwable {warning.before(env,trace);return super.invoke(args);}
     }
+    /** Only unique retained-diagnostic targets need the invocation site across a Fiber's initial transfer. */
+    public static void retargetRetainedInvocation(Invoker target,TraceInfo trace) {
+        if(target instanceof RetainedStaticMagic || target instanceof RetainedDynamicMagic)target.setTrace(trace);
+    }
+
     /** Discarded invocation bypasses Invoker.invoke, so preserve its retained callback diagnostic here too. */
     public static void beforeRetainedDiscardedInvocation(Invoker target)throws Throwable {
         if(target instanceof RetainedStaticMagic statik)statik.warning.before(target.getEnvironment(),target.trace);

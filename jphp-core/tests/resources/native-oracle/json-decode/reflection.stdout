@@ -1,0 +1,1 @@
+["json_decode",1,4,"mixed",[["json","string",false,null],["associative","?bool",true,null],["depth","int",true,512],["flags","int",true,0]]]

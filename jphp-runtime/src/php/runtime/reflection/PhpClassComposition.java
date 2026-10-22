@@ -29,6 +29,8 @@ final class PhpClassComposition {
             if ((owner.isInterface()) != (use.kind() == PhpClassRelations.InterfaceKind.EXTENDS))
                 fail(env, use.name().trace(), "Invalid interface relation in %s", owner.getName());
             ClassEntity actual = resolve(owner, env, use.name(), ClassEntity.Type.INTERFACE);
+            if(!owner.isInternal() && actual.getNativeClass()!=null && actual.getNativeClass().isAnnotationPresent(php.runtime.annotation.Reflection.InternalInterface.class))
+                fail(env,use.name().trace(),"%s can't be implemented by user classes",actual.getName());
             if (!directInterfaces.add(actual)) fail(env, use.name().trace(), "Interface %s cannot be implemented twice", actual.getName());
             collectInterfaces(actual, interfaces, interfaceSeen);
         }

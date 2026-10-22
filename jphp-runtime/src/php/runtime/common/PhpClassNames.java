@@ -6,6 +6,10 @@ import php.runtime.reflection.ClassEntity;
 /** PHP class identifiers fold ASCII letters only; legacy symbols retain their original lookup contract. */
 public final class PhpClassNames {
     private PhpClassNames() {}
+    /** Normalize a raw PHP API argument exactly once; internal lookup and wire names stay untouched. */
+    public static String lookupName(Environment env, String rawName) {
+        return rawName.startsWith("\\") && isModern(env) ? rawName.substring(1) : rawName;
+    }
     public static String canonicalKey(String name) {
         StringBuilder result = null;
         for (int i = 0; i < name.length(); i++) {

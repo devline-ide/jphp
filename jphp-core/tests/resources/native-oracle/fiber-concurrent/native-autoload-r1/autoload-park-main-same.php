@@ -1,0 +1,2 @@
+<?php
+$e=[];spl_autoload_register(function($name)use(&$e){$e[]='load:'.$name.':'.(Fiber::getCurrent()?'fiber':'main');if(Fiber::getCurrent())Fiber::suspend('park');if(!class_exists($name,false))eval('class '.$name.' {}');});$f=new Fiber(function(){return new ParkedSameClass;});$e[]=$f->start();$e[]='exists:'.(class_exists('ParkedSameClass')?1:0);try{$other=new ParkedSameClass;$e[]='new:'.get_class($other);}catch(Throwable $x){$e[]=$x::class.':'.$x->getMessage();}$f->resume();$e[]='ret:'.get_class($f->getReturn());echo json_encode($e);

@@ -1,0 +1,8 @@
+["omitted",["a","b","c","d"]]
+["null",["a","b","c","d"]]
+["zero",[]]
+["public",["a","d"]]
+["protected",["b"]]
+["private",["c"]]
+["static",["d"]]
+["public-or-static",["a","d"]]

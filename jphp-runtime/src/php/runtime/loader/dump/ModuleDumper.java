@@ -25,8 +25,10 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     public final static int LEGACY_DUMP_VERSION = 20141011;
     public final static int DUMP_VERSION = 20261007;
     // ABI24 bytecode may require PhpUnwindSignal in native-finally exception tables.
-    // ABI25 emitted lexical constant reads require the environment-local resolution cache.
-    public final static int COMPILER_ABI_VERSION = 25;
+    // ABI26 emits compact explicit-capture reads and their actual owned producer operation.
+    // ABI27 adds the explicit constant-only parameter initializer kind (PDIN3).
+    // ABI28 emits the explicit legacy VALUE-copy helper; modern copies preserve independent cursors.
+    public final static int COMPILER_ABI_VERSION = 28;
     public final static int COMPILER_PROVENANCE_STAMP = 0x43414249; // CABI, in the existing reserved module tail.
     public final static int COMPILER_PROVENANCE_VERSION = 1;
 

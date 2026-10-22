@@ -335,6 +335,7 @@ public class PropertyEntity extends Entity {
 
     public Memory assignValue(Environment env, TraceInfo trace, Object object, String name, Memory value) {
         if(object instanceof php.runtime.lang.IPhpNativePropertyGuard guard) guard.validateNativePropertyWrite(env,trace,name);
+        object=php.runtime.PhpLazyObjects.backingUnchecked(env,(IObject)object,specificName);
         php.runtime.memory.ReferenceMemory reference=(php.runtime.memory.ReferenceMemory)((IObject) object).getProperties().refOfIndex(name);
         reference.attachPropertySource(env, this,(IObject)object);
         return phpReadonly ? php.runtime.PhpReadonlyProperty.reflectAssign(env,trace,this,(IObject)object,reference,value) : reference.assign(value);
@@ -358,7 +359,7 @@ public class PropertyEntity extends Entity {
             return ObjectInvokeHelper.invokeMethod((IObject) object, getter, env, trace, null, false);
         }
 
-        ArrayMemory props = ((IObject) object).getProperties();
+        ArrayMemory props = php.runtime.PhpLazyObjects.backing(env,(IObject)object,specificName).getProperties();
 
         Memory result = props.getByScalar(specificName);
         if (result == null && declaredType == null) {

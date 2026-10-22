@@ -75,7 +75,7 @@ abstract public class BaseObject implements IObject, php.runtime.lang.support.IP
             }
         }
 
-        return __dynamicProperties__;
+        return php.runtime.PhpLazyObjects.currentProperties(this,__dynamicProperties__);
     }
 
     @Override

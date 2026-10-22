@@ -1,0 +1,2 @@
+["flags-warning-mutates-array-send","czo5OiJ7Im9sZCI6MX0iOw==",null,0,"No error",[[8192,"Implicit conversion from float 1.5 to int loses precision"]]]
+["flags-warning-throws-before-encode","Tjs=",["Exception",0,"encode-flags-handler"],4,"Syntax error",[[8192,"Implicit conversion from float 1.5 to int loses precision"]]]

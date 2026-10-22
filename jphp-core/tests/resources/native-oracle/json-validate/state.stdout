@@ -1,0 +1,6 @@
+["initial-none",null,0,"No error"]
+["validate-failure",null,2,"State mismatch (invalid or malformed JSON)"]
+["decode-clears-validate",null,0,"No error"]
+["validate-clears-decode",null,0,"No error"]
+["encode-callback-throw-preserves-state",null,4,"Syntax error"]
+["null-handler-before-state","null-handler",4,"Syntax error"]

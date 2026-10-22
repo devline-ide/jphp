@@ -1,0 +1,2 @@
+<?php
+$e=[];$attempt=0;spl_autoload_register(function($name)use(&$e,&$attempt){$e[]='load:'.$name;if($name==='RetryDependency'&&++$attempt===1){Fiber::suspend('park');throw new RuntimeException('load-failed');}eval('class '.$name.' {const X=7;}');});class RetryInitializer{const X=RetryDependency::X;}$f=new Fiber(function(){return RetryInitializer::X;});$e[]=$f->start();$e[]='other:'.OtherRetryClass::X;try{$f->resume();}catch(Throwable $x){$e[]='caught:'.$x->getMessage();}$e[]='retry:'.RetryInitializer::X;$e[]='attempts:'.$attempt;echo json_encode($e);

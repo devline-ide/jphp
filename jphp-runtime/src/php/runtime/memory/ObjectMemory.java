@@ -173,9 +173,10 @@ public class ObjectMemory extends Memory {
         switch (other.type){
             case OBJECT:
                 ClassEntity otherReflection = ((ObjectMemory)other).getReflection();
-                if (otherReflection.getId() != getReflection().getId())
-                    return false;
                 IObject otherObject = ((ObjectMemory)other).value;
+                if (otherReflection.getId() != getReflection().getId()
+                        && !(value instanceof php.runtime.lang.support.IPhpNativeDateView date && date.phpDateComparable(otherObject)))
+                    return false;
                 return comparator.compare(value, otherObject);
             case REFERENCE: return compare(other.toValue(), comparator);
         }
@@ -453,7 +454,7 @@ public class ObjectMemory extends Memory {
                 protected boolean init() {
                     context = env.getLastClassOnStack();
                     reflection = value.getReflection();
-                    child = value.getProperties().foreachIterator(getReferences, getKeyReferences);
+                    child = php.runtime.PhpLazyObjects.observeUnchecked(env,value,php.runtime.PhpLazyObjects.Observation.PROPERTIES).getProperties().foreachIterator(getReferences, getKeyReferences);
                     return true;
                 }
 
@@ -545,6 +546,9 @@ public class ObjectMemory extends Memory {
 
     @Override
     public Memory toArray() {
+        if(value instanceof php.runtime.lang.support.IPhpNativeDateView date)return date.phpDateExport(value.getEnvironment());
+        if (value instanceof php.runtime.lang.spl.iterator.ArrayObject)
+            return ((php.runtime.lang.spl.iterator.ArrayObject)value).castArray(value.getEnvironment());
         ArrayMemory result = new ArrayMemory();
         ArrayMemory props = value.getProperties();
 
@@ -612,10 +616,11 @@ public class ObjectMemory extends Memory {
     }
 
     private boolean nativeArrayIteratorMember(String name) {
-        if (!(value instanceof php.runtime.lang.spl.iterator.ArrayIterator)) return false;
+        if (!(value instanceof php.runtime.lang.spl.iterator.SplArrayAccess)) return false;
         var method = getReflection().findMethod(name.toLowerCase(java.util.Locale.ROOT));
         return method != null && method.getNativeMethod() != null
-                && method.getNativeMethod().getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class;
+                && (method.getNativeMethod().getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayIterator.class
+                    || method.getNativeMethod().getDeclaringClass() == php.runtime.lang.spl.iterator.ArrayObject.class);
     }
 
     @Override
@@ -625,7 +630,7 @@ public class ObjectMemory extends Memory {
                 @Override
                 public Memory assign(Memory memory) {
                     Environment env = ObjectMemory.this.value.getEnvironment();
-                    if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+                    if (value instanceof php.runtime.lang.spl.iterator.SplArrayAccess) {
                         env.invokeMethodNoThrow(value, "offsetSet", index, memory);
                         return memory;
                     }
@@ -1087,7 +1092,7 @@ public class ObjectMemory extends Memory {
                 @Override
                 public ReferenceMemory getReferenceForBinding() {
                     if (nativeArrayIteratorMember("offsetGet"))
-                        return ((ReferenceMemory) ((php.runtime.lang.spl.iterator.ArrayIterator) value)
+                        return ((ReferenceMemory) ((php.runtime.lang.spl.iterator.SplArrayAccess) value)
                                 .offsetAddress(value.getEnvironment(), index)).getReferenceForBinding();
                     return super.getReferenceForBinding();
                 }
@@ -1234,7 +1239,7 @@ public class ObjectMemory extends Memory {
 
     @Override
     public Memory valueOfIndex(TraceInfo trace, Memory index) {
-        if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+        if (value instanceof php.runtime.lang.spl.iterator.SplArrayAccess) {
             return value.getEnvironment().invokeMethodNoThrow(value, "offsetGet", index);
         }
         if (value instanceof ArrayAccess){
@@ -1280,7 +1285,7 @@ public class ObjectMemory extends Memory {
 
     @Override
     public void unsetOfIndex(TraceInfo trace, Memory index) {
-        if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+        if (value instanceof php.runtime.lang.spl.iterator.SplArrayAccess) {
             value.getEnvironment().invokeMethodNoThrow(value, "offsetUnset", index);
             return;
         }
@@ -1311,10 +1316,10 @@ public class ObjectMemory extends Memory {
     }
 
     private Memory issetOfIndex(TraceInfo trace, Memory index, boolean asEmpty) {
-        if (value instanceof php.runtime.lang.spl.iterator.ArrayIterator) {
+        if (value instanceof php.runtime.lang.spl.iterator.SplArrayAccess) {
             Environment env = value.getEnvironment();
             Memory exists = nativeArrayIteratorMember("offsetExists")
-                    ? ((php.runtime.lang.spl.iterator.ArrayIterator) value).offsetIsset(env, index)
+                    ? ((php.runtime.lang.spl.iterator.SplArrayAccess) value).offsetIsset(env, index)
                     : env.invokeMethodNoThrow(value, "offsetExists", index);
             if (!exists.toBoolean()) return Memory.NULL;
             return asEmpty ? env.invokeMethodNoThrow(value, "offsetGet", index) : Memory.TRUE;

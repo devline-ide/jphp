@@ -134,7 +134,7 @@ public class Serializer {
         if (used.add(memory.getPointer())){
             IObject object = memory.value;
             ClassEntity reflection = object.getReflection();
-            if (reflection.isAnonymous()) env.exception(php.runtime.lang.BaseException.class,
+            if (reflection.isAnonymous() || object instanceof php.runtime.lang.PhpFiber) env.exception(php.runtime.lang.BaseException.class,
                     "Serialization of '%s' is not allowed", reflection.getName());
             if (object instanceof Serializable){
                 Memory result;

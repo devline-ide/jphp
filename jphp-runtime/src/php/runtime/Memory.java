@@ -636,6 +636,11 @@ abstract public class Memory implements Comparable<Memory> {
         return this;
     }
 
+    /** Compile-time legacy VALUE copy; scalars retain their ordinary immutable conversion. */
+    public Memory toImmutableForLegacy(){
+        return toImmutable();
+    }
+
     public Memory toImmutable(Environment env, TraceInfo trace){
         return toImmutable();
     }

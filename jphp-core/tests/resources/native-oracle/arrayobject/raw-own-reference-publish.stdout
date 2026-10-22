@@ -1,0 +1,7 @@
+["raw-restore-future-write-guard","ok",["bad",["TypeError","Cannot assign array to property PublishTypedAO::$x of type int"],9],[]]
+["raw-restore-old-alias-detached","ok",[["TypeError","Cannot assign string to reference held by property PublishTypedAO::$x of type int",7],"bad"],[]]
+["raw-restore-new-reference-guard","ok",[["accepted"],"bad","bad"],[]]
+["raw-restore-other-owner-stays-guarded","ok",[["TypeError","Cannot assign string to reference held by property PublishTypedAO::$x of type int"],7,"bad",7],[]]
+["nested-modern-wire-byte-preservation","ok","783a693a303b4f3a31313a2241727261794f626a656374223a343a7b693a303b693a303b693a313b613a313a7b733a343a2274657874223b733a383a22d191d0b6f09f9880223b7d693a323b613a303a7b7d693a333b4e3b7d3b6d3a613a303a7b7d",[[8192,"ArrayObject::__construct(): Using an object as a backing array for ArrayObject is deprecated, as it allows violating class constraints and invariants"]]]
+["invalid-byte-wire-hex","ok",["783a693a303b613a313a7b733a313a22ff223b733a333a22610080223b7d3b6d3a613a303a7b7d","ff","610080"],[]]
+["backing-ownprops-shared-cell-object","ok",["783a693a303b613a323a7b733a343a2263656c6c223b693a333b733a363a226f626a656374223b4f3a383a22737464436c617373223a313a7b733a313a226e223b693a343b7d7d3b6d3a613a323a7b733a353a22616c696173223b523a333b733a363a226f626a656374223b723a343b7d",9,9,true],[]]

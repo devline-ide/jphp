@@ -71,6 +71,23 @@ public final class PhpObjectShellVerifier {
         });
     }
 
+    /**
+     * Exact loaded property shell with intentionally UNDEFINED instance anchors. This does not
+     * resolve PHP defaults and cannot mint foreign/native object certificates: the same closed
+     * constructor/initializer bytecode proof used by ordinary managed objects is still required.
+     */
+    public static PhpOwnershipObjects.Provider registerDeferredPropertiesShell(
+            PhpOwnershipObjects objects,Environment environment,ClassEntity entity) {
+        if(objects.domain().currentContext()!=environment)
+            throw new IllegalArgumentException("Lazy shell provider requires its actual Environment");
+        Constructor<?> constructor=requireLoadedShell(entity);
+        return objects.registerPropertiesProvider(entity,constructor,(selected,actualEnvironment)-> {
+            if(selected!=entity||actualEnvironment!=environment)
+                throw new IllegalArgumentException("Deferred property shell belongs to another class/Environment");
+            requireLoadedShell(selected);
+        });
+    }
+
     /** Pure closed-default proof. No class initialization or PHP value lookup occurs here. */
     public static LiteralDefaultsPlan prepareLiteralDefaults(ClassEntity entity,Environment environment) {
         return new LiteralDefaultsPlan(Objects.requireNonNull(entity),Objects.requireNonNull(environment));

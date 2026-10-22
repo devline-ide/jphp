@@ -1,0 +1,14 @@
+depth	diagnostic	12
+depth	depth	14
+depth	argument-snapshot	2
+utf8	utf8	10
+utf8	consume	7
+callbacks	callbacks	10
+callbacks	mutation-seams	3
+values	values	13
+reflection	reflection	1
+callbacks	publication	4
+callbacks	nested	3
+callbacks	inherited-order	3
+callbacks	hooked-duplicates	15
+values	java-string-producer	56

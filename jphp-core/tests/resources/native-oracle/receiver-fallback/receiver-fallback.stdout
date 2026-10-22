@@ -1,0 +1,3 @@
+instance=1
+static=Error:Using $this when not in object context
+closure=1111

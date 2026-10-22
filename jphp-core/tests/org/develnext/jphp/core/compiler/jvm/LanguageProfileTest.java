@@ -404,6 +404,25 @@ public class LanguageProfileTest extends JvmCompilerCase {
         } finally { env.doFinal(); }
     }
 
+    @Test
+    public void testEchoVariableBoundaryIsIndependentOfCommaSyntax() throws Throwable {
+        String[] statements = {
+                "echo $id,'=',7;",
+                "echo $id . '=' . 7;",
+                "echo$id . '=' . 7;",
+                "echo$id,'=',7;"
+        };
+        for (PhpLanguageProfile profile : PhpLanguageProfile.values()) {
+            for (boolean dumped : new boolean[] {false, true}) {
+                for (String statement : statements) {
+                    assertEquals(profile + " dumped=" + dumped + " " + statement, "x=7",
+                            runProfile("$id='x'; ob_start(); " + statement + " return ob_get_clean();",
+                                    profile, dumped).toString());
+                }
+            }
+        }
+    }
+
     private String resource(String name) throws IOException {
         try (InputStream input = getClass().getClassLoader().getResourceAsStream(name)) {
             assertNotNull(name, input);

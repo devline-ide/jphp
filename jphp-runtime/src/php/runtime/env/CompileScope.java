@@ -57,12 +57,37 @@ public class CompileScope {
     public final ConcurrentHashMap<String, ModuleEntity> moduleMap;
     public final ConcurrentHashMap<String, ModuleEntity> moduleIndexMap;
     private final ConcurrentHashMap<ModuleCacheKey, ModuleEntity> cachedModules = new ConcurrentHashMap<>();
+    private final Set<Object> loadingModules = new HashSet<>();
+    private final Set<String> loadingPhp85Classes = new HashSet<>();
+    private static final class ModuleInputIdentity {
+        private final java.lang.ref.WeakReference<Context> context;
+        private final int hash;
+        ModuleInputIdentity(Context context){this.context=new java.lang.ref.WeakReference<>(context);hash=System.identityHashCode(context);}
+        @Override public int hashCode(){return hash;}
+        @Override public boolean equals(Object other){return this==other || other instanceof ModuleInputIdentity identity
+                && context.get()!=null && context.get()==identity.context.get();}
+    }
+    public final class ModuleLoad implements AutoCloseable {
+        private final Object key;private final Thread owner=Thread.currentThread();private boolean closed;
+        private ModuleLoad(Object key){this.key=key;}
+        @Override public void close(){if(closed)return;if(owner!=Thread.currentThread())throw new IllegalStateException("Foreign module load release");
+            synchronized(loadingModules){loadingModules.remove(key);}closed=true;}
+    }
+    public ModuleLoad beginModuleLoad(Context context,boolean compiled)throws java.io.IOException {
+        String name=context.getModuleName();
+        Object key=name==null?new ModuleInputIdentity(context):new ModuleCacheKey(name,compiled,context.getPhpLanguageProfile(this),
+                compiled?"":context.getImplicitClassImportsFingerprint());
+        synchronized(loadingModules){if(!loadingModules.add(key))throw new IllegalStateException("Recursive module restoration before publication");}
+        return new ModuleLoad(key);
+    }
 
     /** Canonical ASCII class keys, including aliases; legacy lookup state stays private. */
     protected final Map<String, ClassEntity> classMap;
     private final Map<String, ClassEntity> legacyClassMap = new HashMap<>();
     private final Map<String, String> legacyClassKeys = new HashMap<>();
     private final ThreadLocal<Boolean> classLookupModern = new ThreadLocal<>();
+    // Explicit producer context only; restore/remove in finally, never infer an Env from a thread binding.
+    private final ThreadLocal<Environment> classLookupEnvironment = new ThreadLocal<>();
     private final Map<String, CompileClass> canonicalCompileClassMap = new HashMap<>();
     private final Map<String, CompileClass> php85CompileClassMap = new HashMap<>();
     private final Map<String, ClassEntity> php85ClassMap = new HashMap<>();
@@ -331,6 +356,13 @@ public class CompileScope {
         return functionMap;
     }
 
+    /** Snapshot of the registered modern builtins for API metadata consumers. */
+    public Set<String> getPhp85FunctionNames() {
+        synchronized (functionMap) {
+            return Set.copyOf(php85FunctionMap.keySet());
+        }
+    }
+
     public Map<String, ConstantEntity> getConstantMap() {
         return constantMap;
     }
@@ -369,20 +401,28 @@ public class CompileScope {
             if(initializer!=null) php85ClassInitializers.put(key,initializer);
         }
     }
+    public ClassEntity peekPhp85Class(String name) {
+        synchronized(classMap){return php85ClassMap.get(PhpClassNames.canonicalKey(name));}
+    }
+    public boolean isPhp85ClassReserved(String name) {
+        synchronized(classMap){return php85CompileClassMap.containsKey(PhpClassNames.canonicalKey(name));}
+    }
     public ClassEntity fetchPhp85Class(String name) {
-        synchronized(classMap) {
-            String key=PhpClassNames.canonicalKey(name);
-            ClassEntity entity=php85ClassMap.get(key);
-            if(entity!=null) return entity;
-            CompileClass compiled=php85CompileClassMap.get(key);
-            if(compiled==null) return null;
+        String key=PhpClassNames.canonicalKey(name);
+        synchronized(classMap){ClassEntity found=php85ClassMap.get(key);if(found!=null)return found;if(!php85CompileClassMap.containsKey(key))return null;}
+        try(var admission=enterClassLookupDomain()) {
+            CompileClass compiled;java.util.function.Consumer<ClassEntity> initializer;
+            synchronized(classMap){ClassEntity found=php85ClassMap.get(key);if(found!=null)return found;
+                compiled=php85CompileClassMap.get(key);if(compiled==null)return null;
+                if(!loadingPhp85Classes.add(key))throw new IllegalStateException("Recursive builtin class wrapping before publication");
+                initializer=php85ClassInitializers.get(key);}
             Boolean previous=classLookupModern.get();classLookupModern.set(true);
             try {
-                entity=new ClassEntity(new ClassWrapper(compiled.getExtension(),this,compiled.getNativeClass()));
-                entity.setId(nextClassIndex());
-                var initializer=php85ClassInitializers.get(key);if(initializer!=null) initializer.accept(entity);
-                php85ClassMap.put(key,entity);return entity;
-            } finally {if(previous==null) classLookupModern.remove();else classLookupModern.set(previous);}
+                ClassEntity entity=new ClassEntity(new ClassWrapper(compiled.getExtension(),this,compiled.getNativeClass()));
+                entity.setId(nextClassIndex());if(initializer!=null)initializer.accept(entity);
+                synchronized(classMap){php85ClassMap.put(key,entity);}return entity;
+            }finally{if(previous==null)classLookupModern.remove();else classLookupModern.set(previous);
+                synchronized(classMap){loadingPhp85Classes.remove(key);}}
         }
     }
     public boolean isPhp85Builtin(ClassEntity entity) {
@@ -622,6 +662,17 @@ public class CompileScope {
         return active == null ? getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5 : active;
     }
 
+    ClassEntity fetchUserClass(Environment environment,String name,String nameLower,boolean modern) {
+        if(environment==null||environment.scope!=this)throw new IllegalArgumentException("Class lookup participant belongs to another CompileScope");
+        Environment previous=classLookupEnvironment.get();classLookupEnvironment.set(environment);
+        try{return fetchUserClass(name,nameLower,modern);}
+        finally{if(previous==null)classLookupEnvironment.remove();else classLookupEnvironment.set(previous);}
+    }
+    private PhpCallbackDomain.Lease enterClassLookupDomain() {
+        Environment environment=classLookupEnvironment.get();
+        if(environment!=null&&environment.scope!=this)throw new IllegalStateException("Stale class lookup Environment context");
+        return environment==null?classLoader.getCallbackDomain().enter():environment.enterCallbackDomain();
+    }
     public ClassEntity fetchUserClass(String name, String nameLower, boolean modern) {
         Boolean previous = classLookupModern.get(); classLookupModern.set(modern);
         try { return fetchUserClass(name, nameLower); }
@@ -629,46 +680,48 @@ public class CompileScope {
     }
 
     private ClassEntity fetchUserClassInternal(String name, String nameLower, boolean modern) {
-        if(modern) {ClassEntity builtin=fetchPhp85Class(name);if(builtin!=null) return builtin;}
-        ClassEntity entity;
-        String canonical = PhpClassNames.canonicalKey(name);
-        nameLower = modern ? canonical : name.toLowerCase();
+        try (var admission=enterClassLookupDomain()) {
+            if(modern) {ClassEntity builtin=fetchPhp85Class(name);if(builtin!=null) return builtin;}
+            ClassEntity entity;
+            String canonical = PhpClassNames.canonicalKey(name);
+            nameLower = modern ? canonical : name.toLowerCase();
 
-        if (classEntityFetchHandler != null) {
-            Boolean previous = classLookupModern.get();
-            classLookupModern.set(modern);
-            try {
-                for (EntityFetchHandler handler : classEntityFetchHandler) handler.fetch(this, name, nameLower);
-            } finally {
-                if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous);
+            if (classEntityFetchHandler != null) {
+                Boolean previous = classLookupModern.get();
+                classLookupModern.set(modern);
+                try {
+                    for (EntityFetchHandler handler : classEntityFetchHandler) handler.fetch(this, name, nameLower);
+                } finally {
+                    if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous);
+                }
             }
-        }
 
-        entity = classMap.get(canonical);
-        if (!modern && !PhpClassNames.isModern(entity)) entity = legacyClassMap.get(nameLower);
-        if (entity != null) {
-            return entity;
-        }
-
-        CompileClass compileClass = modern ? canonicalCompileClassMap.get(canonical) : compileClassMap.get(nameLower);
-        if (compileClass == null)
-            return null;
-
-        synchronized (classMap) {
             entity = classMap.get(canonical);
             if (!modern && !PhpClassNames.isModern(entity)) entity = legacyClassMap.get(nameLower);
-            if (entity != null) return entity;
-            Boolean previous = classLookupModern.get();
-            classLookupModern.set(modern);
-            try {
-                entity = new ClassEntity(new ClassWrapper(
-                        compileClass.getExtension(), this, compileClass.getNativeClass()
-                ));
-                entity.setId(nextClassIndex());
-                registerClass(entity);
+            if (entity != null) {
                 return entity;
-            } finally {
-                if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous);
+            }
+
+            CompileClass compileClass = modern ? canonicalCompileClassMap.get(canonical) : compileClassMap.get(nameLower);
+            if (compileClass == null)
+                return null;
+
+            {
+                entity = classMap.get(canonical);
+                if (!modern && !PhpClassNames.isModern(entity)) entity = legacyClassMap.get(nameLower);
+                if (entity != null) return entity;
+                Boolean previous = classLookupModern.get();
+                classLookupModern.set(modern);
+                try {
+                    entity = new ClassEntity(new ClassWrapper(
+                            compileClass.getExtension(), this, compileClass.getNativeClass()
+                    ));
+                    entity.setId(nextClassIndex());
+                    registerClass(entity);
+                    return entity;
+                } finally {
+                    if (previous == null) classLookupModern.remove(); else classLookupModern.set(previous);
+                }
             }
         }
     }

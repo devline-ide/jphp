@@ -34,8 +34,30 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
         super(exprCompiler);
     }
 
-    protected void writePushUses(Collection<ArgumentStmtToken> parameters){writePushUses(parameters,null);}
-    protected void writePushUses(Collection<ArgumentStmtToken> parameters,ClosureEntity closure){
+    private void writeCaptureRead(ArgumentStmtToken parameter,boolean explicit) {writeCaptureRead(parameter,explicit,true);}
+    private void writeCaptureRead(ArgumentStmtToken parameter,boolean explicit,boolean diagnose) {
+        LocalVariable local=method.getLocalVariable(parameter.getName().getName());
+        boolean warn=explicit && !parameter.isReference()
+                && compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5;
+        if(local!=null)expr.writeVarLoad(local);
+        else if(warn && methodStatement.isDynamicLocal()) {
+            expr.writePushLocal();expr.writePushConstString(parameter.getName().getName());
+            expr.writeSysDynamicCall(Memory.class,"valueOfIndex",Memory.class,String.class);
+        } else if(warn)expr.writePushMemory(Memory.UNDEFINED);
+        else expr.writePushNull();
+        if(warn && diagnose) {
+            // One compact call preserves creation-time reads without copying a warning branch per capture.
+            expr.writePushEnv();expr.writePushCaptureTrace(parameter.getName());
+            expr.writePushConstString(parameter.getName().getName());
+            expr.writeSysStaticCall(PhpOwnershipClosures.class,"readValueCapture",Memory.class,
+                    Memory.class,Environment.class,php.runtime.env.TraceInfo[].class,Integer.TYPE,String.class);
+            // The helper already produced the immutable VALUE snapshot.
+            expr.setStackPeekAsImmutable();
+        }
+    }
+    protected void writePushUses(Collection<ArgumentStmtToken> parameters){writePushUses(parameters,null,false);}
+    protected void writePushUses(Collection<ArgumentStmtToken> parameters,ClosureEntity closure){writePushUses(parameters,closure,false);}
+    private void writePushUses(Collection<ArgumentStmtToken> parameters,ClosureEntity closure,boolean explicit){
         if (parameters.isEmpty()){
             add(new InsnNode(ACONST_NULL));
             expr.stackPush(Memory.Type.REFERENCE);
@@ -53,10 +75,7 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
             expr.writePushSmallInt(i);
 
             LocalVariable local = method.getLocalVariable(param.getName().getName());
-            if (local == null)
-                expr.writePushNull();
-            else
-                expr.writeVarLoad(local);
+            writeCaptureRead(param,explicit);
 
             if (!param.isReference())
                 expr.writePopBoxing(true);
@@ -141,11 +160,26 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
         int index=0;
         for (ArgumentStmtToken parameter:closure.getFunction().getUses()) {
             add(new VarInsnNode(ALOAD,allocation.index));expr.stackPush(Memory.Type.REFERENCE);expr.writePushConstInt(index++);
-            LocalVariable local=method.getLocalVariable(parameter.getName().getName());
-            if (local == null)expr.writePushNull();else expr.writeVarLoad(local);
-            expr.writePopBoxing(!parameter.isReference());
+            boolean explicitValue=!closure.getFunction().isAutoUses()&&!parameter.isReference();
+            boolean dynamicLookup=explicitValue&&method.getLocalVariable(parameter.getName().getName())==null&&methodStatement.isDynamicLocal();
+            boolean moduleLookup=dynamicLookup&&method.isExternal()&&method.clazz.isSystem()&&methodStatement.getName().getName().equals("__include");
+            if(moduleLookup) {
+                // The producer reads the exact module table without declaring or exporting a missing CV.
+                expr.writePushLocal();expr.writePushCaptureTrace(parameter.getName());
+                expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"capture",void.class,
+                        Integer.TYPE,php.runtime.memory.ArrayMemory.class,php.runtime.env.TraceInfo[].class,Integer.TYPE);
+                continue;
+            }
+            if(dynamicLookup)method.ownership().runtimeUnsupported("dynamic-function-value-capture-source:"+parameter.getName().getName());
+            writeCaptureRead(parameter,!closure.getFunction().isAutoUses(),false);
+            // Explicit VALUE capture snapshots inside its actual producer helper.
+            expr.writePopBoxing(!parameter.isReference()&&!explicitValue);
             if (parameter.isReference())expr.writeSysStaticCall(php.runtime.memory.ReferenceMemory.class,"exportReference",Memory.class,Memory.class);
-            expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"capture",void.class,Integer.TYPE,Memory.class);
+            if(explicitValue) {
+                expr.writePushCaptureTrace(parameter.getName());
+                expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"capture",void.class,
+                        Integer.TYPE,Memory.class,php.runtime.env.TraceInfo[].class,Integer.TYPE);
+            } else expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"capture",void.class,Integer.TYPE,Memory.class);
         }
         add(new VarInsnNode(ALOAD,allocation.index));expr.stackPush(Memory.Type.REFERENCE);
         expr.writeSysDynamicCall(PhpOwnershipClosures.RuntimeAllocation.class,"complete",Memory.class);
@@ -153,6 +187,41 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
         expr.stackPop();add(new JumpInsnNode(GOTO,end));add(passive);return end;
     }
 
+    /** Session arm is physically separate from both Authority and ordinary construction. */
+    private LabelNode writeSessionProducer(ClosureStmtToken closure,ClosureEntity entity,int evaluation) {
+        LabelNode passive=method.ownership().guardActive(node.instructions),active=new LabelNode(),end=new LabelNode();
+        add(active);method.ownership().beginRuntimeActiveEmission();
+        LocalVariable allocation=method.addLocalVariable("~sessionClosure"+evaluation,null,Object.class);
+        add(new VarInsnNode(ALOAD,method.ownership().entryIndex()));expr.stackPush(Memory.Type.REFERENCE);
+        expr.writePushConstInt(evaluation);expr.writePushConstInt((int)entity.getId());writeContext();
+        expr.writeSysDynamicCall(php.runtime.PhpOwnershipExecution.Entry.class,"prepareClosure",PhpOwnershipClosures.SessionAllocation.class,Integer.TYPE,Integer.TYPE,String.class);
+        add(new VarInsnNode(ASTORE,allocation.index));expr.stackPop();
+        int index=0;
+        for(ArgumentStmtToken parameter:closure.getFunction().getUses()) {
+            LocalVariable local=method.getLocalVariable(parameter.getName().getName());
+            add(new VarInsnNode(ALOAD,allocation.index));expr.stackPush(Memory.Type.REFERENCE);
+            expr.writePushConstInt(index++);expr.writePushConstInt(local==null?-1:local.index);
+            // No planned CV means an absent capture, including debug's locals-table representation.
+            // Entry verifies that absence before owning NULL and issuing the warning.
+            if(local==null)expr.writePushMemory(Memory.UNDEFINED);else writeCaptureRead(parameter,true,false);
+            expr.writePopBoxing(false);
+            if(parameter.isReference()) {
+                expr.writeSysDynamicCall(PhpOwnershipClosures.SessionAllocation.class,"captureReference",void.class,
+                        Integer.TYPE,Integer.TYPE,Memory.class);
+                method.ownership().closureProducerCall((MethodInsnNode)node.instructions.getLast());continue;
+            }
+            expr.writePushCaptureTrace(parameter.getName());
+            expr.writeSysDynamicCall(PhpOwnershipClosures.SessionAllocation.class,"capture",void.class,
+                    Integer.TYPE,Integer.TYPE,Memory.class,php.runtime.env.TraceInfo[].class,Integer.TYPE);
+            method.ownership().closureProducerCall((MethodInsnNode)node.instructions.getLast());
+        }
+        add(new VarInsnNode(ALOAD,allocation.index));expr.stackPush(Memory.Type.REFERENCE);
+        expr.writeSysDynamicCall(PhpOwnershipClosures.SessionAllocation.class,"complete",Memory.class);
+        method.ownership().closureProducerCall((MethodInsnNode)node.instructions.getLast());
+        expr.stackPop();add(new JumpInsnNode(GOTO,end));add(passive);
+        method.ownership().endRuntimeActiveEmission();method.ownership().runtimeActiveBranch(active,passive);
+        method.ownership().beginPassive();return end;
+    }
     @Override
     public void write(ClosureStmtToken closure, boolean returnValue) {
         if (returnValue){
@@ -161,6 +230,12 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
             boolean staticExists = closure.getFunction().isStaticExists();
             boolean modern = compiler.getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5;
             if (modern) thisExists = !closure.isStaticClosure() && (thisExists || closure.getOwnerClass() != null);
+            boolean sessionValue=modern && method.ownership().enabled() && closure.isStaticClosure() && !thisExists
+                    && closure.getFunction().getStaticLocal().isEmpty() && !closure.getFunction().isAutoUses()
+                    && !closure.getFunction().isGenerator();
+            int sessionEval=sessionValue?method.ownership().closureEvaluation((int)entity.getId(),closure.getFunction().getUses().stream().anyMatch(capture->capture.isReference())):-1;
+            LabelNode sessionEnd=sessionValue?writeSessionProducer(closure,entity,sessionEval):null;
+            LabelNode sessionPassive=sessionEnd==null?null:(LabelNode)node.instructions.getLast();
             int runtimeEval=modern && method.ownership().runtimeEnabled() ? method.ownership().reserveRuntimeEval() : -1;
             if (runtimeEval >= 0)method.ownership().runtimeProducer(runtimeEval,"CLOSURE_LITERAL");
             LabelNode runtimeEnd=runtimeEval < 0 ? null : writeRuntimeProducer(closure,entity,thisExists,runtimeEval);
@@ -189,14 +264,15 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
                 expr.writeSysDynamicCall(Environment.class, "__getClosure", ClassEntity.class, String.class, Integer.TYPE);
 
                 if (thisExists) {
-                    expr.writePushThis();
+                    if (modern) writeRuntimeThis();
+                    else expr.writePushThis();
                 } else {
                     expr.writePushNull();
                 }
 
                 writeContext();
 
-                writePushUses(closure.getFunction().getUses(),entity);
+                writePushUses(closure.getFunction().getUses(),entity,!closure.getFunction().isAutoUses());
                 add(new MethodInsnNode(
                         INVOKESPECIAL, entity.getInternalName(), Constants.INIT_METHOD,
                         Type.getMethodDescriptor(
@@ -233,6 +309,10 @@ public class ClosureValueCompiler extends BaseExprCompiler<ClosureStmtToken> {
                 add(runtimeEnd);expr.stackPeek().runtimeEvaluationId=runtimeEval;
                 expr.stackPeek().runtimeClosureInternalName=entity.getInternalName();
                 expr.stackPeek().runtimeClosureProducerId=runtimeEval;
+            }
+            if(sessionEnd!=null){
+                add(sessionEnd);method.ownership().endPassive(sessionPassive,sessionEnd);
+                expr.stackPeek().ownershipEvalId=sessionEval;
             }
             expr.setStackPeekAsImmutable();
         }

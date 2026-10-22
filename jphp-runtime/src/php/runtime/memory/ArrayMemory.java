@@ -17,12 +17,20 @@ import php.runtime.memory.support.*;
 import php.runtime.reflection.support.ReflectionUtils;
 
 import java.lang.reflect.*;
+import java.lang.ref.WeakReference;
 import java.nio.charset.Charset;
 import java.util.*;
 import java.util.stream.Stream;
 import java.util.stream.StreamSupport;
 
 public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
+    // A custom immutable conversion owns its semantics; inherit legacy reset only with the base conversion.
+    private static final ClassValue<Boolean> INHERITS_IMMUTABLE_CONVERSION = new ClassValue<Boolean>() {
+        @Override protected Boolean computeValue(Class<?> type) {
+            try { return type.getMethod("toImmutable").getDeclaringClass() == ArrayMemory.class; }
+            catch (NoSuchMethodException impossible) { throw new IllegalStateException("Missing public immutable conversion", impossible); }
+        }
+    };
     protected transient long lastLongIndex;
     private long nextFreeElement = Long.MIN_VALUE;
     private boolean pointerNeedsFirst;
@@ -41,7 +49,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             while (current instanceof WriteFetchLease) current=((WriteFetchLease)current).previous;
             return current;
         }
-        Object ownership() {Object value=allocation();return value instanceof RuntimeStorage ? null : value;}
+        Object ownership() {Object value=allocation();return value instanceof RuntimeStorage || value instanceof GlobalsTableOrigin ? null : value;}
         RuntimeStorage runtime() {Object value=allocation();return value instanceof RuntimeStorage ? (RuntimeStorage)value : null;}
         php.runtime.PhpRuntimeOwnership.ArrayOrigin runtimeOrigin() {RuntimeStorage value=runtime();return value == null ? null : value.origin;}
         void ownership(Object certificate) {
@@ -60,6 +68,26 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         RuntimeStorage(php.runtime.PhpRuntimeOwnership.ArrayOrigin origin) {this.origin=origin;}
     }
     private transient ArrayStorage storage;
+
+    /** A value view may outlive its host; constructor provenance must not own the Environment. */
+    private static final class GlobalsTableOrigin extends WeakReference<Environment.SyntheticGlobalsOrigin> {
+        GlobalsTableOrigin(Environment.SyntheticGlobalsOrigin origin) { super(origin); }
+    }
+    /** Constructor metadata is structural; it never grants PHP ARRAY ownership or suppresses COW. */
+    public final void attachSyntheticGlobalsOrigin(Environment.SyntheticGlobalsOrigin origin) {
+        Objects.requireNonNull(origin);
+        if (origin.environment().getRuntimeGlobalsTable() != this || getClass() != ArrayMemory.class
+                || storage.allocation() != null || map == null || _list != null)
+            throw new IllegalArgumentException("Synthetic globals origin requires its exact constructor table");
+        origin.validateCarrier(origin.carrier());
+        storage.ownership(new GlobalsTableOrigin(origin));
+    }
+    private Environment.SyntheticGlobalsOrigin constructorGlobalsOrigin() {
+        Object metadata = storage.allocation();
+        if (!(metadata instanceof GlobalsTableOrigin)) return null;
+        Environment.SyntheticGlobalsOrigin origin = ((GlobalsTableOrigin) metadata).get();
+        return origin != null && origin.environment().getRuntimeGlobalsTable() == this ? origin : null;
+    }
 
     @FunctionalInterface public interface NativeGlobalCarrierProtocol {
         void validateCarrier(ReferenceMemory actual);
@@ -638,12 +666,16 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         boolean copied = original != null || copies > 0;
         if (copied || hasWriteFetchPins()) {
             ArrayStorage shared = storage;
+            Environment.SyntheticGlobalsOrigin globalsOrigin = constructorGlobalsOrigin();
             ArrayMemory dup = duplicate();
+            ForeachIterator detachedCursor = forkCurrentIterator(this, dup);
             storage = dup.storage;
+            if (globalsOrigin != null) storage.ownership(shared.allocation());
             this.map = dup.map;
             this._list = dup._list;
             this.lastLongIndex = dup.lastLongIndex;
             this.nextFreeElement = dup.nextFreeElement;
+            foreachIterator = detachedCursor;
 
             if (copied) {
                 if (this.original == null) {
@@ -745,7 +777,12 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         Object key1 = toKey(oldKey);
         Object key2 = toKey(newKey);
 
-        map.put(key2, map.remove(key1));
+        ForeachIterator removedCursor=currentCursorForRemoval(key1);
+        Memory value=map.remove(key1);
+        advanceRemovedCurrent(removedCursor);
+        boolean added=!map.containsKey(key2);
+        map.put(key2,value);
+        if(added)nativePointerInserted(key2,map.getEntry(key2));
     }
 
     public Memory get(Memory key) {
@@ -856,6 +893,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             ref = new ReferenceMemory(value);
             getList().add(ref);
             size++;
+            nativePointerInserted(LongMemory.valueOf(lastLongIndex),ref);
         } else {
             ref = put(LongMemory.valueOf(++lastLongIndex), value);
         }
@@ -1001,8 +1039,10 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         }
 
         if (map == null && array.map == null) {
+            int firstNewIndex=getList().size();
             for (ReferenceMemory reference : array.getList())
                 getList().add(new ReferenceMemory(reference.toImmutable()));
+            if(firstNewIndex < getList().size())nativePointerInserted(LongMemory.valueOf(firstNewIndex),getList().get(firstNewIndex));
 
             size = getList().size();
             lastLongIndex = size - 1;
@@ -1091,24 +1131,37 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                 lastLongIndex = array.lastLongIndex;
             }
 
+            if (array.hasBucketLayout()) enableBucketLayout();
+            Object firstNewKey=null;
+            if(foreachIterator instanceof NativePointerCursor && foreachIterator.getKey() == null)
+                for(Object key:array.map.keySet())if(!map.containsKey(key)){firstNewKey=key;break;}
             map.putAll(array.map);
+            if(firstNewKey != null)nativePointerInserted(firstNewKey,map.getEntry(firstNewKey));
         }
     }
 
     /** Insert a physical PHP bucket, including a duplicate key, without rebinding older cells. */
     public ReferenceMemory insertBucket(Object key, Memory value) {
         rejectUnmanagedOwnershipMutation();
-        if (map == null) convertToMap();
+        enableBucketLayout();
         if (key instanceof LongMemory) recordIntegerKey(((LongMemory) key).value);
         ReferenceMemory result = map.insertBucket(key, value);
         size++;
+        nativePointerInserted(key,result);
         return result;
     }
 
     public void enableBucketLayout() {
         rejectUnmanagedOwnershipMutation();
+        if (hasBucketLayout()) return;
+        // Layout publication is writer-local too: sibling VALUE views retain their original cursor/backing pair.
+        checkCopied();
         if (map == null) convertToMap();
-        map.enableBucketLayout();
+        if (foreachIterator instanceof ListMapCurrentCursor)
+            foreachIterator=((ListMapCurrentCursor)foreachIterator).materializeBuckets(this);
+        else if(foreachIterator instanceof NativePointerCursor)
+            ((NativePointerCursor)foreachIterator).materializeBuckets();
+        else map.enableBucketLayout();
     }
 
     public boolean hasNumericStringKeys() {
@@ -1142,6 +1195,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
         if (!result.hasA()) {
             size++;
+            nativePointerInserted(key,result.getB());
         }
 
         return result.getB();
@@ -1171,6 +1225,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                     } else if (index == size) {
                         getList().add(mem);
                         this.size++;
+                        nativePointerInserted(key,mem);
                         return mem;
                     } else {
                         convertToMap();
@@ -1191,9 +1246,63 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
         if (!result.hasA()) {
             size++;
+            nativePointerInserted(key,result.getB());
         }
 
         return result.getB();
+    }
+
+    /** Bucket identity, not an equal key/value, decides whether the internal pointer moves. */
+    private boolean cursorMatchesRemoval(ForeachIterator cursor, Object key) {
+        if (cursor == null || cursor.getKey() == null) return false;
+        if (hasBucketLayout()) {
+            int ordinal = cursor instanceof BucketCursor ? ((BucketCursor) cursor).currentOrdinal()
+                    : cursor instanceof NativeReadCursor ? ((NativeReadCursor) cursor).ordinal
+                    : cursor instanceof NativePointerCursor ? ((NativePointerCursor) cursor).ordinal
+                    : cursor instanceof ListMapCurrentCursor ? ((ListMapCurrentCursor) cursor).physicalOrdinal : -1;
+            ReferenceMemory entry = bucketAt(ordinal);
+            return entry != null && entry == map.getEntry(key);
+        }
+        Object currentKey = cursor.getKey();
+        if (currentKey instanceof Long) currentKey = LongMemory.valueOf((Long) currentKey);
+        else if (currentKey instanceof Integer) currentKey = LongMemory.valueOf((Integer) currentKey);
+        if (map == null) return Objects.equals(currentKey, key);
+        ReferenceMemory entry = map.getEntry(currentKey);
+        return entry != null && entry == map.getEntry(key);
+    }
+
+    private ForeachIterator currentCursorForRemoval(Object key) {
+        ForeachIterator cursor = foreachIterator;
+        if (!cursorMatchesRemoval(cursor, key)) return null;
+        if(cursor instanceof NativePointerCursor) {
+            NativePointerCursor nativeCursor=(NativePointerCursor)cursor;
+            if(nativeCursor.readOnly())nativeCursor=(NativePointerCursor)nativeCursor.fork(this,this,this);
+            nativeCursor.prepareRemoval();return nativeCursor;
+        }
+        if (cursor instanceof CurrentCursor && ((CurrentCursor) cursor).readOnly())
+            return ((CurrentCursor) cursor).fork(this, this, this);
+        if (cursor instanceof NativeReadCursor) {
+            // This VALUE snapshot has a frozen position, without an edge to the source array.
+            if (hasBucketLayout()) {
+                BucketCursor live = new BucketCurrentCursor(this,false);
+                live.seekOrdinal(((NativeReadCursor) cursor).ordinal);
+                return live;
+            }
+            cursor = foreachIterator(false, true);
+            while (cursor.next()) {
+                if (cursorMatchesRemoval(cursor, key)) return cursor;
+            }
+            return null;
+        }
+        return cursor;
+    }
+
+    private void advanceRemovedCurrent(ForeachIterator cursor) {
+        if (cursor != null) {
+            if(cursor instanceof NativePointerCursor)((NativePointerCursor)cursor).removed();else cursor.next();
+            foreachIterator = cursor;
+            pointerNeedsFirst = false;
+        }
     }
 
     public Memory removeByScalar(Object key) {
@@ -1218,6 +1327,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                 return null;
 
             if (index == size - 1) {
+                ForeachIterator cursor = currentCursorForRemoval(LongMemory.valueOf(index));
                 size--;
                 lastLongIndex = size - 1;
                 ReferenceMemory remove = getList().remove(index);
@@ -1226,6 +1336,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                     _list = null;
                 }
 
+                advanceRemovedCurrent(cursor);
                 return remove;
             } else {
                 key = (long) index;
@@ -1244,9 +1355,12 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                     key = tmp;
             }
 
+            ForeachIterator cursor = currentCursorForRemoval(key);
             Memory memory = map.remove(key);
-            if (memory != null)
+            if (memory != null) {
                 size--;
+                advanceRemovedCurrent(cursor);
+            }
 
             return memory;
         }
@@ -1263,6 +1377,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                 return null;
 
             if (index == size - 1) {
+                ForeachIterator cursor = currentCursorForRemoval(LongMemory.valueOf(index));
                 size--;
                 lastLongIndex = index - 1;
                 ReferenceMemory remove = getList().remove(index);
@@ -1271,6 +1386,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                     _list = null;
                 }
 
+                advanceRemovedCurrent(cursor);
                 return remove;
             }
 
@@ -1279,9 +1395,12 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         }
 
         {
+            ForeachIterator cursor = currentCursorForRemoval(_key);
             Memory memory = map.remove(_key);
-            if (memory != null)
+            if (memory != null) {
                 size--;
+                advanceRemovedCurrent(cursor);
+            }
 
             return memory;
         }
@@ -1448,6 +1567,16 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         foreachIterator = null;
     }
 
+    /** First physical key without allocating an iterator or changing the internal pointer. */
+    public Memory peekFirstKey() {
+        if (size < 1)
+            return null;
+        if (map == null)
+            return LongMemory.valueOf(0);
+        Object key = map.firstKey();
+        return key instanceof Memory ? (Memory) key : StringMemory.valueOf((String) key);
+    }
+
     public Memory peekKey() {
         if (size < 1)
             return null;
@@ -1508,7 +1637,9 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     public void clear() {
         rejectUnmanagedOwnershipMutation();
+        Object globalsMarker = constructorGlobalsOrigin() == null ? null : storage.allocation();
         storage = new ArrayStorage();
+        if (globalsMarker != null) storage.ownership(globalsMarker);
         _list = null;
         map = null;
 
@@ -1586,8 +1717,57 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         return 0;
     }
 
+    /** The actual symbol table is structural, never a shared modern PHP ARRAY value. */
+    private ArrayMemory snapshotModernGlobals() {
+        Environment.SyntheticGlobalsOrigin origin = constructorGlobalsOrigin();
+        Object authority = storage.ownership();
+        NativeGlobals nativeGlobals = authority instanceof NativeGlobals ? (NativeGlobals) authority : null;
+        Environment environment = origin != null ? origin.environment()
+                : nativeGlobals != null && nativeGlobals.actual() == this ? nativeGlobals.environment : null;
+        if (environment == null) return null;
+        if (nativeGlobals != null) nativeGlobals.validate(environment);
+        if (environment.getModuleManager().getPhpLanguageProfile(environment.trace())
+                != php.runtime.common.PhpLanguageProfile.PHP_8_5) return null;
+        // Active ownership requires its existing complete allocation/publication protocol.
+        // A structural read here must not manufacture an uncertified ARRAY allocation.
+        if (php.runtime.PhpRuntimeOwnership.current(environment) != null) return null;
+        ReferenceMemory synthetic = null;
+        if (origin != null && !origin.isRetired() && map != null
+                && map.getEntry("GLOBALS") == origin.carrier()) {
+            origin.validateCarrier(origin.carrier());
+            synthetic = origin.carrier();
+        }
+        ArrayMemory snapshot = ArrayMemory.createHashed(size - (synthetic == null ? 0 : 1));
+        if (map != null) for (Map.Entry<Object, Memory> entry : map.entrySet()) {
+            if (synthetic != null && "GLOBALS".equals(entry.getKey())) continue;
+            Memory value = entry.getValue();
+            snapshot.put(entry.getKey(), value.isReference() ? value : value.toImmutable());
+        }
+        else if (_list != null) for (ReferenceMemory entry : _list) {
+            Memory value = entry.getValue();
+            snapshot.add(value.isReference() ? value : value.toImmutable());
+        }
+        snapshot.lastLongIndex = lastLongIndex;
+        snapshot.nextFreeElement = nextFreeElement;
+        return snapshot;
+    }
+
     @Override
     public Memory toImmutable() {
+        return valueCopy(true, false);
+    }
+
+    @Override
+    public Memory toImmutableForLegacy() {
+        if (getClass() != ArrayMemory.class && !INHERITS_IMMUTABLE_CONVERSION.get(getClass()))
+            return toImmutable();
+        return valueCopy(false, true);
+    }
+
+    // Native read-only copies capture one frozen cursor, rather than a mutable cursor then a replacement.
+    private ArrayMemory valueCopy(boolean copyCursor, boolean legacyReset) {
+        ArrayMemory globalsSnapshot = snapshotModernGlobals();
+        if (globalsSnapshot != null) return globalsSnapshot;
         if (copies >= 0) {
             ArrayMemory mem = new ArrayMemory(storage);
             if(storage.authority instanceof WriteFetchLease)((WriteFetchLease)storage.authority).recordValueCopy();
@@ -1601,7 +1781,13 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
             mem.lastLongIndex = lastLongIndex;
             mem.nextFreeElement = nextFreeElement;
             origin.copies++;
-            reset();
+            if (legacyReset) {
+                // Historical assignment resets both views; early GLOBALS/constant returns stay untouched.
+                reset();
+            } else {
+                mem.pointerNeedsFirst = pointerNeedsFirst;
+                if (copyCursor) mem.foreachIterator = forkCurrentIterator(mem, mem);
+            }
             return mem;
         } else {
             copies++;
@@ -1619,23 +1805,57 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
         return foreachIterator;
     }
 
+    /** Explicit native pointer operations do not replace generic snapshot continuation. */
+    public ForeachIterator getCurrentPointerForNative() {
+        if(!(foreachIterator instanceof NativePointerCursor)) {
+            ForeachIterator previous=foreachIterator;
+            NativePointerCursor cursor=new NativePointerCursor(this);
+            if(previous == null)cursor.first();
+            else {
+                int position=previous instanceof BucketCursor ? ((BucketCursor)previous).currentOrdinal()
+                        : previous instanceof NativeReadCursor ? ((NativeReadCursor)previous).ordinal
+                        : previous instanceof ListMapCurrentCursor ? ((ListMapCurrentCursor)previous).physicalOrdinal : -1;
+                cursor.select(previous.getKey(),position);
+            }
+            foreachIterator=cursor;pointerNeedsFirst=false;
+        }
+        return foreachIterator;
+    }
+
+    /** Moving a read-only VALUE snapshot materializes only its optional cursor, never its backing. */
+    public ForeachIterator getMutableCurrentIteratorForNative() {
+        NativePointerCursor cursor=(NativePointerCursor)getCurrentPointerForNative();
+        if(cursor.readOnly())foreachIterator=cursor.fork(this,this,this);
+        return foreachIterator;
+    }
+
+    public boolean hasNativeCurrentIterator() {return foreachIterator instanceof NativePointerCursor;}
+
     /** COW snapshot for native read-only inputs; copying does not reset the caller's PHP cursor. */
     public ArrayMemory toImmutableForNativeRead() {
         ForeachIterator cursor=getCurrentIteratorForNative();
         Memory keyMemory=cursor == null ? null : cursor.getMemoryKey().toValue().toImmutable();
-        Object key=keyMemory == null || keyMemory.isNull() ? null : keyMemory;
+        Object key=cursor == null ? null : cursor.getKey();
+        int ordinal=cursor instanceof BucketCursor ? ((BucketCursor)cursor).currentOrdinal()
+                : cursor instanceof NativeReadCursor ? ((NativeReadCursor)cursor).ordinal
+                : cursor instanceof NativePointerCursor ? ((NativePointerCursor)cursor).ordinal
+                : cursor instanceof ListMapCurrentCursor ? ((ListMapCurrentCursor)cursor).physicalOrdinal : -1;
         Memory current=cursor == null ? null : cursor.getValue();
-        ArrayMemory snapshot=(ArrayMemory)toImmutable();
-        foreachIterator=cursor;
-        if (snapshot != this && cursor != null)
-            snapshot.foreachIterator=new NativeReadCursor(key,keyMemory,current);
+        ArrayMemory snapshot=valueCopy(false, false);
+        if (snapshot != this && cursor != null) {
+            if (cursor instanceof CurrentCursor && snapshot.storage == storage)
+                snapshot.foreachIterator=((CurrentCursor)cursor).fork(this,null,this);
+            else snapshot.foreachIterator=new NativeReadCursor(key,keyMemory,current,ordinal);
+        }
         return snapshot;
     }
 
     // Native current/key/pos only read this captured position. No iterator edge to the original array.
     private static final class NativeReadCursor extends ForeachIterator {
-        NativeReadCursor(Object key, Memory keyMemory, Memory value) {
+        private final int ordinal;
+        NativeReadCursor(Object key, Memory keyMemory, Memory value, int ordinal) {
             super(false,false,true);
+            this.ordinal=ordinal;
             currentKey=key;currentKeyMemory=keyMemory;currentValue=value;
             init=true;
         }
@@ -2202,57 +2422,406 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
                         keys = tmp.listIterator(cursor - 1);
                     }
 
-                    if (keys.hasNext()) {
+                    while (keys.hasNext()) {
                         currentKey = keys.next();
-                        setCurrentValue(map.getEntry(currentKey));
+                        ReferenceMemory entry = map.getEntry(currentKey);
+                        if (entry == null) continue;
+                        setCurrentValue(entry);
                         return true;
-                    } else {
-                        currentKey = null;
-                        currentValue = null;
-                        return false;
                     }
+                    currentKey = null;
+                    currentValue = null;
+                    return false;
                 }
             }
         };
     }
 
+    /** Optional current-pointer state; copying it never traverses the array. */
+    private abstract static class CurrentCursor extends ForeachIterator {
+        CurrentCursor(boolean references, boolean keyReferences, boolean previous) {
+            super(references, keyReferences, previous);
+        }
+        abstract ForeachIterator fork(ArrayMemory source, ArrayMemory owner, ArrayMemory backing);
+        abstract boolean readOnly();
+    }
+
+    private ForeachIterator forkCurrentIterator(ArrayMemory owner, ArrayMemory backing) {
+        if (foreachIterator instanceof CurrentCursor)
+            return ((CurrentCursor)foreachIterator).fork(this,owner,backing);
+        if (foreachIterator instanceof NativeReadCursor) {
+            NativeReadCursor cursor=(NativeReadCursor)foreachIterator;
+            return new NativeReadCursor(cursor.getKey(),cursor.getMemoryKey(),cursor.getValue(),cursor.ordinal);
+        }
+        return null;
+    }
+
+    /** PHP's live internal pointer; the generic/legacy foreach continuation stays independent. */
+    private static final class NativePointerCursor extends CurrentCursor {
+        private final ArrayMemory owner;
+        private int ordinal=-1;
+        private Object removalNextKey;
+        private int removalNextOrdinal=-1;
+
+        NativePointerCursor(ArrayMemory owner) { super(false,false,true);this.owner=owner;init=true; }
+        @Override boolean readOnly() {return owner == null;}
+        @Override ForeachIterator fork(ArrayMemory source,ArrayMemory newOwner,ArrayMemory backing) {
+            NativePointerCursor copy=new NativePointerCursor(newOwner);
+            copy.ordinal=ordinal;copy.currentKey=currentKey;copy.currentKeyMemory=currentKeyMemory;
+            copy.currentValue=newOwner == null ? getValue() : null;copy.trace=trace;
+            if(currentKey != null && source.storage != backing.storage) {
+                ReferenceMemory value=backing.hasBucketLayout() ? backing.bucketAt(ordinal)
+                        : backing.getByScalar(nativePointerKey(currentKey));
+                if(value == null)copy.invalidate();else if(newOwner == null)copy.currentValue=value.getValue();
+            }
+            return copy;
+        }
+        private boolean invalidate() {ordinal=-1;currentKey=null;currentKeyMemory=null;currentValue=null;return false;}
+        private boolean select(Object key,int position) {
+            if(owner == null || key == null)return invalidate();
+            ReferenceMemory value=owner.hasBucketLayout() ? owner.bucketAt(position)
+                    : owner.getByScalar(nativePointerKey(key));
+            if(value == null)return invalidate();
+            currentKey=key;currentKeyMemory=null;ordinal=position;currentValue=null;return true;
+        }
+        private int adjacentOrdinal(int position,int direction) {
+            for(int i=position+direction;i>=0 && i<owner.bucketLimit();i+=direction)
+                if(owner.bucketAt(i) != null)return i;
+            return -1;
+        }
+        private boolean selectOrdinal(int position) {
+            return position >= 0 && select(owner.bucketKey(position),position);
+        }
+        private boolean first() {
+            if(owner == null)return false;
+            if(owner.hasBucketLayout()) {
+                int first=adjacentOrdinal(-1,1);return first < 0 ? invalidate() : selectOrdinal(first);
+            }
+            if(owner.map != null)return owner.map.isEmpty() ? invalidate() : select(owner.map.firstKey(),-1);
+            return owner._list == null || owner._list.isEmpty() ? invalidate() : select(LongMemory.valueOf(0),-1);
+        }
+        @Override public Memory getValue() {
+            if(owner == null || currentKey == null)return currentValue;
+            ReferenceMemory value=owner.hasBucketLayout() ? owner.bucketAt(ordinal)
+                    : owner.getByScalar(nativePointerKey(currentKey));
+            return value == null ? null : value.getValue();
+        }
+        @Override public boolean next() {return owner != null && nextValue();}
+        @Override public boolean prev() {return owner != null && prevValue();}
+        @Override protected boolean init() {return true;}
+        @Override public void reset() {if(owner != null)first();}
+        @Override protected boolean nextValue() {
+            if(currentKey == null)return false;
+            if(owner.hasBucketLayout()) {
+                int next=adjacentOrdinal(ordinal,1);return next < 0 ? invalidate() : selectOrdinal(next);
+            }
+            if(owner.map != null)return select(owner.map.nextKey(nativePointerKey(currentKey)),-1);
+            long next=getMemoryKey().toLong()+1;
+            return owner._list != null && next < owner._list.size() ? select(LongMemory.valueOf(next),-1) : invalidate();
+        }
+        @Override protected boolean prevValue() {
+            if(currentKey == null)return false;
+            if(owner.hasBucketLayout()) {
+                int previous=adjacentOrdinal(ordinal,-1);return previous < 0 ? invalidate() : selectOrdinal(previous);
+            }
+            if(owner.map != null)return select(owner.map.previousKey(nativePointerKey(currentKey)),-1);
+            long previous=getMemoryKey().toLong()-1;
+            return previous >= 0 ? select(LongMemory.valueOf(previous),-1) : invalidate();
+        }
+        @Override public boolean end() {
+            if(owner == null)return false;
+            if(owner.hasBucketLayout()) {
+                int last=adjacentOrdinal(owner.bucketLimit(),-1);return last < 0 ? invalidate() : selectOrdinal(last);
+            }
+            if(owner.map != null)return owner.map.isEmpty() ? invalidate() : select(owner.map.lastKey(),-1);
+            return owner._list == null || owner._list.isEmpty() ? invalidate() : select(LongMemory.valueOf(owner._list.size()-1),-1);
+        }
+        private void materializeBuckets() {
+            ArrayMapEntryMemory selected=currentKey == null ? null : owner.map.getEntry(nativePointerKey(currentKey));
+            owner.map.enableBucketLayout();ordinal=owner.map.bucketOrdinal(selected);
+        }
+        private void inserted(Object key,ReferenceMemory entry) {
+            if(currentKey == null)select(key,owner.hasBucketLayout() ? owner.bucketOrdinal(entry) : -1);
+        }
+        // The linked entry's neighbors must be observed before unlink destroys them.
+        private void prepareRemoval() {
+            removalNextKey=null;removalNextOrdinal=-1;
+            if(owner.hasBucketLayout()) {
+                removalNextOrdinal=adjacentOrdinal(ordinal,1);
+                if(removalNextOrdinal >= 0)removalNextKey=owner.bucketKey(removalNextOrdinal);
+            } else if(owner.map != null)removalNextKey=owner.map.nextKey(nativePointerKey(currentKey));
+            else {
+                long next=getMemoryKey().toLong()+1;
+                if(owner._list != null && next < owner._list.size())removalNextKey=LongMemory.valueOf(next);
+            }
+        }
+        private void removed() {
+            select(removalNextKey,removalNextOrdinal);removalNextKey=null;removalNextOrdinal=-1;
+        }
+    }
+
+    private static Object nativePointerKey(Object key) {
+        if(key instanceof Long)return LongMemory.valueOf((Long)key);
+        if(key instanceof Integer)return LongMemory.valueOf((Integer)key);
+        return key;
+    }
+
+    private void nativePointerInserted(Object key,ReferenceMemory entry) {
+        if(foreachIterator instanceof NativePointerCursor) {
+            NativePointerCursor cursor=(NativePointerCursor)foreachIterator;
+            if(cursor.readOnly())cursor=(NativePointerCursor)cursor.fork(this,this,this);
+            cursor.inserted(key,entry);foreachIterator=cursor;
+        }
+    }
+
+    // The key snapshot is never mutated after publication. Copies share it, but not its position.
+    private static final class ListMapCurrentCursor extends CurrentCursor {
+        private final ArrayMemory owner;
+        private int cursor;
+        private int listMax;
+        private List<Object> keys;
+        private int keyPosition;
+        private int[] physicalPositions;
+        private int physicalOrdinal=-1;
+
+        ListMapCurrentCursor(ArrayMemory owner) { super(false,false,true); this.owner=owner; }
+        @Override boolean readOnly() { return owner == null; }
+        @Override ForeachIterator fork(ArrayMemory source, ArrayMemory newOwner, ArrayMemory backing) {
+            ListMapCurrentCursor copy=new ListMapCurrentCursor(newOwner);
+            copy.cursor=cursor;copy.listMax=listMax;copy.keys=keys;copy.keyPosition=keyPosition;
+            copy.physicalPositions=physicalPositions;copy.physicalOrdinal=physicalOrdinal;
+            copy.init=init;copy.currentKey=currentKey;copy.currentKeyMemory=currentKeyMemory;
+            copy.currentValue=newOwner == null ? getValue() : null;copy.trace=trace;
+            if (newOwner == null && source.storage != backing.storage && currentKey != null) {
+                ReferenceMemory rebound;
+                if (source.hasBucketLayout() && physicalOrdinal >= 0) rebound=backing.bucketAt(physicalOrdinal);
+                else if (source.map == null) {
+                    int index=(int)getMemoryKey().toLong();
+                    rebound=backing._list != null && index >= 0 && index < backing._list.size()
+                            ? backing._list.get(index) : null;
+                } else {
+                    ArrayMapEntryMemory originalEntry=source.map.getEntry(currentKey);
+                    ArrayMapEntryMemory copiedEntry=backing.map == null ? null : backing.map.getEntry(currentKey);
+                    rebound=originalEntry != null && copiedEntry != null
+                            && originalEntry.getKey() == copiedEntry.getKey() ? copiedEntry : null;
+                }
+                if (rebound != null) copy.currentValue=rebound.getValue();
+            }
+            return copy;
+        }
+        // Capture actual entries while keys are still unique, before publication can append a duplicate.
+        private ListMapCurrentCursor materializeBuckets(ArrayMemory array) {
+            ListMapCurrentCursor copy=(ListMapCurrentCursor)fork(array,owner,array);
+            ArrayMapEntryMemory current=currentKey == null ? null : array.map.getEntry(currentKey);
+            ArrayMapEntryMemory[] entries=keys == null ? null : new ArrayMapEntryMemory[keys.size()];
+            if (entries != null) for(int i=0;i<entries.length;i++) entries[i]=array.map.getEntry(keys.get(i));
+            int[] positions=entries == null ? null : new int[entries.length];
+            array.map.enableBucketLayout();
+            copy.physicalOrdinal=array.map.bucketOrdinal(current);
+            if (entries != null) {
+                for(int i=0;i<positions.length;i++) positions[i]=array.map.bucketOrdinal(entries[i]);
+                copy.physicalPositions=positions;
+            }
+            return copy;
+        }
+        private void snapshotKeys() {
+            if (owner.hasBucketLayout()) {
+                ArrayList<Object> nextKeys=new ArrayList<>();
+                int[] positions=new int[owner.size];int count=0;
+                for(int i=0;i<owner.bucketLimit();i++) {
+                    ReferenceMemory entry=owner.bucketAt(i);
+                    if(entry != null){nextKeys.add(owner.bucketKey(i));positions[count++]=i;}
+                }
+                keys=nextKeys;physicalPositions=positions;
+            } else {keys=new ArrayList<Object>(owner.map.keySet());physicalPositions=null;}
+        }
+        private ReferenceMemory selectPosition(int position) {
+            if (physicalPositions == null) {physicalOrdinal=-1;return owner.map.getEntry(keys.get(position));}
+            physicalOrdinal=physicalPositions[position];return owner.bucketAt(physicalOrdinal);
+        }
+        @Override public boolean next() { return owner != null && super.next(); }
+        @Override public boolean prev() { return owner != null && super.prev(); }
+        @Override public void reset() {
+            if (owner == null) return;
+            if (owner.map != null) {snapshotKeys();keyPosition=0;}
+            else listMax=owner._list == null ? 0 : owner.getList().size();
+        }
+        @Override protected boolean init() {reset();return true;}
+        // Live current pointers name a slot; only readonly forks retain its captured payload.
+        @Override public Memory getValue() {
+            if (owner == null || currentKey == null) return currentValue;
+            ReferenceMemory value=owner.hasBucketLayout() ? owner.bucketAt(physicalOrdinal)
+                    : owner.getByScalar(nativePointerKey(currentKey));
+            return value == null ? null : value.getValue();
+        }
+        private void select(ReferenceMemory value) {Objects.requireNonNull(value);currentValue=null;}
+        @Override public boolean end() {
+            if (owner == null || owner.size == 0) return false;
+            if (owner.map == null) {
+                cursor=owner.size-1;currentKey=(long)cursor;select(owner.getList().get(cursor));return true;
+            }
+            init=true;snapshotKeys();keyPosition=keys.size()-1;
+            return keyPosition < keys.size() && next();
+        }
+        @Override protected boolean prevValue() {
+            if (owner.map == null) {
+                if (cursor <= 0) {currentKey=null;currentValue=null;physicalOrdinal=-1;cursor--;keys=null;return false;}
+                cursor--;currentKey=LongMemory.valueOf(cursor);select(owner.getList().get(cursor));return true;
+            }
+            while (keyPosition > 0) {
+                currentKey=keys.get(--keyPosition);ReferenceMemory entry=selectPosition(keyPosition);
+                if (physicalPositions != null && entry == null) continue;
+                select(entry);return true;
+            }
+            currentKey=null;currentValue=null;physicalOrdinal=-1;keys=null;cursor=-1;return false;
+        }
+        @Override protected boolean nextValue() {
+            if (keys == null && cursor < 0) return false;
+            if (owner.map == null) {
+                if (cursor >= listMax || owner.size < listMax) {currentKey=null;currentValue=null;physicalOrdinal=-1;return false;}
+                currentKey=LongMemory.valueOf(cursor);select(owner.getList().get(cursor));cursor++;return true;
+            }
+            if (keys == null) {snapshotKeys();keyPosition=cursor-1;}
+            while (keyPosition < keys.size()) {
+                currentKey=keys.get(keyPosition);
+                ReferenceMemory entry=selectPosition(keyPosition++);
+                if (entry == null) continue;
+                select(entry);return true;
+            }
+            currentKey=null;currentValue=null;physicalOrdinal=-1;return false;
+        }
+    }
+
+    /** Internal cursor metadata; ordinary Memory/ArrayMemory instances gain no fields. */
+    private abstract static class BucketCursor extends CurrentCursor {
+        BucketCursor(boolean references, boolean keyReferences, boolean previous) {
+            super(references, keyReferences, previous);
+        }
+        abstract int currentOrdinal();
+        abstract void seekOrdinal(int ordinal);
+    }
+
     private ForeachIterator bucketIterator(boolean references, boolean keyReferences, boolean previous, final boolean freeze) {
-        return new ForeachIterator(references, keyReferences, previous) {
-            private int cursor = -1;
-            private int limit;
-            private boolean invalid;
-            @Override public void reset() { cursor = -1; limit = bucketLimit(); invalid = false; }
-            @Override protected boolean init() { reset(); return true; }
-            private boolean select(int ordinal) {
-                ReferenceMemory entry = bucketAt(ordinal);
-                if (entry == null) return false;
-                currentKey = bucketKey(ordinal);
-                currentKeyMemory = null;
-                currentValue = getReferences ? (plainReferences ? entry
-                        : new ArrayValueMemory(getMemoryKey(), ArrayMemory.this, entry, ordinal)) : entry.getValue();
-                if (getKeyReferences) currentKeyMemory = new ArrayKeyMemory(ArrayMemory.this, getMemoryKey());
-                return true;
+        return new BucketIterator(this,references,keyReferences,previous,freeze);
+    }
+
+    private static final class BucketIterator extends BucketCursor {
+        private final ArrayMemory owner;
+        private final boolean freeze;
+        private int cursor=-1;
+        private int limit;
+        private boolean invalid;
+        BucketIterator(ArrayMemory owner,boolean references,boolean keyReferences,boolean previous,boolean freeze) {
+            super(references,keyReferences,previous);this.owner=owner;this.freeze=freeze;
+        }
+        @Override boolean readOnly() {return owner == null;}
+        @Override ForeachIterator fork(ArrayMemory source,ArrayMemory newOwner,ArrayMemory backing) {
+            BucketIterator copy=new BucketIterator(newOwner,getReferences,getKeyReferences,withPrevious,freeze);
+            copy.cursor=cursor;copy.limit=limit;copy.invalid=invalid;copy.init=init;
+            copy.currentKey=currentKey;copy.currentKeyMemory=currentKeyMemory;copy.currentValue=currentValue;
+            copy.trace=trace;copy.plainReferences=plainReferences;
+            if (source.storage != backing.storage && currentOrdinal() >= 0) {
+                ReferenceMemory entry=backing.bucketAt(cursor);
+                if (entry != null) copy.currentValue=entry.getValue();
             }
-            @Override protected boolean nextValue() {
-                if (invalid) return false;
-                int end = freeze ? limit : bucketLimit();
-                while (++cursor < end) if (select(cursor)) return true;
-                cursor = end; invalid = true;
-                currentKey = null; currentValue = null; return false;
+            return copy;
+        }
+        @Override public boolean next() {return owner != null && super.next();}
+        @Override public boolean prev() {return owner != null && super.prev();}
+        @Override public void reset() {if(owner != null){cursor=-1;limit=owner.bucketLimit();invalid=false;}}
+        @Override protected boolean init() {reset();return true;}
+        @Override int currentOrdinal() {return invalid || currentKey == null ? -1 : cursor;}
+        @Override void seekOrdinal(int ordinal) {
+            reset();init=true;cursor=ordinal;
+            if (!select(ordinal)) {invalid=true;currentKey=null;currentValue=null;}
+        }
+        private boolean select(int ordinal) {
+            ReferenceMemory entry=owner.bucketAt(ordinal);
+            if (entry == null) return false;
+            currentKey=owner.bucketKey(ordinal);currentKeyMemory=null;
+            currentValue=getReferences ? (plainReferences ? entry
+                    : new ArrayValueMemory(getMemoryKey(),owner,entry,ordinal)) : entry.getValue();
+            if(getKeyReferences)currentKeyMemory=new ArrayKeyMemory(owner,getMemoryKey());
+            return true;
+        }
+        @Override protected boolean nextValue() {
+            if(invalid)return false;
+            int end=freeze?limit:owner.bucketLimit();
+            while(++cursor<end)if(select(cursor))return true;
+            cursor=end;invalid=true;currentKey=null;currentValue=null;return false;
+        }
+        @Override protected boolean prevValue() {
+            if(invalid)return false;
+            while(--cursor>=0)if(select(cursor))return true;
+            cursor=-1;invalid=true;currentKey=null;currentValue=null;return false;
+        }
+        @Override public boolean end() {
+            if(owner == null)return false;
+            init=true;limit=owner.bucketLimit();cursor=limit;invalid=false;
+            while(--cursor>=0)if(select(cursor))return true;
+            invalid=true;currentKey=null;currentValue=null;return false;
+        }
+    }
+
+    /** Internal live current slot; ordinary foreach retains the accepted captured VALUE path. */
+    private static final class BucketCurrentCursor extends BucketCursor {
+        private final ArrayMemory owner;
+        private final boolean freeze;
+        private int cursor=-1;
+        private int limit;
+        private boolean invalid;
+        BucketCurrentCursor(ArrayMemory owner,boolean freeze) {
+            super(false,false,true);this.owner=owner;this.freeze=freeze;
+        }
+        @Override boolean readOnly() {return owner == null;}
+        @Override ForeachIterator fork(ArrayMemory source,ArrayMemory newOwner,ArrayMemory backing) {
+            BucketCurrentCursor copy=new BucketCurrentCursor(newOwner,freeze);
+            copy.cursor=cursor;copy.limit=limit;copy.invalid=invalid;copy.init=init;
+            copy.currentKey=currentKey;copy.currentKeyMemory=currentKeyMemory;
+            copy.currentValue=newOwner == null ? getValue() : null;
+            copy.trace=trace;
+            if (newOwner == null && source.storage != backing.storage && currentOrdinal() >= 0) {
+                ReferenceMemory entry=backing.bucketAt(cursor);
+                if (entry != null) copy.currentValue=entry.getValue();
             }
-            @Override protected boolean prevValue() {
-                if (invalid) return false;
-                while (--cursor >= 0) if (select(cursor)) return true;
-                cursor = -1; invalid = true;
-                currentKey = null; currentValue = null; return false;
-            }
-            @Override public boolean end() {
-                init = true; limit = bucketLimit(); cursor = limit; invalid = false;
-                while (--cursor >= 0) if (select(cursor)) return true;
-                invalid = true;
-                currentKey = null; currentValue = null; return false;
-            }
-        };
+            return copy;
+        }
+        @Override public boolean next() {return owner != null && super.next();}
+        @Override public boolean prev() {return owner != null && super.prev();}
+        @Override public Memory getValue() {
+            if (owner == null) return currentValue;
+            ReferenceMemory entry=currentOrdinal() < 0 ? null : owner.bucketAt(cursor);
+            return entry == null ? null : entry.getValue();
+        }
+        @Override public void reset() {if(owner != null){cursor=-1;limit=owner.bucketLimit();invalid=false;}}
+        @Override protected boolean init() {reset();return true;}
+        @Override int currentOrdinal() {return invalid || currentKey == null ? -1 : cursor;}
+        @Override void seekOrdinal(int ordinal) {
+            reset();init=true;cursor=ordinal;
+            if (!select(ordinal)) {invalid=true;currentKey=null;currentValue=null;}
+        }
+        private boolean select(int ordinal) {
+            if (owner.bucketAt(ordinal) == null) return false;
+            currentKey=owner.bucketKey(ordinal);currentKeyMemory=null;currentValue=null;
+            return true;
+        }
+        @Override protected boolean nextValue() {
+            if(invalid)return false;
+            int end=freeze?limit:owner.bucketLimit();
+            while(++cursor<end)if(select(cursor))return true;
+            cursor=end;invalid=true;currentKey=null;currentValue=null;return false;
+        }
+        @Override protected boolean prevValue() {
+            if(invalid)return false;
+            while(--cursor>=0)if(select(cursor))return true;
+            cursor=-1;invalid=true;currentKey=null;currentValue=null;return false;
+        }
+        @Override public boolean end() {
+            if(owner == null)return false;
+            init=true;limit=owner.bucketLimit();cursor=limit;invalid=false;
+            while(--cursor>=0)if(select(cursor))return true;
+            invalid=true;currentKey=null;currentValue=null;return false;
+        }
     }
 
     @Override
@@ -2262,7 +2831,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
 
     public ForeachIterator getCurrentIterator() {
         if (foreachIterator == null) {
-            foreachIterator = foreachIterator(false, true);
+            foreachIterator = hasBucketLayout() ? new BucketCurrentCursor(this,true) : new ListMapCurrentCursor(this);
             if (pointerNeedsFirst) {
                 foreachIterator.next();
                 pointerNeedsFirst = false;
@@ -2275,6 +2844,13 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     protected void reset() {
         foreachIterator = null;
         pointerNeedsFirst = false;
+    }
+
+    /** Native reset selects the first item and leaves next() on its successor, independently of legacy each(). */
+    public Memory resetCurrentIteratorForNative() {
+        NativePointerCursor cursor=new NativePointerCursor(this);
+        foreachIterator=cursor;pointerNeedsFirst=false;
+        return cursor.first() ? cursor.getValue() : FALSE;
     }
 
     public Memory resetCurrentIterator() {

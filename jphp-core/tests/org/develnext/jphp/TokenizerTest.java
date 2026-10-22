@@ -427,4 +427,22 @@ public class TokenizerTest {
         assertEquals(StringExprToken.Quote.DOC, ((StringExprToken) token).getQuote());
         assertEquals("\n\n\n\n\n<?php", ((StringExprToken) token).getValue());
     }
+    @Test
+    public void testKeywordVariableBoundaryWithoutWhitespaceInBothProfiles() throws IOException {
+        for (php.runtime.common.PhpLanguageProfile profile : php.runtime.common.PhpLanguageProfile.values()) {
+            for (String keyword : new String[] {"return", "print"}) {
+                for (String gap : new String[] {" ", ""}) {
+                    Tokenizer tokenizer = new Tokenizer(new Context(keyword + gap + "$id;"));
+                    tokenizer.setPhpLanguageProfile(profile);
+                    assertEquals(keyword.equals("return") ? ReturnStmtToken.class : PrintNameToken.class,
+                            tokenizer.nextToken().getClass());
+                    Token variable = tokenizer.nextToken();
+                    assertTrue(variable instanceof VariableExprToken);
+                    assertEquals("id", ((VariableExprToken) variable).getName());
+                    assertTrue(tokenizer.nextToken() instanceof SemicolonToken);
+                    assertNull(tokenizer.nextToken());
+                }
+            }
+        }
+    }
 }

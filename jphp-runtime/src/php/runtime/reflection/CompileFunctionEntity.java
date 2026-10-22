@@ -29,7 +29,7 @@ public class CompileFunctionEntity extends FunctionEntity {
                 var arg = declared[i];
                 var parameter = new ParameterEntity(null);
                 parameter.setName(arg.value());
-                parameter.setType(arg.type());
+                parameter.setType(arg.type() == php.runtime.common.HintType.ANY ? null : arg.type());
                 parameter.setNullable(arg.nullable());
                 parameter.setReference(arg.reference());
                 if (arg.variadic() && (i != declared.length - 1 || arg.optional().exists()))
@@ -67,15 +67,21 @@ public class CompileFunctionEntity extends FunctionEntity {
             setReturnTypeNullable(result.nullable() || result.type() == php.runtime.common.HintType.MIXED);
             if (!signature.returnType().isEmpty()) {
                 if ((!signature.returnType().equals("true") && !signature.returnType().equals("string|false")
-                        && !signature.returnType().equals("int|false"))
+                        && !signature.returnType().equals("int|false") && !signature.returnType().equals("array|false")
+                        && !signature.returnType().equals("int|string|null") && !signature.returnType().equals("array|string|null"))
                         || result.type() != php.runtime.common.HintType.ANY
                         || !result.typeClass().isEmpty() || result.nullable())
                     throw new IllegalArgumentException("Unsupported or conflicting explicit native return type");
                 setReturnTypeChecker(new php.runtime.reflection.support.PhpTypeDeclaration(
-                        signature.returnType().equals("true") ? java.util.List.of(java.util.List.of("true"))
-                                : java.util.List.of(java.util.List.of(signature.returnType().equals("int|false") ? "int" : "string"),
+                        signature.returnType().equals("array|string|null")
+                                ? java.util.List.of(java.util.List.of("array"), java.util.List.of("string"), java.util.List.of("null"))
+                                : signature.returnType().equals("int|string|null")
+                                ? java.util.List.of(java.util.List.of("int"), java.util.List.of("string"), java.util.List.of("null"))
+                                : signature.returnType().equals("true") ? java.util.List.of(java.util.List.of("true"))
+                                : java.util.List.of(java.util.List.of(signature.returnType().equals("int|false") ? "int"
+                                        : signature.returnType().equals("array|false") ? "array" : "string"),
                                         java.util.List.of("false"))));
-                setReturnTypeNullable(false);
+                setReturnTypeNullable(signature.returnType().equals("int|string|null") || signature.returnType().equals("array|string|null"));
             }
         }
     }

@@ -108,6 +108,91 @@ public final class PhpOwnershipClosures {
             }
         }
     }
+    /** Compact ABI26 lowering retains the precise trace while sharing VALUE snapshot work. */
+    public static Memory readValueCapture(Memory raw,Environment environment,php.runtime.env.TraceInfo[] traces,int traceIndex,String name) {
+        Objects.requireNonNull(raw);Objects.requireNonNull(environment);Objects.requireNonNull(traces);Objects.requireNonNull(name);
+        if(traceIndex<0||traceIndex>=traces.length)throw new IllegalArgumentException("Capture trace slot is outside its exact table");
+        var trace=Objects.requireNonNull(traces[traceIndex]);
+        if(!raw.toValue().isUndefined())return raw.toImmutable();
+        Memory snapshot=Memory.NULL;
+        environment.warning(trace,"Undefined variable $"+name);
+        return snapshot;
+    }
+    /** Session-local exact shell provider; this does not certify its invocation body. */
+    private Provider sessionProvider(ClosureEntity entity) throws NoSuchMethodException {
+        domain().currentContext();Provider previous=providers.get(entity);
+        if(previous!=null){validateLexicalShell(entity,previous.constructor);return previous;}
+        var constructor=entity.getNativeClass().getConstructor(Environment.class,ClassEntity.class,Memory.class,String.class,Memory[].class);
+        return registerLexical(entity,constructor,(actual,environment)->{
+            if(actual!=entity)throw new IllegalArgumentException("Lexical shell declaration changed");
+            validateLexicalShell(entity,constructor);
+        });
+    }
+    /** Package-private: only the current issued Entry may create this actual EVAL. */
+    SessionAllocation prepareSession(PhpOwnershipExecution.Entry entry,int evalId,int closureIndex,ClosureEntity entity,String scope) throws Throwable {
+        entry.requireClosureProducer(evalId,closureIndex,entity,null);
+        if(entry.session().domain()!=domain())throw new IllegalArgumentException("Foreign Session closure adapter");
+        Provider provider=sessionProvider(entity);
+        var shell=objects.allocate(provider.shell,entry.session().environment(),Collections.emptyMap());
+        Closure closure=(Closure)shell.object();var object=shell.certificate();
+        try {entry.stageClosureShell(evalId,closureIndex,entity,shell);}
+        catch(Throwable failure){try{shell.close();}catch(Throwable cleanup){failure=domain().graph().composeFailure(failure,cleanup);}throw failure;}
+        return new SessionAllocation(entry,evalId,closureIndex,provider,closure,object,scope);
+    }
+    public final class SessionAllocation {
+        private final PhpOwnershipExecution.Entry entry;
+        private final int evalId,closureIndex;
+        private final Provider provider;
+        private final Closure closure;
+        private final PhpOwnershipObjects.ObjectCertificate object;
+        private final String scope;
+        private final List<PhpOwnershipValues.Binding> captures=new ArrayList<>();
+        private final List<PhpOwnershipFramePublisher> pending=new ArrayList<>();
+        private boolean completed;
+        private SessionAllocation(PhpOwnershipExecution.Entry entry,int evalId,int closureIndex,Provider provider,Closure closure,
+                                  PhpOwnershipObjects.ObjectCertificate object,String scope){
+            this.entry=entry;this.evalId=evalId;this.closureIndex=closureIndex;this.provider=provider;this.closure=closure;this.object=object;this.scope=scope;
+        }
+        private void open(){
+            if(completed)throw new IllegalStateException("Lexical producer has completed");
+            entry.requireClosureProducer(evalId,closureIndex,provider.entity,closure);object.validateObject(closure);
+        }
+        public void capture(int index,int localId,Memory raw,php.runtime.env.TraceInfo[] traces,int traceIndex)throws Throwable {
+            open();entry.requireClosureCall("php/runtime/PhpOwnershipClosures$SessionAllocation","capture","(IILphp/runtime/Memory;[Lphp/runtime/env/TraceInfo;I)V");
+            var plan=provider.entity.getOwnershipCapturePlan();
+            if(index!=captures.size() || index<0 || index>=plan.entries().size()
+                    || plan.entries().get(index).mode()!=ClosureEntity.CaptureMode.VALUE)
+                throw new IllegalArgumentException("Capture differs from its next actual VALUE descriptor");
+            Objects.requireNonNull(traces);
+            if(traceIndex<0 || traceIndex>=traces.length || traces[traceIndex]==null)
+                throw new IllegalArgumentException("Capture lacks its exact generated trace");
+            boolean missing=raw.toValue().isUndefined();
+            Memory snapshot=missing?Memory.NULL:raw.toImmutable();
+            var binding=entry.closureCaptureValue(evalId,closureIndex,provider.entity,closure,index,localId,raw,snapshot);
+            // The frame owns this snapshot before warning handlers can mutate its source or throw.
+            pending.add(entry.stageValue(binding));captures.add(binding);
+            if(missing)entry.session().environment().warning(traces[traceIndex],"Undefined variable $"+plan.entries().get(index).name());
+        }
+        public void captureReference(int index,int localId,Memory raw)throws Throwable {
+            open();entry.requireClosureCall("php/runtime/PhpOwnershipClosures$SessionAllocation","captureReference","(IILphp/runtime/Memory;)V");
+            var plan=provider.entity.getOwnershipCapturePlan();
+            if(index!=captures.size() || index<0 || index>=plan.entries().size()
+                    || plan.entries().get(index).mode()!=ClosureEntity.CaptureMode.CELL)
+                throw new IllegalArgumentException("Capture differs from its next actual CELL descriptor");
+            var binding=entry.closureCaptureReference(evalId,closureIndex,provider.entity,closure,index,localId,raw);
+            pending.add(entry.stageValue(binding));captures.add(binding);
+        }
+        public Memory complete()throws Throwable {
+            open();entry.requireClosureCall("php/runtime/PhpOwnershipClosures$SessionAllocation","complete","()Lphp/runtime/Memory;");
+            var plan=provider.entity.getOwnershipCapturePlan();
+            if(captures.size()!=plan.entries().size())throw new IllegalArgumentException("Incomplete lexical VALUE captures");
+            var certificate=new Certificate(provider,closure,object,entry.session().value(Memory.NULL),captures,entry.session().environment());
+            domain().graph().deferDestruction(()->{
+                object.attachClosure(certificate);certificate.initialize(scope,true,false);completed=true;
+                for(int i=pending.size()-1;i>=0;i--)entry.releaseClosureCapture(pending.get(i));pending.clear();
+            });return new ObjectMemory(closure);
+        }
+    }
     /** The verified empty shell is an actual EVAL before evaluating any capture. */
     public static RuntimeAllocation prepareRuntime(PhpRuntimeOwnership.Frame frame,int evalId,ClosureEntity entity) throws Throwable {
         Objects.requireNonNull(frame);var authority=frame.authority();
@@ -159,6 +244,31 @@ public final class PhpOwnershipClosures {
                 throw new IllegalArgumentException("Capture producer does not follow its exact AST order");
             boolean cell=plan.entries().get(index).mode() == ClosureEntity.CaptureMode.CELL;
             captures.add(stage(raw,cell ? PhpRuntimeOwnership.Role.CELL : PhpRuntimeOwnership.Role.VALUE));
+        }
+        /** Array/index is the same immutable generated trace entry; snapshot before PHP warning. */
+        public void capture(int index,Memory raw,php.runtime.env.TraceInfo[] traces,int traceIndex) throws Throwable {
+            open();Objects.requireNonNull(raw);Objects.requireNonNull(traces);
+            var plan=provider.entity.getOwnershipCapturePlan();
+            if(self==null || index!=captures.size() || index<0 || index>=plan.entries().size()
+                    || plan.entries().get(index).mode()!=ClosureEntity.CaptureMode.VALUE)
+                throw new IllegalArgumentException("Explicit capture read needs its actual next VALUE producer");
+            if(traceIndex<0||traceIndex>=traces.length)throw new IllegalArgumentException("Capture trace slot is outside its exact table");
+            var trace=Objects.requireNonNull(traces[traceIndex]);
+            boolean missing=raw.toValue().isUndefined();Memory snapshot=missing?Memory.NULL:raw.toImmutable();
+            captures.add(stage(snapshot,PhpRuntimeOwnership.Role.VALUE));
+            if(missing)frame.authority().environment().warning(trace,"Undefined variable $"+plan.entries().get(index).name());
+        }
+        /** A missing module CV is read through its actual global-table publisher, never a new address. */
+        public void capture(int index,ArrayMemory actualLocals,php.runtime.env.TraceInfo[] traces,int traceIndex) throws Throwable {
+            open();Objects.requireNonNull(actualLocals);Objects.requireNonNull(traces);
+            var plan=provider.entity.getOwnershipCapturePlan();
+            if(self==null || index!=captures.size() || index<0 || index>=plan.entries().size()
+                    || plan.entries().get(index).mode()!=ClosureEntity.CaptureMode.VALUE)
+                throw new IllegalArgumentException("Named capture read needs its actual next VALUE producer");
+            if(traceIndex<0||traceIndex>=traces.length||traces[traceIndex]==null)
+                throw new IllegalArgumentException("Capture trace slot is outside its exact table");
+            Memory raw=frame.readModuleClosureCapture(evalId,provider.entity,closure,index,actualLocals);
+            capture(index,raw,traces,traceIndex);
         }
         public Memory complete() throws Throwable {
             open();var plan=provider.entity.getOwnershipCapturePlan();

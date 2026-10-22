@@ -49,6 +49,8 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
     private boolean completed;
 
     protected boolean busy;
+    // Present only while a delegated segment executes or is suspended inside its Fiber.
+    PhpFiber fiberOwner;
     protected ClosedType closed;
 
     public Generator(final Environment env, ClassEntity generator, Memory self, Memory[] uses) {
@@ -67,6 +69,13 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
         this.callStackItem = stackItem == null ? null : new CallStackItem(stackItem);
 
         gen = new php.runtime.util.generator.Generator<Bucket>() {
+            @Override
+            protected php.runtime.util.generator.Collector.ExecutionContext executionContext() {
+                var fiber=php.runtime.lang.PhpFiber.generatorExecution(env, Generator.this);
+                if(fiber!=null)return fiber;
+                return env.generatorExecutionContext();
+            }
+
             @Override
             protected void run(YieldAdapterIterator<Bucket> yieldAdapter) {
                 try {
@@ -102,6 +111,7 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
     abstract protected Memory _run(Environment env, Memory... args);
 
     protected Memory _next(Environment env) {
+        env.validateCallbackDomain();
         if (busy) {
             env.error(env.trace(), "Cannot resume an already running generator");
         }
@@ -155,14 +165,28 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
         return ((GeneratorEntity)getReflection()).isReturnReference();
     }
 
+    /** A parked delegated frame still owns this generator; dropping an alias is not retirement. */
+    @php.runtime.annotation.Reflection.Ignore
+    public final boolean __isBusyInFiber() {return busy && fiberOwner!=null;}
+
     @Override
     public void onManualDestruct(Environment env) {
         closed = ClosedType.MANUAL;
     }
 
+    @SuppressWarnings("unchecked")
+    private static <T extends Throwable> Memory raiseRetirement(Throwable failure) throws T {throw (T)failure;}
+
     @Signature
     public Memory __destruct(Environment env, Memory... args) {
         try {
+            // GC finalizers have no ordering. A busy delegated stack must be cancelled
+            // through its Fiber before close() can join the generator's worker.
+            PhpFiber owner=fiberOwner;
+            if(busy && owner!=null) {
+                try {owner.retireNative(env);return Memory.NULL;}
+                catch(Throwable failure) {return Generator.<RuntimeException>raiseRetirement(failure);}
+            }
             if (isInit) {
                 if (closed == null) {
                     closed = ClosedType.DEFAULT;
@@ -189,30 +213,36 @@ abstract public class Generator extends BaseObject implements Iterator, IManualD
     }
 
     @Signature(@Arg("value"))
-    synchronized public Memory send(Environment env, Memory... args) {
-        if (!isInit) {
-           rewind(env);
-        }
+    public Memory send(Environment env, Memory... args) {
+        try (var admission=env.enterCallbackDomain()) {
+            if(busy)env.error(env.trace(),"Cannot resume an already running generator");
+            if (!isInit) {
+               rewind(env);
+            }
 
-        sentValue = args[0];
-        try {
-            return _next(env);
-        } finally {
-            sentValue = null;
+            sentValue = args[0];
+            try {
+                return _next(env);
+            } finally {
+                sentValue = null;
+            }
         }
     }
 
     @Name("throw")
     @Signature(@Arg(value = "throwable", nativeType = BaseException.class))
-    synchronized public Memory _throw(Environment env, Memory... args) {
-        if (valid) {
-            newThrow = args[0].toObject(BaseException.class);
-            ((BaseException)newThrow).setTraceInfo(env, env.trace());
-            return _next(env);
-        } else {
-            env.__throwException(args[0].toObject(BaseException.class));
+    public Memory _throw(Environment env, Memory... args) {
+        try (var admission=env.enterCallbackDomain()) {
+            if(busy)env.error(env.trace(),"Cannot resume an already running generator");
+            if (valid) {
+                newThrow = args[0].toObject(BaseException.class);
+                ((BaseException)newThrow).setTraceInfo(env, env.trace());
+                return _next(env);
+            } else {
+                env.__throwException(args[0].toObject(BaseException.class));
+            }
+            return Memory.NULL;
         }
-        return Memory.NULL;
     }
 
     @Signature

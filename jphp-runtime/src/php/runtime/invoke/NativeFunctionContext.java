@@ -44,9 +44,14 @@ public final class NativeFunctionContext {
         }
     }
 
-    public static boolean isStrict(Environment env, TraceInfo trace, String function) {
+    /** Distinguish a reflected/internal dispatch from a direct source invocation at this exact call site. */
+    public static boolean isInternalCall(Environment env, TraceInfo trace, String function) {
         Frame frame = CURRENT.get();
-        if (frame != null && frame.environment == env && frame.trace == trace && frame.function.equals(function)) return false;
+        return frame != null && frame.environment == env && frame.trace == trace && frame.function.equals(function);
+    }
+
+    public static boolean isStrict(Environment env, TraceInfo trace, String function) {
+        if (isInternalCall(env, trace, function)) return false;
         var module = env.getModuleManager().findModule(trace);
         return module != null && module.isStrictTypes();
     }

@@ -100,7 +100,7 @@ public final class PhpOwnershipExecution {
     public static final class Session {
         private final PhpOwnershipDomain.Participant participant;private final Environment env;
         private final IdentityHashMap<Object,Target> targets=new IdentityHashMap<>();private final Map<Method,Target> members=new HashMap<>();
-        private PhpOwnershipArrays arrays;private PhpOwnershipObjects objects;
+        private PhpOwnershipArrays arrays;private PhpOwnershipObjects objects;private PhpOwnershipClosures closures;
         private final Set<Target> validating=Collections.newSetFromMap(new IdentityHashMap<>());
         private final IdentityHashMap<CallStackItem,Ticket> callFrames=new IdentityHashMap<>();
         public Session(PhpOwnershipDomain.Participant participant,Environment env){this.participant=Objects.requireNonNull(participant);this.env=Objects.requireNonNull(env);if(participant.cleanupContext()!=env)throw new IllegalArgumentException("Participant needs its exact releasing Environment");}
@@ -109,9 +109,10 @@ public final class PhpOwnershipExecution {
         public Scope enter(){open();var execution=participant.enter();try{return new Scope(env.bindOwnershipExecutionContext(new Context(this,null)),execution);}catch(Throwable failure){execution.close();throw failure;}}
         public PhpOwnershipArrays arrays(){open();if(arrays==null)arrays=new PhpOwnershipArrays(domain().heap());return arrays;}
         public PhpOwnershipObjects objects(){open();if(objects==null)objects=new PhpOwnershipObjects(domain().heap(),arrays());return objects;}
+        public PhpOwnershipClosures closures(){open();if(closures==null)closures=new PhpOwnershipClosures(objects(),arrays());return closures;}
         public PhpOwnershipValues.Binding value(Memory raw){
             open();PhpOwnership.Node node=null;
-            if(raw instanceof ObjectMemory){var o=((ObjectMemory)raw).value;if(o.getClass()==php.runtime.lang.exception.BaseTypeError.class){var nativeOrigin=((php.runtime.lang.exception.BaseTypeError)o).getOwnershipThrowable();if(nativeOrigin==null)throw new IllegalArgumentException("Native TypeError lacks its complete origin");node=nativeOrigin.node();}else{if(!(o instanceof IPhpOwnershipObject) || ((IPhpOwnershipObject)o).getOwnershipObject()==null)throw new IllegalArgumentException("Invocation OBJECT lacks its allocation origin");node=((IPhpOwnershipObject)o).getOwnershipObject().node();}}
+            if(raw instanceof ObjectMemory){var o=((ObjectMemory)raw).value;if(PhpOwnershipThrowables.isEngineThrowableType(o.getClass())){var nativeOrigin=((php.runtime.lang.exception.BaseTypeError)o).getOwnershipThrowable();if(nativeOrigin==null)throw new IllegalArgumentException("Native TypeError lacks its complete origin");node=nativeOrigin.node();}else{if(!(o instanceof IPhpOwnershipObject) || ((IPhpOwnershipObject)o).getOwnershipObject()==null)throw new IllegalArgumentException("Invocation OBJECT lacks its allocation origin");node=((IPhpOwnershipObject)o).getOwnershipObject().node();}}
             else if(raw instanceof ArrayMemory)node=arrays().certificate((ArrayMemory)raw).node();
             return PhpOwnershipValues.bindValue(domain(),raw,node).requireCertifiedObject();
         }
@@ -151,7 +152,7 @@ public final class PhpOwnershipExecution {
             }return List.copyOf(frames);
         }
         public void requireGeneratedTarget(Object entity){target(entity);}
-        public void requireMethodCapability(MethodEntity method){target(method);}
+        public void requireMethodCapability(MethodEntity method){if(PhpOwnershipReflectionCalls.supports(method))PhpOwnershipReflectionCalls.require(method);else target(method);}
         private Target target(Object entity){Target target=targets.get(entity);if(target==null)throw new IllegalArgumentException("Target has no complete invocation capability");target.validate();return target;}
         public CallRoots requireNativeCallRoots(Method member,Memory[] args){open();Context c=env.getOwnershipExecutionContext();if(c==null || c.session!=this || c.ticket==null || !member.equals(c.ticket.nativeMember))throw new IllegalArgumentException("Native body needs its exact invocation packet");c.ticket.roots.validateArguments(args);c.ticket.bindCallFrame();return c.ticket.roots;}
         public void requireFunctionCapability(FunctionEntity function,int arity){
@@ -177,35 +178,88 @@ public final class PhpOwnershipExecution {
             Object entity;if(invoker.getClass()==DynamicMethodInvoker.class)entity=((DynamicMethodInvoker)invoker).getMethod();
             else if(invoker.getClass()==StaticMethodInvoker.class)entity=((StaticMethodInvoker)invoker).getMethod();
             else if(invoker.getClass()==FunctionInvoker.class)entity=((FunctionInvoker)invoker).getFunction();
-            else throw new IllegalArgumentException("Custom or magic Invoker lacks a complete target protocol");target(entity);
+            else throw new IllegalArgumentException("Custom or magic Invoker lacks a complete target protocol");if(entity instanceof MethodEntity method&&PhpOwnershipReflectionCalls.supports(method))PhpOwnershipReflectionCalls.require(method);else target(entity);
         }
         public Memory invokeInvoker(Invoker invoker,Memory[] args,CallRoots roots)throws Throwable{return invokeInvoker(invoker,args,roots,TraceInfo.UNKNOWN,false);}
         public Memory invokeInvoker(Invoker invoker,Memory[] args,CallRoots roots,TraceInfo trace,boolean discarded)throws Throwable{
-            roots.same(this);roots.validateArguments(args);requireInvokerCapability(invoker);Object entity;
+            roots.same(this);roots.validateArguments(args);requireInvokerCapability(invoker);
+            if(invoker.getClass()==DynamicMethodInvoker.class&&PhpOwnershipReflectionCalls.supports(((DynamicMethodInvoker)invoker).getMethod()))
+                return invokeNativeReflection(((DynamicMethodInvoker)invoker).getMethod(),((DynamicMethodInvoker)invoker).getObject(),trace,roots,false);
+            Object entity;
             if(invoker instanceof DynamicMethodInvoker)entity=((DynamicMethodInvoker)invoker).getMethod();else if(invoker instanceof StaticMethodInvoker)entity=((StaticMethodInvoker)invoker).getMethod();else if(invoker.getClass()==FunctionInvoker.class)entity=((FunctionInvoker)invoker).getFunction();else throw new IllegalArgumentException("Invoker has no exact target contract");
             Ticket ticket=new Ticket(this,target(entity),null,roots,trace);return scoped(ticket,()->discarded?PhpNoDiscardInvocation.invokeDiscarded(env,trace,invoker,args,false):invoker.call(args));
         }
         public Memory invokeMethod(MethodEntity method,IObject receiver,TraceInfo trace,CallRoots roots)throws Throwable {
-            roots.same(this);Ticket ticket=new Ticket(this,target(method),null,roots,trace);
-            return scoped(ticket,()->method.invokeDynamic(receiver,env,trace,roots.rawArguments()));
+            roots.same(this);if(PhpOwnershipReflectionCalls.supports(method))return invokeNativeReflection(method,receiver,trace,roots,false);Ticket ticket=new Ticket(this,target(method),null,roots,trace);
+            return scoped(ticket,()->{
+                Memory[] passed=roots.rawArguments();ParameterEntity[] parameters=method.getParameters();
+                if(parameters!=null && passed.length<parameters.length) {
+                    if(!method.isStatic()) {
+                        var binding=roots.receiver();
+                        if(binding==null || !(binding.rawValue() instanceof ObjectMemory) || ((ObjectMemory)binding.rawValue()).value!=receiver)
+                            throw new IllegalArgumentException("Method receiver lacks its actual invocation owner");
+                    }
+                    for(int index=passed.length;index<parameters.length;index++) {
+                        ParameterEntity parameter=parameters[index];
+                        if(parameter.isVariadic() || parameter.isReference() && parameter.isOptional())
+                            throw new IllegalArgumentException("Omitted reference/variadic creation requires its complete SEND protocol");
+                    }
+                    // The real Ticket already owns its Entry; initializer RESULT is staged there before the callee's CV import.
+                    String declaration=method.getClazz().getName();
+                    passed=InvokeArgumentHelper.makeArguments(env,passed,method,method.getParameters(passed.length),declaration,
+                            method.getName(),declaration,trace,false);
+                }
+                return method.invokeDynamic(receiver,env,trace,passed);
+            });
         }
         public Memory invokeCheckedMethod(MethodEntity method,IObject receiver,TraceInfo trace,CallRoots roots,boolean checkAccess)throws Throwable {
-            roots.same(this);Ticket ticket=new Ticket(this,target(method),null,roots,trace);
+            roots.same(this);if(PhpOwnershipReflectionCalls.supports(method))return invokeNativeReflection(method,receiver,trace,roots,checkAccess);Ticket ticket=new Ticket(this,target(method),null,roots,trace);
             return scoped(ticket,()->ObjectInvokeHelper.invokeMethod(receiver,method,env,trace,roots.rawArguments(),checkAccess));
         }
         public Memory invokeInitializer(Object exactKey,TraceInfo trace)throws Throwable {
             Target target=target(exactKey);Method member=target.member;
             if(!Arrays.equals(member.getParameterTypes(),new Class<?>[]{Environment.class}) || !java.lang.reflect.Modifier.isStatic(member.getModifiers()))throw new IllegalArgumentException("Initializer has no exact Environment-only protocol");
             Entry caller=currentEntry(env);if(caller==null)throw new IllegalArgumentException("Initializer needs its actual caller frame");
-            try(CallRoots roots=newCallRoots()) {
-                Ticket ticket=new Ticket(this,target,null,roots,trace);
-                Memory raw=scoped(ticket,()->{try{Object returned=member.invoke(null,env);if(member.getReturnType()==void.class){if(!ticket.entered)throw new IllegalArgumentException("Initializer bypassed admitted entry");return Memory.NULL;}return ticket.checked((Memory)returned);}catch(InvocationTargetException failure){throw failure.getCause();}});
-                if(member.getReturnType()==void.class)return Memory.NULL;
+            ParameterEntity parameter=exactKey instanceof ParameterEntity ? (ParameterEntity)exactKey : null;
+            boolean cache=parameter!=null && parameter.getDefaultInitializer().constantOnly();
+            try(var admission=cache ? env.enterCallbackDomain() : null; CallRoots roots=newCallRoots()) {
+                var cached=cache ? PhpParameterDefaults.find(parameter,env) : null;
+                Memory raw;
+                if(cached!=null) {
+                    var binding=cached.binding(this);raw=binding.rawValue();roots.stageResult(binding);
+                } else {
+                    Ticket ticket=new Ticket(this,target,null,roots,trace);
+                    raw=scoped(ticket,()->{try{Object returned=member.invoke(null,env);if(member.getReturnType()==void.class){if(!ticket.entered)throw new IllegalArgumentException("Initializer bypassed admitted entry");return Memory.NULL;}return ticket.checked((Memory)returned);}catch(InvocationTargetException failure){throw failure.getCause();}});
+                    if(member.getReturnType()==void.class)return Memory.NULL;
+                    if(cache) {
+                        var published=PhpParameterDefaults.publish(parameter,env,raw);
+                        if(published!=null)raw=published.binding(this).rawValue();
+                    }
+                }
                 var stage=caller.publisher(caller.frame.temporary("stage:"+caller.stages.size()));
                 caller.transfer(roots.result,stage,raw);caller.stages.add(stage);return raw;
             }
         }
+        private Memory invokeNativeReflection(MethodEntity method,IObject receiver,TraceInfo trace,CallRoots roots,boolean checkAccess)throws Throwable {
+            roots.same(this);var packet=PhpOwnershipReflectionCalls.prepare(this,method,receiver,trace,roots);
+            Method member=PhpOwnershipReflectionCalls.require(method);Ticket ticket=new Ticket(this,null,member,roots,trace);
+            return scoped(ticket,()->{
+                try(packet) {
+                    Memory[] original=roots.rawArguments();
+                    if(checkAccess)InvokeHelper.checkAccess(env,trace,method);
+                    Memory[] passed=InvokeArgumentHelper.makeArguments(env,original,method,method.getParameters(original.length),
+                            method.getClazz().getName(),method.getName(),receiver.getReflection().getName(),trace,false);
+                    env.pushCall(trace,receiver,original,method.getName(),method.getClazz().getName(),receiver.getReflection().getName());
+                    try {
+                        ticket.bindCallFrame();packet.enter(original,passed);Memory result;
+                        try {result=(Memory)member.invoke(receiver,env,passed);}catch(InvocationTargetException failure){throw failure.getCause();}
+                        return packet.complete(result);
+                    } finally {env.popCall();}
+                }
+            });
+        }
         public Memory invokeNativePropertyConstructor(MethodEntity method,IObject receiver,TraceInfo trace,CallRoots roots)throws Throwable {
+            if(PhpOwnershipReflectionCalls.supports(method))return invokeNativeReflection(method,receiver,trace,roots,false);
             roots.same(this);var member=method.getNativeMethod();
             if(method.getClazz().methodConstruct!=method||method.isStatic()||member==null||member.getDeclaringClass()!=receiver.getClass()
                     ||!Arrays.equals(member.getParameterTypes(),new Class<?>[]{Environment.class,Memory[].class})||member.getReturnType()!=Memory.class)
@@ -238,6 +292,7 @@ public final class PhpOwnershipExecution {
     public static final class Target {
         private final Session session;private final Object entity;private final Method member;private final byte[] bytes;private final FramePlan plan;
         private final Map<String,FunctionEntity> functionDependencies=new HashMap<>();
+        private final Map<String,php.runtime.reflection.helper.ClosureEntity> closureDependencies=new HashMap<>();
         private Target(Session session,Object entity,Method member,byte[] bytes,FramePlan plan){this.session=session;this.entity=entity;this.member=member;this.bytes=bytes;this.plan=plan;}
         public FramePlan plan(){return plan;}
         private void validate(){session.open();
@@ -255,6 +310,40 @@ public final class PhpOwnershipExecution {
                     session.requireFunctionCapability(function,arity);
                 }
                 else if(capability.equals("php-throwable-custody-v1")){if(plan.schema()!=2 || session.env.getClass()!=Environment.class)throw new IllegalArgumentException("Throwable custody needs its exact generated and host protocol");}
+                else if(capability.equals("invocation-receiver-import-v1")) {
+                    if (!(entity instanceof MethodEntity method) || method.isStatic()
+                            || plan.entryKind()!=EntryKind.METHOD || plan.locals().stream().noneMatch(local->local.name().equals("this")
+                                && local.storage()==Storage.ADDRESS && local.importKind()==ImportKind.NONE))
+                        throw new IllegalArgumentException("Receiver import needs its actual instance method and ADDRESS CV");
+                }
+                else if(capability.startsWith("closure-value-producer-v1:") || capability.startsWith("closure-capture-producer-v2:")) {
+                    String[] parts=capability.split(":",-1);int evaluation,index;
+                    try{if(parts.length!=3)throw new NumberFormatException();evaluation=Integer.parseInt(parts[1]);index=Integer.parseInt(parts[2]);}
+                    catch(NumberFormatException failure){throw new IllegalArgumentException("Malformed lexical producer capability",failure);}
+                    if(!contains(plan.evalIds(),evaluation) || index<0 || module()==null)
+                        throw new IllegalArgumentException("Lexical producer lacks its actual module/EVAL");
+                    var closure=module().findClosure(index);requireCaptureClosure(closure,capability.startsWith("closure-capture-producer-v2:"));
+                    var previous=closureDependencies.putIfAbsent(capability,closure);
+                    if(previous!=null && previous!=closure)throw new IllegalArgumentException("Lexical declaration changed after admission");
+                }
+                else if(capability.equals("closure-value-import-v1") || capability.equals("closure-capture-import-v2")) {
+                    if(!(entity instanceof MethodEntity method) || !(method.getClazz() instanceof php.runtime.reflection.helper.ClosureEntity closure)
+                            || plan.entryKind()!=EntryKind.LEXICAL_CLOSURE || !method.getName().equals("__invoke"))
+                        throw new IllegalArgumentException("Capture import lacks its actual lexical invocation");
+                    requireCaptureClosure(closure,capability.equals("closure-capture-import-v2"));var captures=closure.getOwnershipCapturePlan().entries();
+                    if(plan.locals().stream().filter(local->local.importKind()==ImportKind.CAPTURE).count()!=captures.size())
+                        throw new IllegalArgumentException("Lexical frame does not import every actual capture");
+                    for(Local local:plan.locals())if(local.importKind()==ImportKind.CAPTURE && (local.importIndex()<0 || local.importIndex()>=captures.size()
+                            || local.importMode()!=(captures.get(local.importIndex()).mode()==php.runtime.reflection.helper.ClosureEntity.CaptureMode.CELL?Mode.CELL:Mode.VALUE)
+                            || local.importMode()==Mode.CELL && local.storage()!=Storage.ADDRESS || !local.name().equals(captures.get(local.importIndex()).name())))
+                        throw new IllegalArgumentException("Capture CV differs from its ordered lexical descriptor");
+                }
+                else if(capability.startsWith("lexical-cv-unset-v2:")) {
+                    int id;try{id=Integer.parseInt(capability.substring("lexical-cv-unset-v2:".length()));}
+                    catch(NumberFormatException failure){throw new IllegalArgumentException("Malformed lexical CV unset",failure);}
+                    if(plan.locals().stream().noneMatch(local->local.id()==id && local.storage()==Storage.ADDRESS))
+                        throw new IllegalArgumentException("Unset lacks its actual ADDRESS CV");
+                }
                 else if(!capability.equals("frame-local-publication-v1"))throw new IllegalArgumentException("Unknown complete frame capability: "+capability);
             }
             Method actual=entity instanceof FunctionEntity?((FunctionEntity)entity).getNativeMethod():entity instanceof MethodEntity?((MethodEntity)entity).getNativeMethod():entity instanceof ModuleEntity?((ModuleEntity)entity).getNativeMethod():entity instanceof ClassEntity?((ClassEntity)entity).getNativeInitEnvironment():member;
@@ -262,6 +351,15 @@ public final class PhpOwnershipExecution {
             if(entity instanceof ParameterEntity){var initializer=((ParameterEntity)entity).getDefaultInitializer();if(initializer==null || !member.getDeclaringClass().getName().equals(initializer.javaClass()) || !member.getName().equals(initializer.method()))throw new IllegalArgumentException("Default initializer changed after admission");}
             if(!member.equals(actual) || !((RuntimeClassLoader)member.getDeclaringClass().getClassLoader()).matchesDefinedBytecode(member.getDeclaringClass(),bytes))throw new IllegalArgumentException("Admitted target changed");
             } finally {session.validating.remove(this);}}
+        private static void requireCaptureClosure(php.runtime.reflection.helper.ClosureEntity closure,boolean cells) {
+            if(closure==null || closure.getOwnershipCapturePlan()==null)throw new IllegalArgumentException("Missing actual lexical declaration");
+            var capture=closure.getOwnershipCapturePlan();
+            if(!capture.staticClosure() || capture.usesThis() || closure.getGeneratorEntity()!=null
+                    || !cells && capture.entries().stream().anyMatch(e->e.mode()!=php.runtime.reflection.helper.ClosureEntity.CaptureMode.VALUE))
+                throw new IllegalArgumentException("Lexical receiver/CELL/generator publishers are not admitted by VALUE protocol");
+            try{PhpOwnershipClosures.validateLexicalShell(closure,closure.getNativeClass().getConstructor(Environment.class,ClassEntity.class,Memory.class,String.class,Memory[].class));}
+            catch(NoSuchMethodException failure){throw new IllegalArgumentException("Missing actual lexical empty-shell constructor",failure);}
+        }
         private ModuleEntity module(){return entity instanceof php.runtime.loader.dump.PhpAttributeDumper.ArgumentSource source?source.module():entity instanceof FunctionEntity?((FunctionEntity)entity).getModule():entity instanceof MethodEntity?((MethodEntity)entity).getClazz().getModule():entity instanceof ClassEntity?((ClassEntity)entity).getModule():entity instanceof ParameterEntity?session.env.getScope().getClassLoader().getModule(((ParameterEntity)entity).getDefaultInitializer().moduleName()):entity instanceof ModuleEntity?(ModuleEntity)entity:null;}
     }
     public static final class Ticket implements AutoCloseable {
@@ -376,6 +474,32 @@ public final class PhpOwnershipExecution {
             } catch(Throwable failure) {frame.unwind(failure);throw failure;}
         }
         private PhpOwnershipFramePublisher publisher(PhpOwnershipFrame.Slot slot){return session.domain().heap().framePublisher(slot);}
+        private final Map<PhpConstantReads.Site,PhpOwnershipFramePublisher> constantReadRoots=new IdentityHashMap<>();
+        public void requireConstantRead(PhpConstantReads.Site site) {
+            session.open();
+            if(currentEntry(session.env)!=this || ticket.target==null || !site.matches(ticket.target.member))
+                throw new IllegalArgumentException("Constant read differs from its actual Session entry");
+            ticket.target.validate();
+        }
+        public Memory parameterDefault(int index) {
+            session.open();
+            if(currentEntry(session.env)!=this || ticket.target==null)
+                throw new IllegalArgumentException("Parameter default needs its actual callee entry");
+            ticket.target.validate();
+            ParameterEntity[] parameters=ticket.target.entity instanceof FunctionEntity function ? function.getParameters()
+                    : ticket.target.entity instanceof MethodEntity method ? method.getParameters() : null;
+            if(parameters==null || index<0 || index>=parameters.length || parameters[index].getDefaultInitializer()==null)
+                throw new IllegalArgumentException("Parameter default differs from its actual declaration");
+            return parameters[index].evaluateDefault(session.env);
+        }
+        public Memory retainConstantRead(PhpConstantReads.Site site,Memory raw)throws Throwable {
+            requireConstantRead(site);var binding=session.value(raw);
+            if(binding.node()!=null) {
+                var root=constantReadRoots.computeIfAbsent(site,key->publisher(frame.temporary("constant-read:"+key.bci())));
+                publish(root,binding);
+            }
+            return raw;
+        }
         public Session session(){return session;}public PhpOwnershipArrays arrays(){return session.arrays();}public PhpOwnershipObjects objects(){return session.objects();}
         private Local local(int id){session.open();Local local=localPlans.get(id);if(local==null)throw new IllegalArgumentException("Unknown semantic local");return local;}
         public ArrayMemory nullableLocalTable(){session.open();return table;}
@@ -395,10 +519,146 @@ public final class PhpOwnershipExecution {
         private Throwable closeCalls(Throwable primary){List<CallRoots> pending=new ArrayList<>(calls.values());calls.clear();for(int i=pending.size()-1;i>=0;i--)try{pending.get(i).close();}catch(Throwable failure){primary=session.domain().graph().composeFailure(primary,failure);}return primary;}
         public PhpOwnershipHeap.Publication prepareImportedArgument(int argument,int id,Memory raw,int mode){Local local=local(id);if(local.storage()!=Storage.VALUE)throw new IllegalArgumentException("Direct import requires a VALUE local");if(raw==null)return new NoPublication();var destination=locals.get(id);var binding=session.candidate(raw,mode(mode));if(argument>=ticket.roots.arguments.size())return destination.prepare(destination.current(),binding);var source=ticket.roots.arguments.get(argument);validateImport(source.current().binding(),binding);return source.prepareTransferTo(source.current(),destination,destination.current(),raw);}
         public Memory importArgument(int argument,int id,Memory raw,int mode)throws Throwable {Local local=local(id);if(local.storage()!=Storage.ADDRESS)throw new IllegalArgumentException("Address import requires an ADDRESS local");if(raw==null)return localAddress(id,local.name());var binding=session.candidate(raw,mode(mode));if(argument>=ticket.roots.arguments.size()){assignLocal(id,raw,mode);return localAddress(id,local.name());}var source=ticket.roots.arguments.get(argument);validateImport(source.current().binding(),binding);session.domain().graph().deferDestruction(()->{assignLocal(id,raw,mode);publish(source,session.value(Memory.UNDEFINED));});return localAddress(id,local.name());}
-        public Memory importCapture(int capture,int id,Memory raw,int mode)throws Throwable {var receiver=ticket.roots.receiver();if(receiver==null || !(receiver.rawValue() instanceof ObjectMemory) || !(((ObjectMemory)receiver.rawValue()).value instanceof Closure))throw new IllegalArgumentException("Capture lacks an actual lexical closure receiver");Closure closure=(Closure)((ObjectMemory)receiver.rawValue()).value;var certificate=closure.ownershipClosure();if(certificate==null)throw new IllegalArgumentException("Closure captures lack allocation certification");var source=certificate.captureBindings().get(capture);var binding=session.candidate(raw,mode(mode));validateImport(source,binding);assignLocal(id,raw,mode);return localAddress(id,local(id).name());}
+        public Memory importReceiver(int id,IObject actual)throws Throwable {
+            session.open();Local local=local(id);
+            if(currentEntry(session.env)!=this || ticket.target==null || plan==null
+                    || !plan.requiredCapabilities().contains("invocation-receiver-import-v1")
+                    || !(ticket.target.entity instanceof MethodEntity method) || method.isStatic()
+                    || local.storage()!=Storage.ADDRESS || !local.name().equals("this") || local.importKind()!=ImportKind.NONE)
+                throw new IllegalArgumentException("Receiver import lacks its actual active method/Ticket/CV");
+            ticket.target.validate();var source=ticket.roots.receiver();
+            if(source==null || source.domain()!=session.domain() || source.role()!=PhpOwnershipValues.Role.VALUE
+                    || !(source.rawValue() instanceof ObjectMemory object) || object.value!=actual)
+                throw new IllegalArgumentException("Receiver import differs from its certified invocation receiver");
+            source.requireCertifiedObject();source.view(source.rawValue());
+            // The invocation receiver remains held by CallRoots while the real CV payload acquires its own edge.
+            physical.get(id).payloadPublisher().assign(source);
+            return localAddress(id,local.name());
+        }
+        public PhpOwnershipHeap.Publication prepareImportedCapture(int capture,int id,Memory raw,int mode) {
+            session.open();Local local=local(id);
+            if(currentEntry(session.env)!=this || mode!=VALUE || local.storage()!=Storage.VALUE
+                    || local.importKind()!=ImportKind.CAPTURE || local.importIndex()!=capture
+                    || !(plan.requiredCapabilities().contains("closure-value-import-v1") || plan.requiredCapabilities().contains("closure-capture-import-v2")))
+                throw new IllegalArgumentException("Capture publication lacks its actual lexical CV");
+            var receiver=ticket.roots.receiver();
+            if(receiver==null || !(receiver.rawValue() instanceof ObjectMemory object) || !(object.value instanceof Closure closure)
+                    || closure.ownershipClosure()==null)throw new IllegalArgumentException("Capture lacks its actual certified Closure receiver");
+            var source=closure.ownershipClosure().captureBindings().get(capture);var binding=session.value(raw);
+            validateImport(source,binding);return locals.get(id).prepare(locals.get(id).current(),binding);
+        }
+        public PhpOwnershipClosures.SessionAllocation prepareClosure(int evaluation,int index,String scope)throws Throwable {
+            session.open();if(currentEntry(session.env)!=this || ticket.target==null)throw new IllegalArgumentException("Closure literal needs its current issued Entry");
+            requireClosureCall("php/runtime/PhpOwnershipExecution$Entry","prepareClosure","(IILjava/lang/String;)Lphp/runtime/PhpOwnershipClosures$SessionAllocation;");
+            ticket.target.validate();
+            var entity=ticket.target.closureDependencies.get("closure-value-producer-v1:"+evaluation+":"+index);
+            if(entity==null)entity=ticket.target.closureDependencies.get("closure-capture-producer-v2:"+evaluation+":"+index);
+            if(entity==null)throw new IllegalArgumentException("Unissued lexical literal site");
+            return session.closures().prepareSession(this,evaluation,index,entity,scope);
+        }
+        private static final StackWalker CLOSURE_CALLER=StackWalker.getInstance(StackWalker.Option.RETAIN_CLASS_REFERENCE);
+        void requireClosureCall(String owner,String name,String descriptor) {
+            session.open();if(currentEntry(session.env)!=this || ticket.target==null)throw new IllegalArgumentException("No active lexical instruction");
+            var caller=CLOSURE_CALLER.walk(frames->frames.filter(frame->frame.getDeclaringClass()!=Entry.class
+                    && frame.getDeclaringClass()!=PhpOwnershipClosures.SessionAllocation.class
+                    && frame.getDeclaringClass()!=PhpOwnershipArrays.PhysicalSlot.class).findFirst().orElseThrow());
+            var member=ticket.target.member;
+            if(caller.getDeclaringClass()!=member.getDeclaringClass() || !caller.getMethodName().equals(member.getName())
+                    || !caller.getDescriptor().equals(PhpOwnershipExecution.descriptor(member)))
+                throw new IllegalArgumentException("Lexical helper was not reached by its exact generated member");
+            int offset=0;
+            for(var method:java.lang.classfile.ClassFile.of().parse(ticket.target.bytes).methods()) {
+                if(!method.methodName().equalsString(caller.getMethodName()) || !method.methodType().equalsString(caller.getDescriptor()))continue;
+                for(var element:method.code().orElseThrow().elementList())if(element instanceof java.lang.classfile.Instruction instruction) {
+                    if(offset==caller.getByteCodeIndex()) {
+                        if(instruction instanceof java.lang.classfile.instruction.InvokeInstruction call
+                                && call.opcode()==java.lang.classfile.Opcode.INVOKEVIRTUAL && call.owner().asInternalName().equals(owner)
+                                && call.name().equalsString(name) && call.type().equalsString(descriptor))return;
+                        throw new IllegalArgumentException("Lexical helper caller has another actual instruction");
+                    }
+                    offset+=instruction.sizeInBytes();
+                }
+            }
+            throw new IllegalArgumentException("Lexical helper lacks its actual defined bytecode position");
+        }
+        void requireClosureProducer(int evaluation,int index,php.runtime.reflection.helper.ClosureEntity entity,Closure shell) {
+            session.open();if(currentEntry(session.env)!=this || ticket.target==null || entity==null)
+                throw new IllegalArgumentException("Lexical literal is not this actual issued Entry");
+            ticket.target.validate();
+            if(ticket.target.closureDependencies.get("closure-value-producer-v1:"+evaluation+":"+index)!=entity
+                    && ticket.target.closureDependencies.get("closure-capture-producer-v2:"+evaluation+":"+index)!=entity
+                    || ticket.target.module().findClosure(index)!=entity
+                    || !contains(plan.evalIds(),evaluation))
+                throw new IllegalArgumentException("Foreign or unissued lexical producer");
+            if(shell!=null){var binding=eval(evaluation).current().binding();
+                if(binding==null || !(binding.rawValue() instanceof ObjectMemory object) || object.value!=shell)
+                    throw new IllegalArgumentException("Lexical shell is no longer the actual EVAL");}
+        }
+        void stageClosureShell(int evaluation,int index,php.runtime.reflection.helper.ClosureEntity entity,PhpOwnershipObjects.Allocation allocation)throws Throwable {
+            requireClosureProducer(evaluation,index,entity,null);var destination=eval(evaluation);
+            if(destination.current().binding()!=null && !destination.current().binding().rawValue().isUndefined())
+                throw new IllegalArgumentException("Lexical EVAL is already occupied");
+            session.domain().graph().deferDestruction(()->{try(var publication=allocation.preparePublication(destination,destination.current())){publication.commit();}allocation.close();});
+        }
+        PhpOwnershipValues.Binding closureCaptureValue(int evaluation,int closureIndex,php.runtime.reflection.helper.ClosureEntity entity,Closure shell,
+                                                       int index,int localId,Memory raw,Memory snapshot) {
+            requireClosureProducer(evaluation,closureIndex,entity,shell);var capture=entity.getOwnershipCapturePlan().entries().get(index);
+            if(capture.mode()!=php.runtime.reflection.helper.ClosureEntity.CaptureMode.VALUE)throw new IllegalArgumentException("VALUE read from a CELL descriptor");
+            if(localId<0){if(raw!=Memory.UNDEFINED || plan.locals().stream().anyMatch(local->local.name().equals(capture.name())))
+                throw new IllegalArgumentException("Missing capture differs from its absent CV");}
+            else {Local local=local(localId);if(!local.name().equals(capture.name()))throw new IllegalArgumentException("Capture reads another CV");
+                var source=local.storage()==Storage.VALUE?locals.get(localId).current().binding():physical.get(localId).payloadPublisher().current().binding();
+                if(local.storage()==Storage.ADDRESS && raw!=localAddress(localId,local.name()))
+                    throw new IllegalArgumentException("Capture differs from its actual CV address");
+                if(source==null || source.role()!=PhpOwnershipValues.Role.VALUE)throw new IllegalArgumentException("Capture lacks its actual VALUE publisher");
+                source.view(raw.toValue());if(!raw.toValue().isUndefined())validateImport(source,session.value(snapshot));
+            }
+            return session.value(snapshot);
+        }
+        PhpOwnershipValues.Binding closureCaptureReference(int evaluation,int closureIndex,php.runtime.reflection.helper.ClosureEntity entity,Closure shell,
+                                                           int index,int localId,Memory raw)throws Throwable {
+            requireClosureProducer(evaluation,closureIndex,entity,shell);var capture=entity.getOwnershipCapturePlan().entries().get(index);
+            Local local=local(localId);
+            if(capture.mode()!=php.runtime.reflection.helper.ClosureEntity.CaptureMode.CELL || local.storage()!=Storage.ADDRESS
+                    || !local.name().equals(capture.name()) || raw!=localAddress(localId,local.name()))
+                throw new IllegalArgumentException("CELL capture differs from its actual ADDRESS CV");
+            // PHP missing by-reference capture creates NULL without a VALUE-read warning.
+            var slot=physical.get(localId);var payload=slot.payloadPublisher().current().binding();
+            if(payload.rawValue().isUndefined())slot.payloadPublisher().assign(session.value(Memory.NULL));
+            return session.cell((ReferenceMemory)referenceLocal(localId));
+        }
+        /** Only the generated unset instruction can remove this CV's owner, never its shared CELL payload. */
+        public void unsetLocal(int id,Memory raw)throws Throwable {
+            Local local=local(id);requireClosureCall("php/runtime/PhpOwnershipExecution$Entry","unsetLocal","(ILphp/runtime/Memory;)V");
+            if(!plan.requiredCapabilities().contains("lexical-cv-unset-v2:"+id) || local.storage()!=Storage.ADDRESS
+                    || raw!=localAddress(id,local.name()))throw new IllegalArgumentException("Unset differs from its actual issued CV");
+            physical.get(id).clearLexicalCv(this,id);
+        }
+        boolean permitsLexicalCvClear(PhpOwnershipArrays.PhysicalSlot slot,int id) {
+            requireClosureCall("php/runtime/PhpOwnershipExecution$Entry","unsetLocal","(ILphp/runtime/Memory;)V");
+            return currentEntry(session.env)==this && physical.get(id)==slot && local(id).storage()==Storage.ADDRESS
+                    && plan.requiredCapabilities().contains("lexical-cv-unset-v2:"+id);
+        }
+        void releaseClosureCapture(PhpOwnershipFramePublisher stage)throws Throwable {
+            session.open();if(currentEntry(session.env)!=this || !stages.contains(stage))throw new IllegalArgumentException("Foreign capture temporary");
+            publish(stage,session.value(Memory.UNDEFINED));
+        }
+        public Memory importCapture(int capture,int id,Memory raw,int mode)throws Throwable {
+            Local local=local(id);
+            if(currentEntry(session.env)!=this || local.storage()!=Storage.ADDRESS || local.importKind()!=ImportKind.CAPTURE
+                    || local.importIndex()!=capture || local.importMode()!=mode(mode)
+                    || !(plan.requiredCapabilities().contains("closure-value-import-v1") || plan.requiredCapabilities().contains("closure-capture-import-v2")))
+                throw new IllegalArgumentException("Capture import differs from its certified lexical CV/role");
+            var receiver=ticket.roots.receiver();
+            if(receiver==null || !(receiver.rawValue() instanceof ObjectMemory object) || !(object.value instanceof Closure closure))
+                throw new IllegalArgumentException("Capture lacks an actual lexical closure receiver");
+            var certificate=closure.ownershipClosure();if(certificate==null)throw new IllegalArgumentException("Closure captures lack allocation certification");
+            var source=certificate.captureBindings().get(capture);var binding=session.candidate(raw,mode(mode));validateImport(source,binding);
+            assignLocal(id,raw,mode);return localAddress(id,local.name());
+        }
         private void validateImport(PhpOwnershipValues.Binding source,PhpOwnershipValues.Binding next){if(source==null || source.domain()!=session.domain() || source.role()!=next.role() || source.node()!=next.node())throw new IllegalArgumentException("Imported value differs from its certified SEND/capture");source.view(next.rawValue());}
         public Memory assignLocal(int id,Memory raw,int mode)throws Throwable {Local local=local(id);if(local.storage()!=Storage.ADDRESS)throw new IllegalArgumentException("Direct JVM locals require prepare/store/commit");var binding=session.candidate(raw,mode(mode));var address=addresses.get(id);if(binding.role()==PhpOwnershipValues.Role.CELL){try(var publication=physical.get(id).prepareRebind(address.current(),binding)){publication.store();publication.commit();}}else physical.get(id).payloadPublisher().assign(binding);return raw;}
-        public Memory referenceLocal(int id)throws Throwable {Local local=local(id);if(local.storage()!=Storage.ADDRESS)throw new IllegalArgumentException("Reference fetch needs an addressable local");var slot=physical.get(id);var current=slot.ownerPublisher().current();if(current.binding().role()==PhpOwnershipValues.Role.CELL)return current.binding().rawValue();try(var publication=slot.preparePromotion(current)){Memory cell=publication.cell();publication.store();publication.commit();return cell;}}
+        public Memory referenceLocal(int id)throws Throwable {requireClosureCall("php/runtime/PhpOwnershipClosures$SessionAllocation","captureReference","(IILphp/runtime/Memory;)V");Local local=local(id);if(local.storage()!=Storage.ADDRESS)throw new IllegalArgumentException("Reference fetch needs an addressable local");var slot=physical.get(id);var current=slot.ownerPublisher().current();if(current.binding().role()==PhpOwnershipValues.Role.CELL)return current.binding().rawValue();try(var publication=slot.preparePromotion(current)){Memory cell=publication.cell();publication.store();publication.commit();return cell;}}
         public Memory normalizeReturn(Memory raw,int mode) {session.open();if(mode!=VALUE)throw new IllegalArgumentException("Reference return normalization lacks its certified payload protocol");session.value(raw);return raw.isUndefined()?Memory.NULL:raw;}
         private final class ReturnCustody {
             final PhpOwnershipFramePublisher publisher;PhpOwnershipFramePublisher previous;boolean active;

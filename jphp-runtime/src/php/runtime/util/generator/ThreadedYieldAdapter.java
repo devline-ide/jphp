@@ -49,6 +49,18 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
         T var;
         volatile boolean closed;
         Object packet;
+        Collector.ExecutionContext execution;
+
+        void enter(Object permit) {
+            execution = permit instanceof Collector.ExecutionContext context ? context : null;
+            if (execution != null) execution.enter();
+        }
+
+        void leave() {
+            Collector.ExecutionContext context = execution;
+            execution = null;
+            if (context != null) context.close();
+        }
 
         public T getVar() {
             return var;
@@ -94,6 +106,12 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                 final LinkedTransferQueue<Object> returnQueue = new LinkedTransferQueue<Object>();
 
                 final VarContainer<Thread> collectThread = new VarContainer<Thread>();
+                final java.util.concurrent.ExecutorService collectorExecutor =
+                        java.util.concurrent.Executors.newThreadPerTaskExecutor(task -> {
+                            Thread worker = Thread.ofVirtual().unstarted(task);
+                            collectThread.setVar(worker);
+                            return worker;
+                        });
 
                 final YieldAdapterIterator<T> iterator = new YieldAdapterIterator<T>() {
                     private volatile Message messageWaiting = null;
@@ -128,12 +146,15 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                             return;
                         }
                         if (messageWaiting == null) { // do not run if value waiting to be put
+                            Collector.ExecutionContext execution = client.executionContext();
                             try {
-                                returnQueue.offer(RESUME); // allow other thread to gather result
+                                returnQueue.offer(execution == null ? RESUME : execution); // hand off this request
                                 messageWaiting = synchronousQueue.take();
                             } catch (final InterruptedException e) {
                                 Thread.currentThread().interrupt();
                                 close();
+                            } finally {
+                                if (execution != null) execution.restoreCaller();
                             }
                         }
                         Throwable failure = messageWaiting.failure();
@@ -183,7 +204,7 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                 };
 
                 // This thread is where the collecting logic is executed.
-                collectThread.setVar(new Thread() {
+                collectorExecutor.execute(new Runnable() {
                     @Override
                     public void run() {
 
@@ -193,15 +214,17 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                         // the collecting process is able to modify any resources that may be requred by
                         // results.
 
+                        Object initialPermit;
                         try {
-                            returnQueue.take();
+                            initialPermit = returnQueue.take();
                         } catch (final InterruptedException e) {
-                            //throw new RuntimeException("Error with yield adapter", e);
+                            collectorExecutor.shutdown();
                             return;
                         }
                         try {
                             try {
 
+                                collectThread.enter(initialPermit);
                                 client.collect(new ResultHandler<T>() {
                                     public T handleResult(final T value)
                                             throws CollectionAbortedException {
@@ -213,8 +236,9 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                                                 packet = new ValueMessage(value);
                                                 collectThread.packet = packet;
                                             } else packet.value = value;
+                                            collectThread.leave();
                                             synchronousQueue.transfer(packet);
-                                            returnQueue.take();  // wait for permission to continue
+                                            collectThread.enter(returnQueue.take()); // acquire the next request's context
                                             return oldValue;
                                         } catch (final InterruptedException e) {
                                             // this thread has been aborted
@@ -223,10 +247,12 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                                     }
                                 });
 
+                                collectThread.leave();
                                 if (!collectThread.closed) synchronousQueue.transfer(new EndMessage());
                                 // Signal no more results to come
 
                             } catch (final CollectionAbortedException collectionAborted) {
+                                collectThread.leave();
                                 if (!(collectionAborted
                                         .getCause() instanceof InterruptedException)) {
                                     // Collect was aborted by client
@@ -235,16 +261,18 @@ public class ThreadedYieldAdapter<T> implements YieldAdapter<T> {
                                     if (!collectThread.closed) synchronousQueue.transfer(new AbortedMessage());
                                 }
                             } catch (RuntimeException | Error failure) {
+                                try { collectThread.leave(); }
+                                catch (RuntimeException | Error cleanup) { if (cleanup != failure) failure.addSuppressed(cleanup); }
                                 if (!collectThread.closed) synchronousQueue.transfer(new FailedMessage(failure));
                             }
 
                         } catch (final InterruptedException e) {
-                            // Operation was aborted internally (e.g.  iterator out of scope)
+                            // Operation was aborted internally (e.g. iterator out of scope)
+                        } finally {
+                            try { collectThread.leave(); } finally { collectorExecutor.shutdown(); }
                         }
                     }
                 });
-                collectThread.getVar().setDaemon(true);
-                collectThread.getVar().start();
 
                 return iterator;
             }

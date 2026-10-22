@@ -1,0 +1,2 @@
+["date",["InvalidArgumentException","Overloaded object of type ReviewDateExport is not compatible with ArrayIterator"],"\\ReviewDateExport::__set_state(array(\n   'tag' => 'v',\n   'hidden' => 2,\n   'secret' => 3,\n   'date' => '2024-01-01 00:00:00.000000',\n   'timezone_type' => 3,\n   'timezone' => 'UTC',\n))"]
+["zone",["InvalidArgumentException","Overloaded object of type ReviewZoneExport is not compatible with ArrayIterator"],"\\ReviewZoneExport::__set_state(array(\n   'tag' => 'z',\n   'hidden' => 4,\n   'timezone_type' => 3,\n   'timezone' => 'UTC',\n))"]

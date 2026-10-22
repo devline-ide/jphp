@@ -1,0 +1,3 @@
+["captured-send",true,0,"No error","bogus",["8192:Implicit conversion from float 512.5 to int loses precision"]]
+["throw-before-state","precision-handler",4,"Syntax error"]
+["deep-native-supported",true,0,"No error",4097]

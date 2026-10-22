@@ -1,0 +1,2 @@
+<?php
+error_reporting(-1);$e=[];$calls=0;$sentinel=new RuntimeException('stop');function f($x=[E_STRICT]){return $x;}set_error_handler(function($n,$s)use(&$e,&$calls,$sentinel){$e[]='warn:'.$n.':'.$s;if(++$calls===1)throw $sentinel;return true;});try{f();$e[]='wrong';}catch(Throwable $t){$e[]=$t===$sentinel?'same':'different';}$e[]='retry:'.serialize(f());$e[]='again:'.serialize(f());restore_error_handler();echo serialize($e);

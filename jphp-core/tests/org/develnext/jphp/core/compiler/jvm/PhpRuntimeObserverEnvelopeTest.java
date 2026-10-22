@@ -66,6 +66,7 @@ public class PhpRuntimeObserverEnvelopeTest extends JvmCompilerCase implements O
     @Test public void typedCreatedRequiresSameCompleteProofAndAddress()throws Throwable {
         modes(TYPED,(bytes,name,descriptor)->{
             assertTrue(PhpRuntimeOwnership.readRuntimePlan(bytes,name,descriptor).unsupported().isEmpty());
+            rejectedSessionUnsetGuards(bytes,name,descriptor);
             for(int mutation=0;mutation<7;mutation++) {
                 var node=read(bytes);var m=method(node,name,descriptor);var ops=code(m);int at=call(ops,"php/runtime/PhpTypedSourceLifetime","created");
                 if(mutation==0)((LdcInsnNode)ops.get(at-6)).cst=org.objectweb.asm.Type.getObjectType("java/lang/Object");
@@ -78,6 +79,21 @@ public class PhpRuntimeObserverEnvelopeTest extends JvmCompilerCase implements O
                 rejected(write(node),name,descriptor);
             }
         });
+    }
+    /** Additional Session guard mutations preserve every original typed-created metadata mutation above. */
+    private static void rejectedSessionUnsetGuards(byte[] bytes,String name,String descriptor)throws Throwable {
+        for(int mutation=0;mutation<7;mutation++) {
+            var node=read(bytes);var m=method(node,name,descriptor);var ops=code(m);
+            int at=call(ops,"php/runtime/PhpOwnershipExecution$Entry","unsetLocal");
+            if(mutation==0)((LdcInsnNode)ops.get(at-2)).cst=1000000;
+            else if(mutation==1)((VarInsnNode)ops.get(at-3)).var=((VarInsnNode)ops.get(at-1)).var;
+            else if(mutation==2)((VarInsnNode)ops.get(at-1)).var=1000;
+            else if(mutation==3)((JumpInsnNode)ops.get(at-4)).setOpcode(IFNONNULL);
+            else if(mutation==4)m.instructions.set(ops.get(at+1),new InsnNode(NOP));
+            else if(mutation==5)((MethodInsnNode)ops.get(at)).desc="(Lphp/runtime/Memory;)V";
+            else {var ingress=new LabelNode();m.instructions.insertBefore(ops.get(at+4),ingress);((JumpInsnNode)ops.get(at+1)).label=ingress;}
+            rejected(write(node),name,descriptor);
+        }
     }
     @Test public void foreignBranchCannotEnterFieldExportOperands()throws Throwable {
         modes(FIELD,(bytes,name,descriptor)->{
