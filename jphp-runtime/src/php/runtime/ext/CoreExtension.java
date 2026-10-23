@@ -125,6 +125,7 @@ public class CoreExtension extends Extension implements ProgramShutdownHandler {
         scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpSensitiveParameterValue.class,php.runtime.ext.core.classes.PhpSensitiveParameterValue::configure);
         scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpSensitiveParameterAttribute.class,php.runtime.ext.core.classes.PhpSensitiveParameterAttribute::configure);
         scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpNoDiscardAttribute.class,php.runtime.ext.core.classes.PhpNoDiscardAttribute::configure);
+        scope.registerPhp85LazyClass(this,php.runtime.ext.core.classes.PhpDeprecatedAttribute.class,php.runtime.ext.core.classes.PhpDeprecatedAttribute::configure);
         // Distinct existing profile-local builtin entities keep the historical Reflection surface intact.
         scope.registerPhp85LazyClass(this,ReflectionClass.class);
         scope.registerPhp85LazyClass(this,ReflectionObject.class);

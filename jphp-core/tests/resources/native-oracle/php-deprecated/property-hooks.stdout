@@ -1,0 +1,4 @@
+hook-get:[["ok",7],[["warning",16384,"Method RouteHooks::$value::get() is deprecated, hook-get"],["get-hook-body"]]]
+hook-set:[["ok","after"],[["warning",16384,"Method RouteHooks::$value::set() is deprecated, hook-set"],["set-hook-body",8]]]
+hook-get-throws:[["throw","RuntimeException","route-handler"],[["warning",16384,"Method RouteHooks::$value::get() is deprecated, hook-get"]]]
+hook-set-throws:[["throw","RuntimeException","route-handler"],[["warning",16384,"Method RouteHooks::$value::set() is deprecated, hook-set"]]]

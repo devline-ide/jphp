@@ -107,11 +107,23 @@ public class PhpPropertyHookTraitDonorTest extends JvmCompilerCase {
                 var donorFile=fixture.sibling("donor.php").toFile();
                 include(env,compile(env,donorFile,source(id,"donor.php"),false,false),donorFile);
                 var module=compile(env,fixture.sibling("consumer.php").toFile(),source(id,"consumer.php"),false,false);
-                var owner=module.findClass("Host");assertNotNull(owner);assertNull(owner.getNativeClass());
-                var property=owner.findProperty("p");var hook=property.getPhpHooks().get();byte[] original=owner.getData().clone();
-                var physical=PhpTraitPropertyHookOrigin.readClass(original);
-                var actual=physical.methods.stream().filter(m->m.name.equals(hook.method().getInternalName())).findFirst().orElseThrow();
-                assertTrue(PhpTraitPropertyHookOrigin.strictContext(owner,physical,actual,property,hook,env));
+                var template=module.getDeferredClasses().stream().filter(type->type.getName().equals("Host")).findFirst().orElseThrow();
+                assertTrue(template.isDeclarationTemplate());assertNull(template.getNativeClass());
+                byte[] templateBytes=template.getData().clone();
+                // Imported bodies now exist only in a runtime linked definition. Capture a genuine
+                // intermediary trait copy while keeping the actual Host consumer cold and unpublished.
+                var copyFile=fixture.sibling("cold-copy.php").toFile();
+                include(env,compile(env,copyFile,("<?php declare(strict_types=0); trait ColdHostCopy { use Shared; }").getBytes(StandardCharsets.UTF_8),false,false),copyFile);
+                var donor=env.fetchClass("Shared",false,PhpLanguageProfile.PHP_8_5);
+                var owner=env.fetchClass("ColdHostCopy",false,PhpLanguageProfile.PHP_8_5);
+                assertNotNull(owner);assertNotNull(owner.getNativeClass());
+                var property=owner.findProperty("p");var hook=property.getPhpHooks().get();
+                var loader=scope.getClassLoader();
+                var snapshot=PhpTraitPropertyHookOrigin.runtimeSource(donor.findProperty("p").getPhpHooks().get(),loader,List.of(donor,owner));
+                byte[] original=loader.traitHookDefinition(owner);
+                String targetOwner=owner.getCompiledInternalName().replace('.','/'),targetMember=hook.method().getInternalName();
+                PhpTraitPropertyHookOrigin.validateRuntimeTarget(snapshot,original,targetOwner,targetMember,loader);
+                assertNull(env.fetchClass("Host",false,PhpLanguageProfile.PHP_8_5));assertEquals(0,out.size());
                 for(String change:new String[]{"joint-profile","body-effect","handler","missing-origin","foreign-origin"}) {
                     ClassNode forged;
                     if(change.equals("joint-profile")||change.equals("foreign-origin")) {
@@ -122,26 +134,30 @@ public class PhpPropertyHookTraitDonorTest extends JvmCompilerCase {
                     if(change.equals("joint-profile")||change.equals("foreign-origin")) {
                         RawOrigin origin=(RawOrigin)target.attrs.stream().filter(a->a.type.equals(PhpTraitPropertyHookOrigin.ATTRIBUTE)).findFirst().orElseThrow();
                         var input=new DataInputStream(new ByteArrayInputStream(origin.payload));
-                        input.readInt();String moduleName=input.readUTF(),trait=input.readUTF(),ownerName=input.readUTF(),member=input.readUTF(),hash=input.readUTF();
+                        int mode=input.readInt();assertEquals(2,mode);
+                        String moduleName=input.readUTF(),trait=input.readUTF(),ownerName=input.readUTF(),member=input.readUTF(),hash=input.readUTF();
                         boolean strict=input.readBoolean();int sourceTrace=input.readInt(),targetTrace=input.readInt();
+                        byte[] retainedTargetTuple=input.readAllBytes();assertTrue(retainedTargetTuple.length>0);
                         var bytes=new ByteArrayOutputStream();var encoded=new DataOutputStream(bytes);
-                        encoded.writeInt(1);encoded.writeUTF(moduleName);encoded.writeUTF(change.equals("foreign-origin")?"OtherTrait":trait);
+                        encoded.writeInt(mode);encoded.writeUTF(moduleName);encoded.writeUTF(change.equals("foreign-origin")?"OtherTrait":trait);
                         encoded.writeUTF(ownerName);encoded.writeUTF(member);encoded.writeUTF(hash);
-                        encoded.writeBoolean(change.equals("joint-profile")?false:strict);encoded.writeInt(sourceTrace);encoded.writeInt(targetTrace);encoded.flush();
-                        origin.payload=bytes.toByteArray();
-                        if(change.equals("joint-profile"))target.instructions.set(code.get(4),new InsnNode(Opcodes.ICONST_0));
+                        encoded.writeBoolean(change.equals("joint-profile")?false:strict);encoded.writeInt(sourceTrace);encoded.writeInt(targetTrace);
+                        encoded.write(retainedTargetTuple);encoded.flush();origin.payload=bytes.toByteArray();
+                        if(change.equals("joint-profile")) {
+                            assertTrue(strict);assertEquals(Opcodes.ICONST_1,code.get(4).getOpcode());
+                            target.instructions.set(code.get(4),new InsnNode(Opcodes.ICONST_0));
+                        }
                     }else if(change.equals("body-effect"))target.instructions.insertBefore(code.get(code.size()-1),new InsnNode(Opcodes.NOP));
                     else if(change.equals("handler")) {assertFalse(target.tryCatchBlocks.isEmpty());target.tryCatchBlocks.get(0).type="java/lang/RuntimeException";}
                     else target.attrs.removeIf(a->a.type.equals(PhpTraitPropertyHookOrigin.ATTRIBUTE));
-                    var writer=new ClassWriter(0);forged.accept(writer);owner.setData(writer.toByteArray());
-                    try {
-                        var saved=new ByteArrayOutputStream();boolean rejected=false;
-                        try {new ModuleDumper(module.getContext(),env,false).save(module,saved);}
-                        catch(IOException expected){rejected=true;}
-                        assertTrue(change+" must reject the genuine imported method before consumer definition",rejected);
-                        assertEquals(0,saved.size());assertEquals(0,out.size());assertNull(owner.getNativeClass());
-                        assertNull(PhpRuntimeOwnership.current(env));
-                    } finally {owner.setData(original);}
+                    var writer=new ClassWriter(0);forged.accept(writer);boolean rejected=false;
+                    try {PhpTraitPropertyHookOrigin.validateRuntimeTarget(snapshot,writer.toByteArray(),targetOwner,targetMember,loader);}
+                    catch(LinkageError expected){rejected=true;}
+                    assertTrue(change+" must reject the genuine runtime imported method before Host consumer definition",rejected);
+                    assertEquals(0,out.size());assertNull(template.getNativeClass());assertTrue(template.isDeclarationTemplate());
+                    assertArrayEquals(templateBytes,template.getData());
+                    assertNull(env.fetchClass("Host",false,PhpLanguageProfile.PHP_8_5));
+                    assertNull(PhpRuntimeOwnership.current(env));
                 }
             } finally {env.doFinal();}
         }

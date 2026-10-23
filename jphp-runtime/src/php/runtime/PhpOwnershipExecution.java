@@ -192,6 +192,7 @@ public final class PhpOwnershipExecution {
         public Memory invokeMethod(MethodEntity method,IObject receiver,TraceInfo trace,CallRoots roots)throws Throwable {
             roots.same(this);if(PhpOwnershipReflectionCalls.supports(method))return invokeNativeReflection(method,receiver,trace,roots,false);Ticket ticket=new Ticket(this,target(method),null,roots,trace);
             return scoped(ticket,()->{
+                PhpDeprecatedInvocation.beforeFunction(env,trace,method);
                 Memory[] passed=roots.rawArguments();ParameterEntity[] parameters=method.getParameters();
                 if(parameters!=null && passed.length<parameters.length) {
                     if(!method.isStatic()) {
@@ -270,7 +271,9 @@ public final class PhpOwnershipExecution {
             php.runtime.reflection.helper.PhpNativePropertiesShellVerifier.require(receiver.getClass().getConstructor(Environment.class,ClassEntity.class));
             Ticket ticket=new Ticket(this,null,member,roots,trace);
             return scoped(ticket,()->{
-                Memory[] args=roots.rawArguments();env.pushCall(trace,receiver,args,method.getName(),method.getClazz().getName(),method.getClazz().getName());
+                Memory[] args=roots.rawArguments();
+                var call=env.pushCall(trace,receiver,args,method.getName(),method.getClazz().getName(),method.getClazz().getName());
+                call.classEntity=method.getClazz();call.staticClassEntity=method.getClazz();
                 try {ticket.bindCallFrame();Memory result;
                     try{result=(Memory)member.invoke(receiver,env,args);}catch(InvocationTargetException failure){throw failure.getCause();}
                     roots.stageResult(value(result));return result;

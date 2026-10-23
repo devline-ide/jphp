@@ -208,6 +208,8 @@ public final class PhpConstantExpression {
         if (target == null || owner.isTrait() || !(access.getField() instanceof NameToken)) return null;
         var constant = target.findConstant(((NameToken) access.getField()).getName());
         if (constant == null || target != owner || constant.getClazz() != owner) return null;
+        // A known value still has a semantic read effect; retain its runtime initializer.
+        if (php.runtime.invoke.PhpDeprecatedInvocation.marker(constant) != null) return null;
         var trace = constant.getTrace();
         if (constant.getClazz() == owner && (trace.getStartLine() > access.getMeta().getStartLine()
                 || trace.getStartLine() == access.getMeta().getStartLine()

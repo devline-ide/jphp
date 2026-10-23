@@ -116,6 +116,8 @@ public class ReflectionClassConstant extends BaseObject {
     @Signature
     public boolean isFinal() { return entity.isFinal(); }
 
+    @Signature public boolean isDeprecated() {return entity.isDeprecated();}
+
     @Signature public boolean isEnumCase() {return entity.isEnumCase();}
 
     @Signature

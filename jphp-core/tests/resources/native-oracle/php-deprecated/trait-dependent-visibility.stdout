@@ -1,0 +1,6 @@
+ordinary-before:[false,false]
+ordinary-after:[true,true,[["warning",16384,"Trait RouteTrait used by RouteC is deprecated, visible-trait",false,false]]]
+retry-before:[false,false]
+retry-first-throws:[["throw","RuntimeException","route-handler"],[["warning",16384,"Trait RouteTrait used by RouteRetryC is deprecated, visible-trait"]]]
+retry-after-failure:[false,false]
+retry-second-publishes:[["ok",[true,true]],[["warning",16384,"Trait RouteTrait used by RouteRetryC is deprecated, visible-trait"]]]

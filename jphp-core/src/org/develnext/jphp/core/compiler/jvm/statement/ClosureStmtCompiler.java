@@ -25,6 +25,20 @@ public class ClosureStmtCompiler extends StmtCompiler<ClosureEntity> {
         this.statement = statement;
     }
 
+    private String deprecatedClosureName(ClosureStmtToken closure) {
+        var parent = closure.getParentFunction();
+        String owner = closure.getOwnerClass() == null ? null : closure.getOwnerClass().getFulledName();
+        String context = closure.toTraceInfo(compiler.getContext()).getFileName();
+        if (parent != null && parent.getName() != null) {
+            context = (owner == null ? parent.getFulledName() : owner + "::" + parent.getName().getName()) + "()";
+        } else if (parent != null) {
+            for (ClosureStmtToken candidate : compiler.getAnalyzer().getClosures()) {
+                if (candidate.getFunction() == parent) { context = deprecatedClosureName(candidate); break; }
+            }
+        }
+        return "{closure:" + context + ":" + (closure.toTraceInfo(compiler.getContext()).getStartLine() + 1) + "}";
+    }
+
     @Override
     public ClosureEntity compile() {
         ClosureEntity entity = new ClosureEntity(getCompiler().getContext());
@@ -58,6 +72,12 @@ public class ClosureStmtCompiler extends StmtCompiler<ClosureEntity> {
                     :(owner==null?parent.getFulledName():owner+"::"+parent.getName().getName())+"()";
             String closure="{closure:"+context+":"+(statement.toTraceInfo(compiler.getContext()).getStartLine()+1)+"}";
             classStmtCompiler.setNoDiscardClosureName((owner==null?"function ":"method "+owner+"::")+closure);
+        }
+        if (compiler.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5
+                && statement.getFunction().getPhpAttributes().stream().anyMatch(a -> a.getName().getName().equalsIgnoreCase("Deprecated"))) {
+            String owner = statement.getOwnerClass() == null ? null : statement.getOwnerClass().getFulledName();
+            classStmtCompiler.setDeprecatedClosureName((owner == null ? "Function " : "Method " + owner + "::")
+                    + deprecatedClosureName(statement));
         }
         ClassEntity clazzEntity = classStmtCompiler.compile();
         clazzEntity.setType(ClassEntity.Type.CLOSURE);

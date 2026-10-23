@@ -203,7 +203,11 @@ public class PhpUnicodeClassNamesTest extends JvmCompilerCase {
                         + ".'|'.$b->upper().'|'.$b->lower().'|'.(int)($b instanceof MixedContractÉ).(int)($b instanceof MixedContracté);",
                         PhpLanguageProfile.PHP_8_5, dump);
                 assertEquals("3|9|3|7|upper|lower|11", include(env, modern).toString());
-                ClassEntity both = modern.findClass("MixedBoth"); assertEquals(2, both.getInterfaces().size()); assertEquals(2, both.getTraits().size());
+                ClassEntity template=modern.getDeferredClasses().stream().filter(type->type.getName().equals("MixedBoth")).findFirst().orElseThrow();
+                assertTrue(template.isDeclarationTemplate());assertNull(template.getNativeClass());
+                ClassEntity both=env.fetchClass("MixedBoth",false,PhpLanguageProfile.PHP_8_5);
+                assertNotNull(both);assertNotSame(template,both);assertSame(modern,both.getModule());
+                assertFalse(both.isDeclarationTemplate());assertEquals(2,both.getInterfaces().size());assertEquals(2,both.getTraits().size());
                 ClassEntity old = env.fetchClass("StorageÉ", false, PhpLanguageProfile.PHP_8_5), current = modern.findClass("Storageé");
                 assertNotEquals(old.findStaticProperty("value").getInternalName(), current.findStaticProperty("value").getInternalName());
                 assertNotEquals(old.findConstant("c").getInternalName(), current.findConstant("c").getInternalName());

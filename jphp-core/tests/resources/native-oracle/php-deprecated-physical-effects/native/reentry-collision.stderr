@@ -1,0 +1,6 @@
+Fatal error: Cannot redeclare class DepReviewCollisionConsumer (previously declared in F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\reentry-collision\subject.php:3) in F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\reentry-collision\reentry-definition.php on line 3
+Stack trace:
+#0 F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\reentry-collision.php(13): require()
+#1 F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\reentry-collision\subject.php(3): {closure:F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\reentry-collision.php:8}(16384, 'Trait DepReview...', 'F:\\ReWork\\ozl.d...', 3)
+#2 F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\reentry-collision.php(21): require('F:\\ReWork\\ozl.d...')
+#3 {main}

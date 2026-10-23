@@ -80,7 +80,7 @@ public final class PhpActiveCaptureWarningTest {
         String runtime=System.getProperty("qa.runtime"),core=System.getProperty("qa.core");
         if(runtime!=null)assertEquals(Path.of(runtime).toRealPath(),Path.of(Environment.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath());
         if(core!=null)assertEquals(Path.of(core).toRealPath(),Path.of(JvmCompiler.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath());
-        assertEquals(28,ModuleDumper.COMPILER_ABI_VERSION);
+        assertEquals(29,ModuleDumper.COMPILER_ABI_VERSION);
         try(var stdout=PhpActiveCaptureWarningTest.class.getClassLoader().getResourceAsStream("resources/native-oracle/active-capture-warning/native.stdout");
             var stderr=PhpActiveCaptureWarningTest.class.getClassLoader().getResourceAsStream("resources/native-oracle/active-capture-warning/native.stderr")) {
             assertNotNull("Pinned native capture/earlier ARRAY oracle",stdout);assertNotNull(stderr);

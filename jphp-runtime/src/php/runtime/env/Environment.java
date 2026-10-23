@@ -1097,6 +1097,22 @@ public class Environment {
         return entity;
     }
 
+    private static String classDeclarationReservationKey(String name) {
+        return "\0class-declaration-reservation:" + PhpClassNames.canonicalKey(name);
+    }
+
+    private boolean isClassDeclarationReserved(String name) {
+        return getUserValue(classDeclarationReservationKey(name), ClassEntity.class) != null;
+    }
+
+    private void reserveClassDeclaration(String name, ClassEntity template, TraceInfo trace) {
+        String key=classDeclarationReservationKey(name);
+        synchronized(userValues) {
+            if(!userValues.containsKey(key)) {userValues.put(key,template);return;}
+        }
+        error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
+    }
+
     private boolean hasClassCollision(String name, ClassEntity entity) {
         synchronized (classMap) {
             String key = PhpClassNames.canonicalKey(name);
@@ -1180,14 +1196,14 @@ public class Environment {
     /** Alias publication is local to this Environment and retains the actual declaration identity. */
     public boolean registerClassAlias(String name,ClassEntity entity,PhpLanguageProfile profile) {
         try(var admission=enterCallbackDomain()) {
-            if(hasClassCollision(name,entity) || fetchClass(name,false,profile)!=null)return false;
+            if(isClassDeclarationReserved(name) || hasClassCollision(name,entity) || fetchClass(name,false,profile)!=null)return false;
             publishClass(name,entity);return true;
         }
     }
 
     public void registerClass(ClassEntity entity) {
         try(var admission=enterCallbackDomain()) {
-            if(hasClassCollision(entity.getName(),entity))exception("Class '%s' already registered",entity.getName());
+            if(isClassDeclarationReserved(entity.getName()) || hasClassCollision(entity.getName(),entity))exception("Class '%s' already registered",entity.getName());
             publishClass(entity.getName(),entity);entity.initEnvironment(this);
         }
     }
@@ -1812,10 +1828,16 @@ public class Environment {
 
     public void registerModule(ModuleEntity module, boolean ignoreErrors) {
         try(var admission=enterCallbackDomain()) {
+            // Old plain-class PHB has no lexical reservation check even when it has no Deprecated metadata.
+            for(ClassEntity entity:module.getClasses())if(entity.isStatic() && isClassDeclarationReserved(entity.getName()))
+                if(module.getPhpLanguageProfile()!=PhpLanguageProfile.PHP_8_5
+                        || module.getCompilerProvenance().getCompilerAbiVersion()<29)
+                    throw new CriticalException("Reserved class declaration requires PHP 8.5 compiler ABI 29 or newer; recompile this module from source");
             if(!ignoreErrors)for(ClassEntity entity:module.getClasses())
-                if(entity.isStatic() && hasClassCollision(entity.getName(),entity))
+                if(entity.isStatic() && !isClassDeclarationReserved(entity.getName()) && hasClassCollision(entity.getName(),entity))
                     error(entity.getTrace(),Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(entity.getName()));
-            for(ClassEntity entity:module.getClasses())if(entity.isStatic()) {
+            // A reserved name remains invisible; its exact module entity is checked at the lexical statement.
+            for(ClassEntity entity:module.getClasses())if(entity.isStatic() && !isClassDeclarationReserved(entity.getName())) {
                 entity.setModule(module);publishClass(entity.getName(),entity);entity.register(this);
             }
             for(FunctionEntity entity:module.getFunctions())if(entity.isStatic()) {
@@ -1862,6 +1884,18 @@ public class Environment {
     }
 
     private Memory constantReadValue(String name, String lowerName, TraceInfo trace, Memory value) {
+        if (value != null) {
+            // Follow the successful lookup's precedence without turning quiet findConstant into a read.
+            ConstantEntity declaration = constantMap.get(lowerName);
+            if (declaration != null && declaration.caseSensitise && !name.equals(declaration.getName())) declaration = null;
+            if (declaration == null && scope.findCompileConstant(name) == null) {
+                ConstantEntity scoped = scope.findUserConstant(name);
+                if (scoped != null && (!scoped.caseSensitise || name.equals(scoped.getName()))) declaration = scoped;
+            }
+            if (declaration != null && php.runtime.invoke.PhpDeprecatedInvocation.marker(declaration) != null) {
+                php.runtime.invoke.PhpDeprecatedInvocation.beforeConstant(this, trace, declaration);
+            }
+        }
         if (value != null && "E_STRICT".equals(name)
                 && moduleManager.getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5) {
             ConstantEntity user = constantMap.get(lowerName);
@@ -2143,14 +2177,38 @@ public class Environment {
             ClassEntity entity=module==null?null:module.findClass(name);
             if(entity==null || !entity.isAnonymous())throw new CriticalException("Invalid anonymous declaration in module "+moduleIndex);
             ClassEntity present=lookupClass(name,true);
-            if(present!=null && entity.isUnresolvedDeclaration() && present.getModule()==module)return present;
+            if(present!=null && (entity.isUnresolvedDeclaration() || entity.isDeclarationTemplate()) && present.getModule()==module)return present;
             if(present!=null && present!=entity)throw new CriticalException("Anonymous class identity collision");
             if(present==null) {
-                if(entity.isUnresolvedDeclaration())return __declareClass(moduleIndex,name);
-                entity.initEnvironment(this);publishClass(name,entity);
+                if(entity.isUnresolvedDeclaration() || entity.isDeclarationTemplate())return __declareClass(moduleIndex,name);
+                php.runtime.reflection.PhpClassDeclaration.beforeTraitUses(entity,this,entity.getTrace());
+                present=lookupClass(name,true);
+                if(present!=null && present!=entity)throw new CriticalException("Anonymous class identity collision");
+                if(present==null){entity.initEnvironment(this);publishClass(name,entity);}
             }
             return entity;
         }
+    }
+
+    /** Check-only lexical bridge: ordinary static declarations are already published by module registration. */
+    public final void __checkClassDeclaration(TraceInfo trace, String moduleIndex, String name) {
+        ModuleEntity module=scope.moduleIndexMap.get(moduleIndex);
+        if(module==null || module.getClass()!=ModuleEntity.class)
+            throw new CriticalException("Invalid static class declaration identity");
+        ClassEntity entity=module.findClass(name);
+        if(entity==null || entity.getClass()!=ClassEntity.class || !moduleIndex.equals(module.getInternalName())
+                || entity.getModule()!=module || !entity.isStatic() || entity.isDeferredDeclaration() || entity.isAnonymous()
+                || module.getPhpLanguageProfile()!=PhpLanguageProfile.PHP_8_5)
+            throw new CriticalException("Invalid static class declaration identity");
+        synchronized(userValues) {
+            if(userValues.get(classDeclarationReservationKey(name))!=null)
+                throw new CustomErrorException(E_ERROR,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name),trace);
+        }
+        synchronized(classMap) {
+            if(classMap.get(PhpClassNames.canonicalKey(name))==entity)return;
+        }
+        // A module admitted during another declaration cannot acquire publication authority by a later include.
+        throw new CriticalException("Static class declaration was not published by its module registration");
     }
 
     public ClassEntity __defineClass(TraceInfo trace, String moduleIndex, int declarationId) {
@@ -2170,7 +2228,8 @@ public class Environment {
             throw new IllegalArgumentException("Deferred class declaration lacks its complete ownership protocol");
         ModuleEntity module = scope.moduleIndexMap.get(moduleIndex);
         ClassEntity template = module == null ? null : module.findClass(name);
-        if (template == null || template.getModule() != module || !template.isUnresolvedDeclaration())
+        if (template == null || template.getModule() != module
+                || !(template.isUnresolvedDeclaration() || template.isAnonymous() && template.isDeclarationTemplate()))
             throw new CriticalException("Invalid deferred class declaration");
         return defineClassDeclaration(template.getTrace(), moduleIndex, template);
     }
@@ -2186,19 +2245,25 @@ public class Environment {
             String pendingKey="\0class-link:"+moduleIndex+":"+(template.isDeferredDeclaration()?template.getDeclarationId():name);
             if(getUserValue(pendingKey,Boolean.class)!=null)
                 exception(trace,php.runtime.lang.exception.BaseError.class,"Class \"%s\" not found",name);
+            reserveClassDeclaration(name,template,trace);
             setUserValue(pendingKey,Boolean.TRUE);
             try {
                 String parentName=template.getDeferredParentName();
                 ClassEntity parent=parentName==null?null:fetchClass(parentName,true,template.getModule().getPhpLanguageProfile());
                 if(parentName!=null && parent==null)
                     exception(trace,php.runtime.lang.exception.BaseError.class,"Class \"%s\" not found",parentName);
+                var traits=php.runtime.reflection.PhpClassDeclaration.resolveTraitUses(template, this, trace);
                 if(hasDeclarationCollision(name,template))error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
-                ClassEntity bound=php.runtime.reflection.PhpClassDeclaration.bind(template,parent,this);
+                ClassEntity bound=php.runtime.reflection.PhpClassDeclaration.bind(template,parent,this,traits);
                 if(hasDeclarationCollision(name,bound))error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
                 bound.initEnvironment(this);
                 if(hasDeclarationCollision(name,bound))error(trace,Messages.ERR_CANNOT_REDECLARE_CLASS.fetch(name));
                 publishClass(name,bound);return bound;
-            }finally{setUserValue(pendingKey,null);}
+            }finally{
+                setUserValue(pendingKey,null);
+                String reservationKey=classDeclarationReservationKey(name);
+                synchronized(userValues){if(userValues.get(reservationKey)==template)userValues.remove(reservationKey);}
+            }
         }
     }
 

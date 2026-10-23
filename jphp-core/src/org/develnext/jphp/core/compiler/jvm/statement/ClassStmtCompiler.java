@@ -102,6 +102,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         declaration.setPhpAttributes(attributes);
         php.runtime.reflection.support.PhpAllowDynamicProperties.validate(declaration,entity,compiler.getEnvironment());
         php.runtime.reflection.support.PhpNoDiscardValidation.validate(declaration,entity,compiler.getEnvironment());
+        php.runtime.reflection.support.PhpDeprecatedValidation.validate(declaration,entity,compiler.getEnvironment());
     }
     private void importPhpAttributeHelpers(php.runtime.reflection.support.Entity source,
             php.runtime.reflection.support.Entity target,ClassEntity donor) {
@@ -140,6 +141,27 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         }
         target.setPhpAttributes(attributes);
     }
+    private static boolean compactLdcConstant(Object value) {
+        return value instanceof String || value instanceof Integer || value instanceof Float
+                || value instanceof Type type && (type.getSort()==Type.OBJECT || type.getSort()==Type.ARRAY);
+    }
+
+    private static void seedFrequentLdcConstants(ClassNode node,JPHPClassWriter writer) {
+        int uses=0;
+        outer: for(MethodNode method:node.methods) for(AbstractInsnNode instruction:method.instructions) {
+            if(instruction instanceof LdcInsnNode ldc && compactLdcConstant(ldc.cst) && ++uses>255) break outer;
+        }
+        // LDC has only 255 narrow constant-pool slots; keep small classes allocation-free here.
+        if(uses<=255) return;
+        var counts=new LinkedHashMap<Object,Integer>();
+        for(MethodNode method:node.methods) for(AbstractInsnNode instruction:method.instructions)
+            if(instruction instanceof LdcInsnNode ldc && compactLdcConstant(ldc.cst)) counts.merge(ldc.cst,1,Integer::sum);
+        var entries=new ArrayList<>(counts.entrySet());
+        // Stable sort retains first physical occurrence order for equal frequencies.
+        entries.sort((left,right)->Integer.compare(right.getValue(),left.getValue()));
+        for(var entry:entries) writer.newConst(entry.getKey());
+    }
+
     protected JPHPClassWriter cw;
     public final ClassNode node;
     public final ClassStmtToken statement;
@@ -154,6 +176,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     private String functionName = "";
     private String noDiscardClosureName;
     public void setNoDiscardClosureName(String name){noDiscardClosureName=name;}
+    private String deprecatedClosureName;
+    public void setDeprecatedClosureName(String name){deprecatedClosureName=name;}
 
     private boolean initDynamicExists = false;
     private int callFuncCount = 0;
@@ -596,6 +620,8 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
     protected void writeSystemInfo() {
         if(noDiscardClosureName!=null)node.fields.add(new FieldNode(ACC_PUBLIC|ACC_STATIC|ACC_FINAL,
                 "__$noDiscardClosureName",Type.getDescriptor(String.class),null,noDiscardClosureName));
+        if(deprecatedClosureName!=null)node.fields.add(new FieldNode(ACC_PUBLIC|ACC_STATIC|ACC_FINAL,
+                "__$deprecatedClosureName",Type.getDescriptor(String.class),null,deprecatedClosureName));
         if(isSystem && classContext!=null) node.fields.add(new FieldNode(ACC_PUBLIC|ACC_STATIC|ACC_FINAL,
                 "__$attributeLexicalScope",Type.getDescriptor(String.class),null,classContext.getFulledName()));
         node.fields.add(new FieldNode(
@@ -1370,7 +1396,9 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
             if(!statement.getProperties().isEmpty())compiler.getEnvironment().error(entity.getTrace(),ErrorType.E_COMPILE_ERROR,"Enum %s cannot include properties",entity.getName());
         }
 
-        boolean declarationTemplate = statement.isDeferredDeclaration();
+        boolean declarationTemplate = statement.isDeferredDeclaration()
+                || !isSystem && statement.isAnonymous() && !statement.getUses().isEmpty()
+                    && compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5;
         if (declarationTemplate) entity.setDeclarationRelations(declarationRelations());
         List<ClassEntity> traits = declarationTemplate ? Collections.emptyList() : fetchTraits();
         for (ClassEntity e : traits) {
@@ -1382,9 +1410,9 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
         if (statement.getExtend() != null) {
             String parentName=statement.getExtend().getName().getName();
             boolean modern=compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5 && !isSystem;
-            ClassEntity parent=statement.isDeferredDeclaration() ? null : modern ? compiler.getModule().findClass(parentName) : fetchClass(parentName);
-            if (modern && !statement.isDeferredDeclaration() && parent==null) parent=compiler.getEnvironment().fetchClass(parentName,false,php.runtime.common.PhpLanguageProfile.PHP_8_5);
-            if (modern && (statement.isDeferredDeclaration() || parent==null || parent.isUnresolvedDeclaration())) entity.setDeferredParentName(parentName);
+            ClassEntity parent=declarationTemplate ? null : modern ? compiler.getModule().findClass(parentName) : fetchClass(parentName);
+            if (modern && !declarationTemplate && parent==null) parent=compiler.getEnvironment().fetchClass(parentName,false,php.runtime.common.PhpLanguageProfile.PHP_8_5);
+            if (modern && (declarationTemplate || parent==null || parent.isUnresolvedDeclaration())) entity.setDeferredParentName(parentName);
             if (entity.getDeferredParentName()==null) {
             if (parent == null)
                 compiler.getEnvironment().error(
@@ -1522,6 +1550,7 @@ public class ClassStmtCompiler extends StmtCompiler<ClassEntity> {
                 witness.instructions.add(new InsnNode(ARETURN));node.methods.add(witness);
             }
             cw = new JPHPClassWriter(entity.isTrait());
+            seedFrequentLdcConstants(node,cw);
             try {
                 node.accept(cw);
             } catch (RuntimeException error) {

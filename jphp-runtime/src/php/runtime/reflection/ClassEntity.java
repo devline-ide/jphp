@@ -121,7 +121,7 @@ public class ClassEntity extends Entity implements Cloneable {
 
     /** Only the cold declaration resolver can turn a cloned template into a definition. */
     void markDeclarationBound() {
-        if (!declarationTemplate || declarationId < 0)
+        if (!declarationTemplate || declarationId < 0 && (!anonymous || declarationRelations.traitGroups().isEmpty()))
             throw new IllegalStateException("Expected a cold declaration template clone");
         declarationTemplate = false;
     }
@@ -133,6 +133,12 @@ public class ClassEntity extends Entity implements Cloneable {
         if (nativeClazz != null || classComposition != null
                 || declarationRelations != PhpClassRelations.EMPTY && declarationRelations != value)
             throw new IllegalStateException("Class declaration relations are immutable");
+        if (anonymous && !value.traitGroups().isEmpty()) {
+            if (getModule()==null || getModule().getPhpLanguageProfile()!=php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    || getType()!=Type.CLASS)
+                throw new IllegalArgumentException("Anonymous relation template requires a modern class declaration");
+            declarationTemplate = true;
+        }
         declarationRelations = value;
     }
     public PhpTraitCompositionPlan getClassComposition() { return classComposition; }
@@ -427,7 +433,7 @@ ClassReader classReader;
     }
 
     public boolean isDeprecated() {
-        return false; // TODO
+        return php.runtime.invoke.PhpDeprecatedInvocation.marker(this) != null;
     }
 
     public boolean isAbstract() {
@@ -1952,6 +1958,7 @@ ClassReader classReader;
                             );
                             env.peekCall(0).flags = FLAG_GET;
 
+                            php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(env, trace, methodMagicGet);
                             args = InvokeArgumentHelper.checkType(env, trace, methodMagicGet, args);
                             o1 = methodMagicGet.invokeDynamic(object, env, trace, args);
                         } finally {
@@ -1966,6 +1973,7 @@ ClassReader classReader;
                     env.pushCall(trace, object, args, methodMagicSet.getName(), methodMagicSet.getClazz().getName(), name);
                     env.peekCall(0).flags = FLAG_SET;
 
+                    php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(env, trace, methodMagicSet);
                     args = InvokeArgumentHelper.checkType(env, trace, methodMagicSet, args);
                     methodMagicSet.invokeDynamic(object, env, trace, args);
                 } finally {
@@ -2100,6 +2108,7 @@ ClassReader classReader;
                     env.pushCall(trace, object, args, methodMagicUnset.getName(), methodMagicUnset.getClazz().getName(), name);
                     env.peekCall(0).flags = FLAG_UNSET;
 
+                    php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(env, trace, methodMagicUnset);
                     args = InvokeArgumentHelper.checkType(env, trace, methodMagicUnset, args);
                     methodMagicUnset.invokeDynamic(object, env, trace, args);
                 } finally {
@@ -2165,6 +2174,7 @@ ClassReader classReader;
                 );
                 env.peekCall(0).flags = FLAG_ISSET;
 
+                php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(env, trace, methodMagicIsset);
                 InvokeArgumentHelper.checkType(env, trace, methodMagicIsset, new StringMemory(property));
                 result = methodMagicIsset.invokeDynamic(object, env, trace, new StringMemory(property))
                         .toBoolean() ? Memory.TRUE : Memory.NULL;
@@ -2225,6 +2235,7 @@ ClassReader classReader;
             env.pushCall(trace, object, args, methodMagicIsset.getName(), methodMagicIsset.getClazz().getName(), name);
             env.peekCall(0).flags = FLAG_ISSET;
 
+            php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(env, trace, methodMagicIsset);
             args = InvokeArgumentHelper.checkType(env, trace, methodMagicIsset, args);
             result = methodMagicIsset.invokeDynamic(object, env, trace, args)
                     .toBoolean() ? Memory.TRUE : Memory.NULL;
@@ -2511,6 +2522,7 @@ ClassReader classReader;
                 env.pushCall(trace, object, args, methodMagicGet.getName(), methodMagicGet.getClazz().getName(), name);
                 env.peekCall(0).flags = FLAG_GET;
 
+                php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(env, trace, methodMagicGet);
                 InvokeArgumentHelper.checkType(env, trace, methodMagicGet, args);
                 result = methodMagicGet.invokeDynamic(object, env, trace, args);
                 if (entity != null && accessFlag == 0 && entity.getDeclaredType() != null) {

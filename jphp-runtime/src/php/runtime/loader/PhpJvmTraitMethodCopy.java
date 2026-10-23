@@ -103,7 +103,9 @@ final class PhpJvmTraitMethodCopy {
 
     static Plan capture(RuntimeClassLoader loader,ClassEntity owner,PhpTraitCompositionPlan recipe) {
         Objects.requireNonNull(recipe);recipe.validate();
-        if(recipe.owner()!=owner || owner.isDeclarationTemplate() || !owner.isDeferredDeclaration())
+        if(recipe.owner()!=owner || owner.isDeclarationTemplate()
+                || !owner.isDeferredDeclaration() && !(owner.getClassComposition()==recipe
+                    && php.runtime.reflection.PhpClassDeclaration.isBoundAnonymousDeclaration(owner)))
             throw new LinkageError("Composition requires its exact bound deferred PHP class");
         var donors=new ArrayList<Class<?>>();
         for(ClassEntity trait:recipe.traits()) {

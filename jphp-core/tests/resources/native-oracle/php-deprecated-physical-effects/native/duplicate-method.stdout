@@ -1,0 +1,4 @@
+before=false
+fragment-enter
+warning=[16384,"Trait DepReviewConflictTrait used by DepReviewConflictConsumer is deprecated, composition conflict",false]
+shutdown=[[64,"Trait method DepReviewOtherTrait::shared has not been applied as DepReviewConflictConsumer::shared, because of collision with DepReviewConflictTrait::shared"],false]

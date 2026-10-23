@@ -1,0 +1,6 @@
+magic-get:[["ok",4],[["warning",16384,"Method RouteMagic::__get() is deprecated, get"],["get-body","value"]]]
+magic-set:[["ok","after"],[["warning",16384,"Method RouteMagic::__set() is deprecated, set"],["set-body","value",5]]]
+magic-isset:[["ok",true],[["warning",16384,"Method RouteMagic::__isset() is deprecated, isset"],["isset-body","value"]]]
+magic-unset:[["ok","after"],[["warning",16384,"Method RouteMagic::__unset() is deprecated, unset"],["unset-body","value"]]]
+magic-get-throws:[["throw","RuntimeException","route-handler"],[["warning",16384,"Method RouteMagic::__get() is deprecated, get"]]]
+magic-set-throws:[["throw","RuntimeException","route-handler"],[["warning",16384,"Method RouteMagic::__set() is deprecated, set"]]]

@@ -106,6 +106,11 @@ public final class PropertyHookGenerator extends Generator<ClassVarStmtToken> {
         while(iterator.hasNext()) {
             token=nextToken(iterator);
             if(isClosedBrace(token,BraceExprToken.Kind.BLOCK)) break;
+            List<AttributeStmtToken> attributes=List.of();
+            if(token instanceof AttributeStartToken) {
+                attributes=analyzer.generator(AttributeGenerator.class).parse(token,iterator);
+                token=nextToken(iterator);
+            }
             boolean isFinal=false,reference=false;
             if(token instanceof FinalStmtToken) {isFinal=true;token=nextToken(iterator);}
             if(token instanceof AmpersandRefToken) {reference=true;token=nextToken(iterator);}
@@ -116,6 +121,7 @@ public final class PropertyHookGenerator extends Generator<ClassVarStmtToken> {
                     "Cannot redeclare property hook \"%s\"",kind.name().toLowerCase(Locale.ROOT));
             if(reference && kind==PropertyHookStmtToken.Kind.SET) unexpectedToken(token,"Only get hooks may return by reference");
             MethodStmtToken method=new MethodStmtToken(token.getMeta());
+            method.setPhpAttributes(attributes);
             method.setClazz(clazz);method.setName(NameToken.valueOf("$"+variable.getName()+"::"+kind.name().toLowerCase(Locale.ROOT)));
             method.setModifier(property.getModifier());method.setFinal(isFinal);method.setReturnReference(reference);
             Token first=nextToken(iterator);

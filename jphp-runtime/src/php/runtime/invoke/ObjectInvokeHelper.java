@@ -94,6 +94,8 @@ final public class ObjectInvokeHelper {
         }
 
         InvokeHelper.checkAccess(env, trace, method);
+        if (!(iObject instanceof PhpCallableFactory.CapturedClosure))
+            PhpDeprecatedInvocation.beforeFunction(env, trace, method);
 
         if (passed == null) {
             passed = InvokeArgumentHelper.makeArguments(
@@ -197,6 +199,8 @@ final public class ObjectInvokeHelper {
         }
 
         InvokeHelper.checkAccess(env, trace, method);
+        if (!(iObject instanceof PhpCallableFactory.CapturedClosure))
+            PhpDeprecatedInvocation.beforeFunction(env, trace, method);
 
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         Memory result = modern ? null : method.getImmutableResultTyped(env, trace);
@@ -284,6 +288,8 @@ final public class ObjectInvokeHelper {
 
         if (checkAccess)
             InvokeHelper.checkAccess(env, trace, method);
+        if (!(iObject instanceof PhpCallableFactory.CapturedClosure))
+            PhpDeprecatedInvocation.beforeFunction(env, trace, method);
 
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5;
         String originClassName = modern ? method.getClazzName() : className;
@@ -314,7 +320,11 @@ final public class ObjectInvokeHelper {
 
             String stackClass = clazz.isHiddenInCallStack() ? staticClass : method.getClazz().getName();
 
-            env.pushCall(trace, iObject, BoundArguments.callArguments(env, args, method), method.getName(), stackClass, staticClass);
+            var frame = env.pushCall(trace, iObject, BoundArguments.callArguments(env, args, method), method.getName(), stackClass, staticClass);
+            if (!(iObject instanceof Closure)) {
+                frame.classEntity = clazz.isHiddenInCallStack() ? clazz : method.getClazz();
+                frame.staticClassEntity = clazz;
+            }
         }
 
         try {
@@ -380,9 +390,13 @@ final public class ObjectInvokeHelper {
 
     public static Memory getRelativeConstant(Memory name, Environment env, TraceInfo trace, String keyword,
                                              ConstantCallCache callCache, int cacheIndex) {
-        ClassEntity entity = "parent".equals(keyword) ? PhpMethodResolver.parentClass(env, trace)
-                : "static".equals(keyword) ? PhpMethodResolver.staticClass(env, trace)
-                : PhpMethodResolver.resolveClass(new StringMemory(env.__getSelf(trace)), env, trace);
+        ClassEntity entity;
+        if ("parent".equals(keyword)) entity = PhpMethodResolver.parentClass(env, trace);
+        else if ("static".equals(keyword)) entity = PhpMethodResolver.staticClass(env, trace);
+        else {
+            entity = env.getLastClassOnStack();
+            if (entity == null) env.__getSelf(trace); // Preserve the exact missing-self-scope error.
+        }
         return getConstant(entity, name, env, trace, callCache, cacheIndex, "static".equals(keyword), keyword);
     }
 

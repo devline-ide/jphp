@@ -35,6 +35,17 @@ final class PhpJvmInheritanceBytecode {
     }
     private static byte[] bindParent(byte[] source,String parent) {
         ClassModel model=FILE.parse(source);
+        if(model.superclass().isPresent() && model.superclass().get().asInternalName().equals("php/runtime/lang/BaseEnum")) {
+            if(!parent.equals("php/runtime/lang/BaseEnum"))
+                throw new LinkageError("A bound PHP enum cannot replace its original BaseEnum carrier");
+            long constructors=model.methods().stream().filter(method->method.methodName().equalsString("<init>"))
+                    .flatMap(method->method.code().stream()).flatMap(code->code.elementList().stream())
+                    .filter(element->element instanceof InvokeInstruction call && call.opcode()==Opcode.INVOKESPECIAL
+                            && call.owner().asInternalName().equals("php/runtime/lang/BaseEnum")
+                            && call.name().equalsString("<init>") && call.type().equalsString(CONSTRUCTOR)).count();
+            if(constructors!=1)throw new LinkageError("A bound PHP enum requires its original BaseEnum constructor");
+            return source; // Same physical parent; only the existing semantic self-name rewrite is needed.
+        }
         if (model.superclass().isEmpty() || !model.superclass().get().asInternalName().equals(BASE))
             throw new LinkageError("Deferred PHP inheritance requires its original BaseObject template");
         ClassDesc target=ClassDesc.ofInternalName(parent);

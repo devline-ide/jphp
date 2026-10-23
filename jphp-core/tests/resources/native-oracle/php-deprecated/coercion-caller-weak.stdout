@@ -1,0 +1,4 @@
+dep_coerce_weak:[["ok","weak-body"],[[16384,"Function dep_coerce_weak() is deprecated, 12"]]]
+dep_coerce_weak-reflection:["ok","12",""]
+dep_coerce_strict:[["ok","strict-body"],[[16384,"Function dep_coerce_strict() is deprecated, 12"]]]
+dep_coerce_strict-reflection:["throw","TypeError","Deprecated::__construct(): Argument #1 ($message) must be of type ?string, int given"]

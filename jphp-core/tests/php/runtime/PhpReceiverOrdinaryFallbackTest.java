@@ -25,7 +25,7 @@ public class PhpReceiverOrdinaryFallbackTest {
                 assertEquals(PhpLanguageProfile.JPHP_LEGACY,scope.getPhpLanguageProfile());assertEquals(PhpLanguageProfile.PHP_8_5,module.getPhpLanguageProfile());
                 if(phb) {
                     var wire=new ByteArrayOutputStream();var dumper=new ModuleDumper(context,env,debug);dumper.save(module,wire);
-                    assertEquals(28,ModuleDumper.readHeader(new ByteArrayInputStream(wire.toByteArray())).getCompilerAbiVersion());
+                    assertEquals(29,ModuleDumper.readHeader(new ByteArrayInputStream(wire.toByteArray())).getCompilerAbiVersion());
                     module=dumper.load(new ByteArrayInputStream(wire.toByteArray()));assertTrue(module.isCompiledArtifact());
                 }
                 scope.loadModule(module);scope.addUserModule(module);env.registerModule(module);module.include(env);env.flushAll();

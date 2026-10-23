@@ -109,6 +109,18 @@ public final class PhpCallableFactory {
         }
     }
 
+    /** Reflection already holds the actual declaration; do not resolve its name again. */
+    public static Memory fromResolvedFunction(FunctionEntity function, Environment env, TraceInfo trace) {
+        return capture(env, trace, Objects.requireNonNull(function), null);
+    }
+
+    public static Memory fromResolvedMethod(MethodEntity method, IObject receiver, Environment env, TraceInfo trace) {
+        Objects.requireNonNull(method);
+        Invoker invoker = method.isStatic() ? new StaticMethodInvoker(env, trace, method.getClazzName(), method)
+                : new DynamicMethodInvoker(env, trace, Objects.requireNonNull(receiver), method);
+        return capture(env, trace, null, invoker);
+    }
+
     public static Memory fromCallable(Memory value, Environment env, TraceInfo trace) throws Throwable {
         try (var frame=PhpCallFrame.acquireInternalClosureCallable(value,env,trace)) {
             return frame.capture();

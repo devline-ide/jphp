@@ -1,0 +1,3 @@
+body-end
+warning:[16384,"Method DepShutdownOwner::__destruct() is deprecated, shutdown destructor"]
+destructor-body

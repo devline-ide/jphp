@@ -12,6 +12,15 @@ public class ClassInitEnvironmentCompiler extends BaseStatementCompiler<JvmCompi
 
     @Override
     public void write(JvmCompiler.ClassInitEnvironment token) {
+        if(compiler.getModule().getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5
+                && !token.getEntity().isUnresolvedDeclaration()) {
+            expr.writePushEnv();expr.writePushTraceInfo(token.getToken());
+            expr.writePushConstString(compiler.getModule().getInternalName());
+            expr.writePushConstString(token.getEntity().getName());
+            expr.writeSysDynamicCall(Environment.class,"__checkClassDeclaration",void.class,
+                    php.runtime.env.TraceInfo.class,String.class,String.class);
+            if(!token.isInitializationRequired())return;
+        }
         expr.writePushEnv();
         if (token.getEntity().isUnresolvedDeclaration()) {
             expr.writePushConstString(compiler.getModule().getInternalName());

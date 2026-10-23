@@ -334,6 +334,7 @@ final public class InvokeHelper {
 
     public static Memory call(Environment env, TraceInfo trace, FunctionEntity function, Memory[] args, boolean internalCall,boolean discarded)
             throws Throwable {
+        PhpDeprecatedInvocation.beforeFunction(env, trace, function);
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
         Memory result = modern ? null : function.getImmutableResultTyped(env, trace);
 
@@ -522,6 +523,7 @@ final public class InvokeHelper {
         }
 
         checkAccess(env, trace, method);
+        PhpDeprecatedInvocation.beforeFunction(env, trace, method);
 
         if (callCache != null && !isMagic) {
             callCache.put(env, cacheIndex, method, classEntity, methodName, accessScope);
@@ -575,6 +577,7 @@ final public class InvokeHelper {
                                     Memory[] args, boolean checkAccess, boolean internalCall,boolean discarded) throws Throwable {
         if (checkAccess)
             checkAccess(env, trace, method);
+        PhpDeprecatedInvocation.beforeFunction(env, trace, method);
 
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
         Memory result = modern ? null : method.getImmutableResultTyped(env, trace);

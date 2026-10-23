@@ -39,6 +39,9 @@ public final class ReflectionAttribute extends Reflection implements php.runtime
         return instantiate(env,attribute.trace(),attribute.strictTypes());
     }
     @Ignore public Memory instantiateForDiscardedCall(Environment env,php.runtime.env.TraceInfo callTrace) throws Throwable {
+        return instantiateForInvocation(env,callTrace);
+    }
+    @Ignore public Memory instantiateForInvocation(Environment env,php.runtime.env.TraceInfo callTrace) throws Throwable {
         var caller=env.getModuleManager().findModule(callTrace);
         return instantiate(env,callTrace,caller!=null&&caller.isStrictTypes());
     }
@@ -65,6 +68,10 @@ public final class ReflectionAttribute extends Reflection implements php.runtime
         }
         if(clazz.getNativeClass()==php.runtime.ext.core.classes.PhpAllowDynamicPropertiesAttribute.class) {
             String rejection=php.runtime.reflection.support.PhpAllowDynamicProperties.rejection(declaration instanceof ClassEntity owner?owner:null,attribute.target());
+            if(rejection!=null){env.exception(attribute.trace(),BaseError.class,rejection);return Memory.NULL;}
+        }
+        if(clazz.getNativeClass()==php.runtime.ext.core.classes.PhpDeprecatedAttribute.class) {
+            String rejection=php.runtime.reflection.support.PhpDeprecatedValidation.classRejection(declaration instanceof ClassEntity owner?owner:null,attribute.target());
             if(rejection!=null){env.exception(attribute.trace(),BaseError.class,rejection);return Memory.NULL;}
         }
         var context=php.runtime.PhpPropertyWriteContext.enter(env,bindingTrace,strict);

@@ -50,7 +50,9 @@ public class ConstantEntity extends Entity {
                 nativeInitializer = method;
             } catch (NoSuchMethodException error) { throw new php.runtime.exceptions.CriticalException(error); }
         }
-        env.pushCall(trace, null, null, "{constant-expression}", owner.getName(), owner.getName());
+        var call=env.pushCall(trace, null, null, "{constant-expression}", owner.getName(), owner.getName());
+        // Linking can evaluate self/parent/static before the resolved owner is publicly visible.
+        call.classEntity=owner;call.staticClassEntity=owner;
         php.runtime.PhpConstantInitializer.enter(env);
         try { return (Memory) method.invoke(null, env); }
         catch (java.lang.reflect.InvocationTargetException error) { return env.__throwException(error); }
@@ -99,10 +101,6 @@ public class ConstantEntity extends Entity {
         this.caseSensitise = caseSensitise;
     }
 
-    public boolean isDeprecated(){
-        return false; // TODO
-    }
-
     public DocumentComment getDocComment() {
         return docComment;
     }
@@ -137,6 +135,10 @@ public class ConstantEntity extends Entity {
         this.clazz = clazz;
         this.module = clazz == null ? null : clazz.getModule();
         updateInternalName();
+    }
+
+    public boolean isDeprecated() {
+        return php.runtime.invoke.PhpDeprecatedInvocation.marker(this) != null;
     }
 
     public ModuleEntity getModule() {

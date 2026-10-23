@@ -23,7 +23,12 @@ public class PhpAttributeFunctionalTest extends JvmCompilerCase {
             var output=new ByteArrayOutputStream();var env=new Environment(newScope(),output);
             try {
                 var context=new Context(row[0]+" $GLOBALS['entered']=1;");context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
-                try {new JvmCompiler(env,context).compile(false);fail("Accepted missing Override relation");}
+                try {
+                    var module=new JvmCompiler(env,context).compile(false);
+                    if(isCompiled()) {var dumper=new ModuleDumper(context,env,false);var bytes=new ByteArrayOutputStream();dumper.save(module,bytes);module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));}
+                    env.getScope().loadModule(module);env.getScope().addUserModule(module);env.registerModule(module);
+                    module.include(env);fail("Accepted missing Override relation");
+                }
                 catch(CustomErrorException expected) {assertEquals(row[1],expected.getMessage());}
                 assertNull(env.getGlobals().getByScalar("entered"));assertEquals(0,output.size());
             }finally {env.doFinal();}

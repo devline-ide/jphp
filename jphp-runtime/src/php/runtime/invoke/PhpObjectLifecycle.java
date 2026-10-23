@@ -98,8 +98,9 @@ public final class PhpObjectLifecycle {
             php.runtime.PhpOwnershipExecution.Session session=php.runtime.PhpOwnershipExecution.current(environment);
             if (session != null) {session.invokeDestructor(entity.methodDestruct,object,environment.trace());return;}
         }
-        entity.methodDestruct.invokeDynamic(object, environment,
-                reason == Reason.ENVIRONMENT_FINALIZE ? TraceInfo.UNKNOWN : environment.trace());
+        TraceInfo trace = reason == Reason.ENVIRONMENT_FINALIZE ? TraceInfo.UNKNOWN : environment.trace();
+        PhpDeprecatedInvocation.beforeFunction(environment, trace, entity.methodDestruct);
+        entity.methodDestruct.invokeDynamic(object, environment, trace);
     }
     /** No checked signature change in Memory.manualUnset; pre-dispatch failures retain their exact identity. */
     public static void manualUnset(IObject object, Environment environment) {

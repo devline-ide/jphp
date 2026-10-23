@@ -8,7 +8,64 @@ import php.runtime.loader.dump.ClassDumper;
 /** A declaration template never owns the Environment's resolved PHP class or user instances. */
 public final class PhpClassDeclaration {
     private PhpClassDeclaration() {}
+    /** A single declaration invocation's actual resolved trait occurrences, never stored on runtime entities. */
+    public static final class TraitUses {
+        private final ClassEntity declaration;
+        private final java.util.List<java.util.List<ClassEntity>> groups;
+        private TraitUses(ClassEntity declaration,java.util.List<java.util.List<ClassEntity>> groups) {
+            this.declaration=declaration;this.groups=java.util.List.copyOf(groups);
+        }
+    }
+    /** Actual lexical declaration/linking effect; composition and metadata loading never call this. */
+    public static void beforeTraitUses(ClassEntity owner,Environment env,php.runtime.env.TraceInfo trace) {
+        resolveTraitUses(owner,env,trace);
+    }
+    public static TraitUses resolveTraitUses(ClassEntity owner,Environment env,php.runtime.env.TraceInfo trace) {
+        if(owner.getModule()==null || owner.getModule().getPhpLanguageProfile()!=php.runtime.common.PhpLanguageProfile.PHP_8_5)return null;
+        var groups=new java.util.ArrayList<java.util.List<ClassEntity>>();
+        if(!owner.getDeclarationRelations().traitGroups().isEmpty()) {
+            for(PhpClassRelations.TraitGroup group:owner.getDeclarationRelations().traitGroups()) {
+                var actual=new java.util.ArrayList<ClassEntity>();
+                for(PhpClassRelations.Name name:group.traits()) {
+                    ClassEntity trait=PhpClassComposition.resolve(owner,env,name,ClassEntity.Type.TRAIT);
+                    actual.add(trait);
+                    if(php.runtime.invoke.PhpDeprecatedInvocation.marker(trait)!=null)
+                        php.runtime.invoke.PhpDeprecatedInvocation.beforeTrait(env,trace,trait,owner.isAnonymous()?"class@anonymous":owner.getName());
+                }
+                groups.add(java.util.List.copyOf(actual));
+            }
+        } else for(ClassEntity trait:owner.getTraits().values())
+            if(php.runtime.invoke.PhpDeprecatedInvocation.marker(trait)!=null)
+                php.runtime.invoke.PhpDeprecatedInvocation.beforeTrait(env,trace,trait,owner.isAnonymous()?"class@anonymous":owner.getName());
+        return new TraitUses(owner,groups);
+    }
+    /** Pure physical-composition witness for the existing nonordinal anonymous declaration route. */
+    public static boolean isBoundAnonymousDeclaration(ClassEntity owner) {
+        if(owner==null || !owner.isAnonymous() || owner.isStatic() || owner.isDeferredDeclaration()
+                || owner.isDeclarationTemplate() || owner.isUnresolvedDeclaration()
+                || owner.getType()!=ClassEntity.Type.CLASS || owner.getModule()==null
+                || owner.getModule().getPhpLanguageProfile()!=php.runtime.common.PhpLanguageProfile.PHP_8_5
+                || owner.getDeclarationRelations().traitGroups().isEmpty()
+                || owner.getClassComposition()==null || owner.getClassComposition().owner()!=owner)
+            return false;
+        ClassEntity template=owner.getModule().findClass(owner.getName());
+        return template!=null && template!=owner && template.getModule()==owner.getModule()
+                && template.isAnonymous() && !template.isStatic() && !template.isDeferredDeclaration()
+                && template.isDeclarationTemplate() && template.getNativeClass()==null
+                && template.getType()==ClassEntity.Type.CLASS && template.getClassComposition()==null
+                && java.util.Objects.equals(template.getName(),owner.getName())
+                && java.util.Objects.equals(template.getCompiledInternalName(),owner.getCompiledInternalName())
+                && java.util.Objects.equals(template.getDeferredParentName(),owner.getDeferredParentName())
+                && template.getData()!=null && template.getData().length>0
+                && java.util.Arrays.equals(template.getData(),owner.getData())
+                && sameSerializedRelations(template.getDeclarationRelations(),owner.getDeclarationRelations());
+    }
     public static ClassEntity bind(ClassEntity template,ClassEntity parent,Environment env) {
+        return bind(template,parent,env,null);
+    }
+    public static ClassEntity bind(ClassEntity template,ClassEntity parent,Environment env,TraitUses traits) {
+        if(traits!=null && traits.declaration!=template)
+            throw new IllegalArgumentException("Resolved trait uses belong to another declaration invocation");
         if ((!template.isDeclarationTemplate() && !template.isUnresolvedDeclaration())
                 || template.getNativeClass() != null || template.getModule() == null
                 || (template.getDeferredParentName() == null) != (parent == null))
@@ -16,6 +73,9 @@ public final class PhpClassDeclaration {
         if (template.isDeferredDeclaration()
                 && template.getModule().findDeferredClass(template.getDeclarationId()) != template)
             throw new IllegalArgumentException("Class declaration does not belong to its ordinal catalog");
+        if (template.isAnonymous() && template.isDeclarationTemplate()
+                && template.getModule().findClass(template.getName()) != template)
+            throw new IllegalArgumentException("Anonymous declaration does not belong to its module catalog");
         if (php.runtime.PhpOwnershipExecution.current(env)!=null)
             throw new IllegalArgumentException("Deferred inheritance lacks its complete ownership protocol");
         try {
@@ -34,8 +94,8 @@ public final class PhpClassDeclaration {
             if (bound.getDeclarationRelations() == PhpClassRelations.EMPTY) bound.setDeclarationRelations(relations);
             else if (!sameSerializedRelations(bound.getDeclarationRelations(), relations))
                 throw new IllegalStateException("Cold class declaration relations changed");
-            if (template.isDeferredDeclaration()) {
-                bound.setDeclarationId(template.getDeclarationId());
+            if (template.isDeclarationTemplate()) {
+                if (template.isDeferredDeclaration()) bound.setDeclarationId(template.getDeclarationId());
                 bound.markDeclarationBound();
             }
             if (relations.parent() != null && !java.util.Objects.equals(relations.parent().name(), template.getDeferredParentName()))
@@ -43,7 +103,7 @@ public final class PhpClassDeclaration {
             if (parent != null) bound.attachDeferredParentMetadata(parent, env);
             restoreOwnMethodOrigins(template, bound);
             restoreOwnAttributeDeclarations(template,bound);
-            PhpTraitCompositionPlan composition = PhpClassComposition.compose(bound, env);
+            PhpTraitCompositionPlan composition = PhpClassComposition.compose(bound, env,traits==null?null:traits.groups);
             if (composition != null) bound.setClassComposition(composition);
             if(bound.isEnum()) {
                 ClassEntity marker=env.fetchClass(bound.getEnumBackingType()==null?"UnitEnum":"BackedEnum",true,php.runtime.common.PhpLanguageProfile.PHP_8_5);

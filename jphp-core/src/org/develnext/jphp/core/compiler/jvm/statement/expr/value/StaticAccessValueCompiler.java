@@ -20,9 +20,10 @@ public class StaticAccessValueCompiler extends BaseExprCompiler<StaticAccessExpr
 
     private void writeModernConstant(StaticAccessExprToken token, boolean returnValue) {
         ValueExprToken clazz = token.getClazz();
-        if (token.isDynamicConstant() && (clazz instanceof ParentExprToken || clazz instanceof StaticExprToken || clazz instanceof SelfExprToken)) {
-            // Relative scope errors occur after the name expression, unlike an ordinary class fetch.
-            expr.writeExpression(token.getFieldExpr(), true, false);
+        if ((token.isDynamicConstant() || clazz instanceof SelfExprToken) && (clazz instanceof ParentExprToken || clazz instanceof StaticExprToken || clazz instanceof SelfExprToken)) {
+            // Relative scope errors follow a dynamic name expression; literal self keeps the actual scoped entity too.
+            if (token.isDynamicConstant()) expr.writeExpression(token.getFieldExpr(), true, false);
+            else expr.writePushString(((NameToken) token.getField()).getName());
             expr.writePopBoxing();
             expr.writePushEnv();
             expr.writePushTraceInfo(token);

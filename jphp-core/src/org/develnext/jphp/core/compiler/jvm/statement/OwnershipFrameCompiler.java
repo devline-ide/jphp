@@ -1192,8 +1192,56 @@ public final class OwnershipFrameCompiler {
         return true;
     }
 
+    /** Check-only final bridge, with the actual module operands and no interior CFG ingress. */
+    private boolean isClassDeclarationCheck(MethodInsnNode call) {
+        if(call.getOpcode()!=INVOKEVIRTUAL||!call.owner.equals("php/runtime/env/Environment")
+                ||!call.name.equals("__checkClassDeclaration")
+                ||!call.desc.equals("(Lphp/runtime/env/TraceInfo;Ljava/lang/String;Ljava/lang/String;)V"))return false;
+        try {
+            if(!java.lang.reflect.Modifier.isFinal(php.runtime.env.Environment.class.getMethod("__checkClassDeclaration",
+                    php.runtime.env.TraceInfo.class,String.class,String.class).getModifiers()))return false;
+            var module=method.getCompiler().getModule();
+            if(module.getPhpLanguageProfile()!=PhpLanguageProfile.PHP_8_5||!method.clazz.isSystem()
+                    ||!method.isExternal()||(method.node.access&ACC_STATIC)==0
+                    ||!(method.node.name.equals("__include")||method.node.name.matches("__include_chunk_[0-9]+"))
+                    ||!method.node.desc.equals("(Lphp/runtime/env/Environment;[Lphp/runtime/Memory;Lphp/runtime/memory/ArrayMemory;)Lphp/runtime/Memory;")
+                    ||!method.clazz.node.name.equals(module.getInternalName()))return false;
+            AbstractInsnNode[] prefix=new AbstractInsnNode[6];AbstractInsnNode previous=call;
+            for(int i=5;i>=0;i--){previous=runtimePreviousOpcode(previous);prefix[i]=previous;}
+            int indexOpcode=prefix[2].getOpcode();
+            if(!(prefix[2] instanceof LdcInsnNode literal&&literal.cst instanceof Integer)
+                    &&!(indexOpcode>=ICONST_0&&indexOpcode<=ICONST_5)&&indexOpcode!=BIPUSH&&indexOpcode!=SIPUSH)return false;
+            if(!(prefix[0] instanceof VarInsnNode env)||env.getOpcode()!=ALOAD||env.var!=0
+                    ||!(prefix[1] instanceof FieldInsnNode trace)||trace.getOpcode()!=GETSTATIC
+                    ||!trace.owner.equals(method.clazz.node.name)||!trace.name.equals("$TRC")
+                    ||!trace.desc.equals("[Lphp/runtime/env/TraceInfo;")||runtimeIntegerOperand(prefix[2])<0
+                    ||prefix[3].getOpcode()!=AALOAD||!(prefix[4] instanceof LdcInsnNode moduleName)
+                    ||!module.getInternalName().equals(moduleName.cst)||!(prefix[5] instanceof LdcInsnNode className)
+                    ||!(className.cst instanceof String name)||name.isEmpty())return false;
+            var entity=module.findClass(name);
+            if(entity==null||entity.getModule()!=module||!entity.isStatic()||entity.isDeferredDeclaration()
+                    ||entity.isUnresolvedDeclaration()||entity.isAnonymous())return false;
+            int start=runtimeOrdinal(prefix[0]),end=runtimeOrdinal(call);
+            for(AbstractInsnNode instruction:method.node.instructions) {
+                if(instruction instanceof VarInsnNode store&&store.var==0&&store.getOpcode()>=ISTORE&&store.getOpcode()<=ASTORE
+                        ||instruction instanceof IincInsnNode increment&&increment.var==0)return false;
+                List<LabelNode> targets=new ArrayList<>();
+                if(instruction instanceof JumpInsnNode jump)targets.add(jump.label);
+                else if(instruction instanceof TableSwitchInsnNode table){targets.add(table.dflt);targets.addAll(table.labels);}
+                else if(instruction instanceof LookupSwitchInsnNode lookup){targets.add(lookup.dflt);targets.addAll(lookup.labels);}
+                for(var target:targets){int at=runtimeOrdinal(target);if(at>start&&at<=end)return false;}
+            }
+            for(var handler:method.node.tryCatchBlocks)for(var target:List.of(handler.start,handler.end,handler.handler)) {
+                int at=runtimeOrdinal(target);if(at>start&&at<=end)return false;
+            }
+            return true;
+        }catch(ReflectiveOperationException|IllegalArgumentException invalid){return false;}
+    }
+
+
     private boolean pure(MethodInsnNode call) {
         if(constantReads.contains(call))return true;
+        if(isClassDeclarationCheck(call))return true;
         if (method.typedSources().isObserver(call)) return true;
         if (method.primitiveCells().isDiscardObserver(call)) return true;
         if (passiveCalls.contains(call) && isImmutableByteLiteral(call)) return true;

@@ -28,7 +28,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     // ABI26 emits compact explicit-capture reads and their actual owned producer operation.
     // ABI27 adds the explicit constant-only parameter initializer kind (PDIN3).
     // ABI28 emits the explicit legacy VALUE-copy helper; modern copies preserve independent cursors.
-    public final static int COMPILER_ABI_VERSION = 28;
+    // ABI29 preserves Deprecated invocation effects and lexical trait-use publication ordering.
+    public final static int COMPILER_ABI_VERSION = 29;
     public final static int COMPILER_PROVENANCE_STAMP = 0x43414249; // CABI, in the existing reserved module tail.
     public final static int COMPILER_PROVENANCE_VERSION = 1;
 
@@ -87,6 +88,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         PhpPropertyHookDumper.validateModule(entity, includeData,env);
         byte[] attributes=PhpAttributeDumper.save(entity,includeData);
         int compilerAbi = entity.getCompilerProvenance().getCompilerAbiVersion();
+        PhpAttributeDumper.requireDeprecatedCompilerAbi(entity,compilerAbi);
         if (compilerAbi > COMPILER_ABI_VERSION)
             throw new DumpException("Unsupported original compiler ABI: " + compilerAbi);
 
@@ -363,6 +365,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         if(cold) {
             PhpAttributeDumper.restore(entity,data.readRawData(PhpAttributeDumper.MAX_BYTES),context);
             if(data.read()!=-1) throw new DumpException("Trailing compiled module data");
+            PhpAttributeDumper.requireDeprecatedCompilerAbi(entity,compilerAbi);
             // All declaration/helper bytes and complete metadata were validated before any relation provider.
             if(deferredLinkage!=null && deferredLinkage.length!=0)
                 PhpGeneratorLinkageDumper.restoreDecoded(entity,deferredLinkage,this::resolveGeneratorDonor,compilerAbi,header.getCompilerAbiVersion());

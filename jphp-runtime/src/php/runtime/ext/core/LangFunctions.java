@@ -414,7 +414,7 @@ public class LangFunctions extends FunctionsContainer {
             InvokeHelper.checkAccess(env, trace, constant, false);
             return constant == null ? Memory.NULL
                     : env.getModuleManager().getPhpLanguageProfile(trace) == php.runtime.common.PhpLanguageProfile.PHP_8_5
-                        ? constant.getValue(env, trace) : constant.getValue();
+                        ? php.runtime.PhpConstantInitializer.resolveReference(constant, env, trace, className) : constant.getValue();
         } else {
             Memory value = env.readConstant(name, trace);
             if (value == null)

@@ -211,14 +211,20 @@ public class JvmCompiler extends AbstractCompiler {
             if (token instanceof NamespaceStmtToken) {
                 setNamespace((NamespaceStmtToken) token);
             } if (token instanceof ClassStmtToken){
+                if (((ClassStmtToken) token).isDeferredDeclaration()) {
+                    externalCode.add(new ExprStmtToken(getEnvironment(), getContext(), token));
+                    continue;
+                }
                 ClassStmtCompiler cmp = new ClassStmtCompiler(this, (ClassStmtToken)token);
                 ClassEntity entity = cmp.compile();
                 entity.setStatic(!entity.isUnresolvedDeclaration());
                 module.addClass(entity);
 
-                if (cmp.isInitDynamicExists() || entity.isUnresolvedDeclaration()){
+                if (cmp.isInitDynamicExists() || entity.isUnresolvedDeclaration()
+                        || module.getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5){
                     externalCode.add(new ExprStmtToken(getEnvironment(), getContext(),
-                        new ClassInitEnvironment((ClassStmtToken)token, entity)
+                        new ClassInitEnvironment((ClassStmtToken)token, entity,
+                                cmp.isInitDynamicExists() || entity.isUnresolvedDeclaration())
                     ));
                 }
             } else if (token instanceof FunctionStmtToken){
@@ -236,6 +242,43 @@ public class JvmCompiler extends AbstractCompiler {
         }
 
         return externalCode;
+    }
+
+    /** Trait composition is linked at the lexical declaration, independently of deprecation metadata. */
+    private void promoteTraitDeclarations() {
+        if (module.getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5) return;
+        List<ClassStmtToken> declarations = new ArrayList<>();
+        for (Token token : tokens) if (token instanceof ClassStmtToken) declarations.add((ClassStmtToken) token);
+        Set<String> delayed = new HashSet<>();
+        for (ClassStmtToken declaration : declarations) if (!declaration.getUses().isEmpty())
+            delayed.add(php.runtime.common.PhpClassNames.canonicalKey(declaration.getFulledName()));
+        boolean changed;
+        do {
+            changed = false;
+            for (ClassStmtToken declaration : declarations) {
+                String key = php.runtime.common.PhpClassNames.canonicalKey(declaration.getFulledName());
+                if (delayed.contains(key)) continue;
+                boolean dependent = declaration.getExtend() != null && delayed.contains(
+                        php.runtime.common.PhpClassNames.canonicalKey(declaration.getExtend().getName().getName()));
+                if (!dependent && declaration.getImplement() != null)
+                    for (NameToken name : declaration.getImplement().getNames())
+                        if (delayed.contains(php.runtime.common.PhpClassNames.canonicalKey(name.getName()))) {
+                            dependent = true;
+                            break;
+                        }
+                if (!dependent) for (NameToken use : declaration.getUses())
+                    if (delayed.contains(php.runtime.common.PhpClassNames.canonicalKey(use.getName()))) {
+                        dependent = true;
+                        break;
+                    }
+                if (dependent) changed |= delayed.add(key);
+            }
+        } while (changed);
+        // Parsing already assigned generator and closure ids; only add a declaration ordinal here.
+        for (ClassStmtToken declaration : declarations)
+            if (!declaration.isDeferredDeclaration() && delayed.contains(
+                    php.runtime.common.PhpClassNames.canonicalKey(declaration.getFulledName())))
+                analyzer.registerDeferredClass(declaration);
     }
 
     @Override
@@ -268,6 +311,7 @@ public class JvmCompiler extends AbstractCompiler {
         int anonymousIndex=0;
         for (ClassStmtToken anonymous : analyzer.getAnonymousClasses()) anonymous.setName(new NameToken(
                 TokenMeta.of("class@anonymous\0" + module.getInternalName() + ":" + anonymousIndex++)));
+        promoteTraitDeclarations();
         List<ExprStmtToken> externalCode = process(tokens, analyzer.newNamespace());
         // __defineFunction uses the declaration's AST id; PHB preserves this same positional table.
         // Dynamic declarations compile first, so neither compilation order nor PHP name is its identity.
@@ -363,12 +407,21 @@ public class JvmCompiler extends AbstractCompiler {
     public class ClassInitEnvironment extends StmtToken {
         protected final ClassStmtToken token;
         protected final ClassEntity entity;
+        // Compiler token only; this flag adds no runtime entity or Environment state.
+        private final boolean initializationRequired;
 
         public ClassInitEnvironment(ClassStmtToken token, ClassEntity clazz) {
+            this(token,clazz,true);
+        }
+
+        public ClassInitEnvironment(ClassStmtToken token, ClassEntity clazz, boolean initializationRequired) {
             super(token.getMeta(), TokenType.T_J_CUSTOM);
             this.token = token;
             this.entity = clazz;
+            this.initializationRequired = initializationRequired;
         }
+
+        public boolean isInitializationRequired() { return initializationRequired; }
 
         public ClassStmtToken getToken() {
             return token;

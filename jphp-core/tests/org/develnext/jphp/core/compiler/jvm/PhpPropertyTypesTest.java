@@ -121,11 +121,10 @@ public class PhpPropertyTypesTest extends JvmCompilerCase {
             String[] fields = row.split("\t", -1);
             Environment env = new Environment(newScope(), new ByteArrayOutputStream());
             try {
-                Context context = new Context(new String(Base64.getDecoder().decode(fields[4]), StandardCharsets.UTF_8));
+                Context context = new Context(new String(Base64.getDecoder().decode(fields[4]), StandardCharsets.UTF_8)+";$GLOBALS['declarations_after']=1;");
                 context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
                 try {
                     var module = new JvmCompiler(env, context).compile(false);
-                    if (fields[1].equals("reject")) {differences.add(fields[0] + ": unexpectedly accepted"); continue;}
                     var expected = declarations(module);
                     var dumper = new ModuleDumper(context, env, true); var bytes = new ByteArrayOutputStream();
                     dumper.save(module, bytes); module = dumper.load(new ByteArrayInputStream(bytes.toByteArray()));
@@ -133,12 +132,17 @@ public class PhpPropertyTypesTest extends JvmCompilerCase {
                     env.getScope().setPhpLanguageProfile(PhpLanguageProfile.JPHP_LEGACY);
                     env.getScope().loadModule(module); env.getScope().addUserModule(module); env.registerModule(module);
                     module.include(env);
+                    if (fields[1].equals("reject")) {differences.add(fields[0] + ": unexpectedly accepted"); continue;}
+                    assertEquals(fields[0],1,env.getGlobals().getByScalar("declarations_after").toLong());
+                    for(var template:module.getDeferredClasses())
+                        assertNotNull(fields[0]+": "+template.getName(),env.fetchClass(template.getName(),false,PhpLanguageProfile.PHP_8_5));
                     var diagnostics = new StringWriter(); var writer = new PrintWriter(diagnostics);
                     CheckClassAdapter.verify(new ClassReader(module.getData()), env.getScope().getClassLoader(), false, writer);
                     for (var clazz : module.getClasses()) if (clazz.getData() != null && clazz.getData().length != 0)
                         CheckClassAdapter.verify(new ClassReader(clazz.getData()), env.getScope().getClassLoader(), false, writer);
                     assertEquals(fields[0], "", diagnostics.toString());
                 } catch (ErrorException error) {
+                    assertNull(fields[0],env.getGlobals().getByScalar("declarations_after"));
                     String expected = new String(Base64.getDecoder().decode(fields[3]), StandardCharsets.UTF_8);
                     if (fields[1].equals("accept") || error.getType().value != Integer.parseInt(fields[2]) || !expected.equals(error.getMessage()))
                         differences.add(fields[0] + ": expected=" + fields[2] + ":" + expected + " actual=" + error.getType() + ":" + error.getMessage());
@@ -150,7 +154,8 @@ public class PhpPropertyTypesTest extends JvmCompilerCase {
 
     private static List<String> declarations(ModuleEntity module) {
         var result = new ArrayList<String>();
-        for (var clazz : module.getClasses()) {
+        var catalog = new ArrayList<>(module.getClasses()); catalog.addAll(module.getDeferredClasses());
+        for (var clazz : catalog) {
             var properties = new ArrayList<>(clazz.getProperties()); properties.addAll(clazz.getStaticProperties());
             for (PropertyEntity property : properties) {
                 var value = property.getDefaultValue();

@@ -1,0 +1,3 @@
+warning=[16384,"Trait DepR4RepeatTrait used by DepR4RepeatUser is deprecated, each declared use",false]
+warning=[16384,"Trait DepR4RepeatTrait used by DepR4RepeatUser is deprecated, each declared use",false]
+after=true

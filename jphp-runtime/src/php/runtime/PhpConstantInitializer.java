@@ -31,6 +31,11 @@ public final class PhpConstantInitializer {
         if (state.depth.isEmpty()) STATE.remove();
     }
     public static Memory resolveReference(ConstantEntity constant, Environment env, TraceInfo trace, String className) {
+        // This boundary follows successful class/name/visibility resolution on every semantic read,
+        // including ConstantCallCache hits. Reflection and initialization getValue paths stay quiet.
+        if (php.runtime.invoke.PhpDeprecatedInvocation.marker(constant) != null) {
+            php.runtime.invoke.PhpDeprecatedInvocation.beforeConstant(env, trace, constant);
+        }
         State state = STATE.get();
         if (state == null || !state.depth.containsKey(env) || constant.getInitializerMethod() == null)
             return constant.getValue(env, trace);

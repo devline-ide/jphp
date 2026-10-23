@@ -16,11 +16,16 @@ final class PhpClassComposition {
     private static final String BRIDGE = "(Lphp/runtime/env/Environment;[Lphp/runtime/Memory;)Lphp/runtime/Memory;";
 
     static PhpTraitCompositionPlan compose(ClassEntity owner, Environment env) {
+        return compose(owner,env,null);
+    }
+    static PhpTraitCompositionPlan compose(ClassEntity owner, Environment env,List<List<ClassEntity>> resolvedTraits) {
         PhpClassRelations recipe = owner.getDeclarationRelations();
         if (recipe.interfaces().isEmpty() && recipe.traitGroups().isEmpty()) {
             owner.finishDeferredDeclaration(env);
             return null;
         }
+        if(resolvedTraits!=null && resolvedTraits.size()!=recipe.traitGroups().size())
+            throw new IllegalArgumentException("Resolved trait groups differ from the declaration recipe");
         List<ClassEntity> interfaces = new ArrayList<>(), traits = new ArrayList<>();
         List<List<ClassEntity>> groups = new ArrayList<>();
         Set<ClassEntity> directInterfaces = Collections.newSetFromMap(new IdentityHashMap<>());
@@ -34,11 +39,16 @@ final class PhpClassComposition {
             if (!directInterfaces.add(actual)) fail(env, use.name().trace(), "Interface %s cannot be implemented twice", actual.getName());
             collectInterfaces(actual, interfaces, interfaceSeen);
         }
+        int groupIndex=0;
         for (PhpClassRelations.TraitGroup group : recipe.traitGroups()) {
             if (owner.isInterface()) fail(env, group.trace(), "Cannot use traits inside of interfaces");
             List<ClassEntity> actual = new ArrayList<>();
+            List<ClassEntity> resolved=resolvedTraits==null?null:resolvedTraits.get(groupIndex++);
+            if(resolved!=null && resolved.size()!=group.traits().size())
+                throw new IllegalArgumentException("Resolved trait occurrences differ from the declaration recipe");
+            int occurrence=0;
             for (PhpClassRelations.Name name : group.traits()) {
-                ClassEntity trait = resolve(owner, env, name, ClassEntity.Type.TRAIT);
+                ClassEntity trait = resolved==null?resolve(owner, env, name, ClassEntity.Type.TRAIT):resolved.get(occurrence++);
                 if (!actual.contains(trait)) actual.add(trait);
                 if (!traits.contains(trait)) traits.add(trait);
             }
@@ -100,7 +110,7 @@ final class PhpClassComposition {
         return new PhpTraitCompositionPlan(owner, interfaces, physicalTraits, copies, bridges);
     }
 
-    private static ClassEntity resolve(ClassEntity owner, Environment env, PhpClassRelations.Name name, ClassEntity.Type expected) {
+    static ClassEntity resolve(ClassEntity owner, Environment env, PhpClassRelations.Name name, ClassEntity.Type expected) {
         ClassEntity actual = env.fetchClass(name.name(), true, owner.getModule().getPhpLanguageProfile());
         if (actual == null) {
             String kind = expected == ClassEntity.Type.TRAIT ? "Trait" : "Interface";
@@ -259,8 +269,7 @@ final class PhpClassComposition {
                     || original.getTrait() == null && original.getClazz() != owner && original.isPrivate());
             if (original != null && !skip && original.getClazz()==owner) {
                 boolean sameType = original.getDeclaredType() == null ? candidate.getDeclaredType() == null
-                        : candidate.getDeclaredType() != null && original.getDeclaredType().forTraitComposition(owner)
-                            .equivalentTo(candidate.getDeclaredType().forTraitComposition(owner));
+                        : candidate.getDeclaredType() != null && original.getDeclaredType().equivalentTo(candidate.getDeclaredType());
                 Memory left = original.getDefaultValue(), right = candidate.getDefaultValue();
                 boolean sameDefault = left == null ? right == null : right != null && left.identical(right);
                 if ((original.getPhpHooks()!=null || candidate.getPhpHooks()!=null) && original!=candidate
@@ -297,9 +306,12 @@ final class PhpClassComposition {
                         : candidate.getDeclaredType() != null && original.getDeclaredType().forTraitComposition(owner)
                             .equivalentTo(candidate.getDeclaredType().forTraitComposition(owner));
                 Memory left = original.getValue(), right = candidate.getValue();
+                // Once X needs runtime comparison, later uses of X keep the same declaration order.
+                boolean deferred = left == null || right == null || owner.getTraitConstantChecks().stream()
+                        .anyMatch(check -> check.name.equals(candidate.getName()));
                 if (!sameType || original.getModifier() != candidate.getModifier() || original.isFinal() != candidate.isFinal()
-                        || left != null && right != null && !left.identical(right)) owner.traitConstantConflict(env, candidate.getName(), trait.getName());
-                if (left == null || right == null)
+                        || !deferred && !left.identical(right)) owner.traitConstantConflict(env, candidate.getName(), trait.getName());
+                if (deferred)
                     owner.addTraitConstantCheck(candidate.getName(), trait.getName(), right,
                             original.getTraitName() == null ? owner.getName() : original.getTraitName());
                 if (original.getTraitName() == null) original.setTraitName(trait.getName());

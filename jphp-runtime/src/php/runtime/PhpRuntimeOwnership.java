@@ -666,6 +666,7 @@ public final class PhpRuntimeOwnership {
                 if(matched!=1)throw new IOException("FUNCTION reference parameter lacks one exact actual SEND import");
             }
             if(data.read()!=-1)throw new IOException("Trailing runtime frame data");
+            PhpPrimitiveCellPlan.validateClassDeclarationChecks(bytes,method,descriptor);
             return new RuntimePlan(owner,method,descriptor,producers,unsupported,nativeMembers,closureCvs,calls,literals,clones,arrayEntries,handlers,globalImports,globalAccesses,globalReads,globalUnsets,globalScalars,arrayReferences,functionCalls,arrayIncrements,objectNews,objectCvs,propertyReferences,conditionals,quietGlobalReads,conditionalLocals,lifecycle,lifecycleReceivers,lifecycleDiscards,globalNulls,entryScalars,objectCasts,literalEntries,localIncrements,namedGlobals,entryStrings,returnBoundaries);
         }catch(IllegalArgumentException failure){throw new IOException("Invalid runtime frame plan",failure);}
     }
@@ -3366,6 +3367,7 @@ public final class PhpRuntimeOwnership {
             Holder destination=null;Memory raw=null;Throwable primary=null;boolean pushed=false;
             try {
                 var entity=(php.runtime.reflection.FunctionEntity)target.entity;Memory[] args={send.raw};caller.authority.environment.pushCall(trace,null,args,entity.getName(),null,null);pushed=true;
+                php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(caller.authority.environment,trace,entity);
                 if(discarded)php.runtime.invoke.PhpNoDiscardInvocation.beforeBody(caller.authority.environment,trace,entity);
                 raw=entity.invoke(caller.authority.environment,trace,args);if(!invocation.entered)throw new IllegalStateException("FUNCTION body did not enter its exact frame");
                 destination=caller.root(caller.evaluations,id,Purpose.PRODUCER_EVAL);try(Publication publication=callee.prepareResult(destination,raw,Role.VALUE)){publication.storeDirect();publication.commit();}
@@ -3410,6 +3412,7 @@ public final class PhpRuntimeOwnership {
             Holder destination=null;Memory raw=null;Throwable primary=null;boolean pushed=false;
             try {
                 var method=(php.runtime.reflection.MethodEntity)target.entity;Memory[] passed=args;
+                php.runtime.invoke.PhpDeprecatedInvocation.beforeFunction(caller.authority.environment,trace,method);
                 if(discarded)php.runtime.invoke.PhpNoDiscardInvocation.beforeBody(caller.authority.environment,trace,method);
                 if(internalCallback) {
                     String className=closure.getReflection().getName();String scope=closure.hasPhp8Binding()?closure.getScope():method.getClazz().getName();

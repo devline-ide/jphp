@@ -50,7 +50,7 @@ public class ReflectionConstant extends Reflection implements Reflector, php.run
         return entity.getTrace()==null || entity.getTrace().getFileName()==null || entity.getTrace()==php.runtime.env.TraceInfo.UNKNOWN
                 ? Memory.FALSE : StringMemory.valueOf(entity.getTrace().getFileName());
     }
-    @Signature public boolean isDeprecated() {return entity.getPhpAttributes().stream().anyMatch(a->a.name().equalsIgnoreCase("Deprecated"));}
+    @Signature public boolean isDeprecated() {return entity.isDeprecated();}
     @Signature({@Arg(value="name",type=HintType.STRING,nullable=true,optional=@Optional("null")),
             @Arg(value="flags",type=HintType.INT,optional=@Optional("0"))})
     public Memory getAttributes(Environment env,Memory...args) {return ReflectionAttribute.collect(env,entity,args[0],args[1],"ReflectionConstant");}

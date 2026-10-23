@@ -3490,9 +3490,8 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public ArrayMemory slice(int offset, boolean saveKeys) {
         ArrayMemory result = new ArrayMemory();
 
-        if (offset < 0) {
-            offset = size() + offset;
-        }
+        int size = size();
+        offset = Math.max(0, Math.min(size, offset < 0 ? size + offset : offset));
 
         if (isList()) {
             int i = 0;
@@ -3533,12 +3532,11 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     public ArrayMemory slice(int offset, int length, boolean saveKeys) {
         ArrayMemory result = new ArrayMemory();
 
-        if (offset < 0) {
-            offset = size() + offset;
-        }
-
-        if (length < 0) {
-            length = size() + length - offset;
+        int size = size();
+        offset = Math.max(0, Math.min(size, offset < 0 ? size + offset : offset));
+        length = length < 0 ? Math.max(0, size + length - offset) : Math.min(length, size - offset);
+        if (length == 0) {
+            return result;
         }
 
         if (isList()) {

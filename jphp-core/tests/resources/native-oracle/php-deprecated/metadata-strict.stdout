@@ -1,0 +1,7 @@
+builtin-shape:["ok",[true,true,[["message","?string",true,null],["since","?string",true,null]],87]]
+constructor-properties:["ok",[[null,null],["replacement","arbitrary text"],[["message",true,true,"?string"],["since",true,true,"?string"]]]]
+constructor-weak-scalar-binding:["throw","TypeError","Deprecated::__construct(): Argument #1 ($message) must be of type ?string, int given"]
+constructor-invalid-type:["throw","TypeError","Deprecated::__construct(): Argument #1 ($message) must be of type ?string, array given"]
+constructor-unknown-name:["throw","Error","Unknown named parameter $unknown"]
+readonly-reinitialization:["throw","Error","Cannot modify readonly property Deprecated::$message"]
+function-method-flags-and-attribute-instance:["ok",[true,true,false,{"0":"message","since":"v"},2,false,["message","v"]]]

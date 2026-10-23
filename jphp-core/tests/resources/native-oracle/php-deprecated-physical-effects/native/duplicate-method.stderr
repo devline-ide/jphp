@@ -1,0 +1,4 @@
+Fatal error: Trait method DepReviewOtherTrait::shared has not been applied as DepReviewConflictConsumer::shared, because of collision with DepReviewConflictTrait::shared in F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\duplicate-method\subject.php on line 3
+Stack trace:
+#0 F:\ReWork\ozl.devline.ide\build\agent-qa\php-deprecated-20261022\effects-review-controls-r1\duplicate-method.php(14): require()
+#1 {main}

@@ -163,6 +163,10 @@ public final class PhpAttributeDumper {
                 String rejection=php.runtime.reflection.support.PhpNoDiscardValidation.rejection(declaration.entity(),attribute.target(),attributes);
                 if(rejection!=null)throw new DumpException(rejection);
             }
+            if(module.getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5 && attribute.name().equalsIgnoreCase("Deprecated")) {
+                String rejection=php.runtime.reflection.support.PhpDeprecatedValidation.rejection(declaration.entity(),attribute.target(),attributes);
+                if(rejection!=null)throw new DumpException(rejection);
+            }
             int argumentIndex=0;Set<String> keys=new HashSet<>();boolean named=false;
             for(PhpAttribute.Argument argument:attribute.arguments()) {
                 if(argument.name()!=null) {named=true;if(!keys.add(argument.name())) throw new DumpException("Duplicate attribute argument key");}
@@ -199,6 +203,14 @@ public final class PhpAttributeDumper {
             }
             occurrence++;
         }
+    }
+    /** Original compiler lineage is authoritative; a newer transport header cannot repair old call sites. */
+    public static void requireDeprecatedCompilerAbi(ModuleEntity module,int originalCompilerAbi) throws IOException {
+        if(originalCompilerAbi>=29 || module.getPhpLanguageProfile()!=php.runtime.common.PhpLanguageProfile.PHP_8_5)return;
+        for(Declaration declaration:catalog(module).declarations().values())
+            for(PhpAttribute attribute:declaration.entity().getPhpAttributes())
+                if(attribute.name().equalsIgnoreCase("Deprecated"))
+                    throw new DumpException("PHP #[Deprecated] metadata requires compiler ABI 29 or newer; recompile this module from source");
     }
     public static byte[] save(ModuleEntity module,boolean includeData) throws IOException {
         Catalog catalog=catalog(module);

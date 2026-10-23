@@ -1,0 +1,6 @@
+before=false
+fragment-enter
+warning=[16384,"Trait DepReviewCollisionTrait used by DepReviewCollisionConsumer is deprecated, reentry collision",false]
+reentry-before
+inner-enter
+shutdown=[[64,"Cannot redeclare class DepReviewCollisionConsumer (previously declared in F:\\ReWork\\ozl.devline.ide\\build\\agent-qa\\php-deprecated-20261022\\effects-review-controls-r1\\reentry-collision\\subject.php:3)"],false]

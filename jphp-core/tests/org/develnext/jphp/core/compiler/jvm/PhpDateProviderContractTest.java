@@ -29,7 +29,7 @@ public class PhpDateProviderContractTest {
             var module=new JvmCompiler(env,context).compile(false);
             assertEquals(PhpLanguageProfile.JPHP_LEGACY,scope.getPhpLanguageProfile());assertEquals(PhpLanguageProfile.PHP_8_5,module.getPhpLanguageProfile());
             if(phb){var bytes=new ByteArrayOutputStream();var dumper=new ModuleDumper(context,env,debug);dumper.save(module,bytes);
-                assertEquals(28,ModuleDumper.readHeader(new ByteArrayInputStream(bytes.toByteArray())).getCompilerAbiVersion());module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));assertTrue(module.isCompiledArtifact());}
+                assertEquals(29,ModuleDumper.readHeader(new ByteArrayInputStream(bytes.toByteArray())).getCompilerAbiVersion());module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));assertTrue(module.isCompiledArtifact());}
             scope.loadModule(module);scope.addUserModule(module);env.registerModule(module);module.include(env);env.flushAll();assertNull(env.fetchClass("DateTime",false,PhpLanguageProfile.JPHP_LEGACY));return output.toByteArray();
         }catch(Throwable failure){primary=failure;System.out.println("DATE_PARTIAL_BYTES "+id+" "+debug+" "+phb+" "+java.util.Base64.getEncoder().encodeToString(output.toByteArray()));throw failure;}
         finally{try{env.doFinal();}catch(Throwable cleanup){if(primary==null)throw cleanup;else if(primary!=cleanup)primary.addSuppressed(cleanup);}}

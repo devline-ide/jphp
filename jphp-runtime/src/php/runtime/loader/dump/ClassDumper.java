@@ -280,7 +280,7 @@ public class ClassDumper extends Dumper<ClassEntity> {
             if(version>=3)entity.setDeferredInitialization(deferredInitialization);
             if(version>=4)entity.setAnonymous(anonymous);
             if(version>=6 && declarationId>=0)entity.setDeclarationId(declarationId);
-            if(version>=7 && declarationId>=0)entity.setDeclarationRelations(relations);
+            if(version>=7 && (declarationId>=0 || anonymous && !relations.isEmpty()))entity.setDeclarationRelations(relations);
             if(version>=8)entity.setPhpReadonly(readonly);
             if(version>=9)entity.setEnumBackingType(enumBackingType);
         }
@@ -303,8 +303,12 @@ public class ClassDumper extends Dumper<ClassEntity> {
         int declarationId=version>=6?attributes.readInt():-1;
         if(declarationId < -1)throw new DumpException("Invalid deferred class declaration id");
         PhpClassRelations relations=version>=7?readRelations(attributes):PhpClassRelations.EMPTY;
-        if(declarationId<0 && !relations.isEmpty())throw new DumpException("Relations require a deferred class declaration");
-        if(declarationId>=0) {
+        if(declarationId<0 && !relations.isEmpty()
+                && !(anonymous && !entity.isStatic() && entity.getType()==ClassEntity.Type.CLASS
+                    && module!=null && module.getPhpLanguageProfile()==php.runtime.common.PhpLanguageProfile.PHP_8_5
+                    && !relations.traitGroups().isEmpty()))
+            throw new DumpException("Relations require a deferred class declaration");
+        if(declarationId>=0 || !relations.isEmpty()) {
             String relationParent=relations.parent()==null?null:relations.parent().name();
             if(!java.util.Objects.equals(relationParent,entity.getDeferredParentName()))throw new DumpException("Inconsistent deferred parent recipe");
         }

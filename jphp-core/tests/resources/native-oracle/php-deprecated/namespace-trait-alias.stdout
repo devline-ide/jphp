@@ -1,0 +1,4 @@
+namespaced-custom-function:[["ok",[13,false]],[]]
+namespaced-custom-method:[["ok",[17,false]],[]]
+trait-method-alias-names:[["ok",[11,11]],[["warning",16384,"Method RouteAliasOwner::original() is deprecated, trait-method"],["warning",16384,"Method RouteAliasOwner::renamed() is deprecated, trait-method"]]]
+trait-method-alias-reflection:[["ok",[true,true]],[]]

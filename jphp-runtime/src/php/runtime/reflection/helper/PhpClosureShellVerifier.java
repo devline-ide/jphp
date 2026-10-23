@@ -199,7 +199,7 @@ public final class PhpClosureShellVerifier {
                 int flags=input.readUnsignedShort(); String field=text(input.readUnsignedShort()), type=text(input.readUnsignedShort());
                 boolean className=propertiesShell && field.equals("$CL");
                 // A lexical attribute scope is a ConstantValue literal, never a runtime publisher.
-                boolean lexicalScope=!propertiesShell && (field.equals("__$attributeLexicalScope") || field.equals("__$noDiscardClosureName"));
+                boolean lexicalScope=!propertiesShell && (field.equals("__$attributeLexicalScope") || field.equals("__$noDiscardClosureName") || field.equals("__$deprecatedClosureName"));
                 boolean literal=field.equals("$FN") || className || lexicalScope;
                 known &= type.equals(className || lexicalScope ? "Ljava/lang/String;" : FIELDS.get(field))
                         && fieldNames.add(field) && flags==(literal ? 25 : 9);
@@ -212,7 +212,8 @@ public final class PhpClosureShellVerifier {
             }
             known &= fields==FIELDS.size()+(propertiesShell ? 1 : 0)
                     +(!propertiesShell && fieldNames.contains("__$attributeLexicalScope") ? 1 : 0)
-                    +(!propertiesShell && fieldNames.contains("__$noDiscardClosureName") ? 1 : 0);
+                    +(!propertiesShell && fieldNames.contains("__$noDiscardClosureName") ? 1 : 0)
+                    +(!propertiesShell && fieldNames.contains("__$deprecatedClosureName") ? 1 : 0);
             int methods = input.readUnsignedShort(), constructors = 0, initializers = 0;
             for (int i = 0; i < methods; i++) {
                 int flags = input.readUnsignedShort(); String method = text(input.readUnsignedShort()), descriptor = text(input.readUnsignedShort());

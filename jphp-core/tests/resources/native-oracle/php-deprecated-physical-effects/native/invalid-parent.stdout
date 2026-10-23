@@ -1,0 +1,4 @@
+before=false
+fragment-enter
+warning=[16384,"Trait DepReviewParentTrait used by DepReviewParentConsumer is deprecated, invalid parent",false]
+shutdown=[[64,"Class DepReviewParentConsumer cannot extend final class DepReviewFinalParent"],false]

@@ -1,0 +1,3 @@
+trait-link:[[16384,"Trait DcOldTrait used by DcUsesTrait is deprecated, trait"]]
+constant-reflection:[true,true,4,5,[]]
+constant-repeated-read:[[4,4,5,5],[[16384,"Constant DcConstants::OLD is deprecated, class constant"],[16384,"Constant DcConstants::OLD is deprecated, class constant"],[16384,"Constant DC_OLD is deprecated, global constant"],[16384,"Constant DC_OLD is deprecated, global constant"]]]

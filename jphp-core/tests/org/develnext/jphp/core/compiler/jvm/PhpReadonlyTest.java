@@ -54,10 +54,18 @@ public class PhpReadonlyTest extends JvmCompilerCase {
             var env=new Environment(newScope(),new ByteArrayOutputStream());env.getScope().setDebugMode(debug);
             try {
                 String code=new String(resource(name+".php"),StandardCharsets.UTF_8);
-                var context=new Context(code.substring(5));context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
-                try {new JvmCompiler(env,context).compile(false);fail("Accepted readonly declaration "+name);}
+                var context=new Context(code.substring(5)+";$GLOBALS['readonly_after']=1;");context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
+                try {
+                    var module=new JvmCompiler(env,context).compile(false);
+                    if(isCompiled()) {var dumper=new ModuleDumper(context,env,debug);var bytes=new ByteArrayOutputStream();dumper.save(module,bytes);module=dumper.load(new ByteArrayInputStream(bytes.toByteArray()));}
+                    env.getScope().loadModule(module);env.getScope().addUserModule(module);env.registerModule(module);
+                    module.include(env);fail("Accepted readonly declaration "+name);
+                }
                 catch(php.runtime.exceptions.support.ErrorException error) {
                     assertTrue(name+": "+error.getMessage(),error.getMessage().toLowerCase().contains(fragment.toLowerCase()));
+                    boolean syntax=name.equals("readonly-enum") || name.equals("readonly-interface") || name.equals("readonly-trait");
+                    assertEquals(syntax?php.runtime.exceptions.support.ErrorType.E_PARSE:php.runtime.exceptions.support.ErrorType.E_COMPILE_ERROR,error.getType());
+                    assertNull(env.getGlobals().getByScalar("readonly_after"));
                 }
             } finally {env.doFinal();}
         }

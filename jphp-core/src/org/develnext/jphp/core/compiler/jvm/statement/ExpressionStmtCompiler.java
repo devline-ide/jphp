@@ -338,7 +338,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 if (entity != null) {
                     ConstantEntity c = entity.findConstant(constant);
 
-                    if (c != null && c.getValue() != null && c.isPublic() && !(php8CallFrame() && entity.isTrait())) {
+                    if (c != null && c.getValue() != null && c.isPublic() && !(php8CallFrame() && entity.isTrait())
+                            && !(php8CallFrame() && php.runtime.invoke.PhpDeprecatedInvocation.marker(c) != null)) {
                         stackPush(c.getValue());
                         stackPeek().setLevel(-1);
                         return;
@@ -4860,9 +4861,8 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writeBoxedBinaryOperands(o2,o1,false);
             writeSysDynamicCall(Memory.class,name,operatorResult,Memory.class);
         } else if ((CompilerUtils.isPhpComparison(operator) || operator instanceof IdenticalExprToken
-                || operator instanceof NotIdenticalExprToken) && Lt.isConstant() && Rt.isConstant()
-                && !o1.isKnown() && !o2.isKnown()) {
-            // Both evaluated scalars already occupy the JVM stack; box them in physical operand order.
+                || operator instanceof NotIdenticalExprToken) && !o1.isKnown() && !o2.isKnown()) {
+            // Both evaluated operands already occupy the JVM stack, including mixed scalar/Memory values.
             writeBoxedBinaryOperands(o2,o1,false);
             writeSysDynamicCall(Memory.class,name,operatorResult,Memory.class);
         } else if (Lt.isConstant() && Rt.isConstant()) {

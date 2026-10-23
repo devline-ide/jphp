@@ -57,7 +57,7 @@ public class FunctionEntity extends AbstractFunctionEntity {
     }
 
     public boolean isDeprecated(){
-        return false; // TODO
+        return php.runtime.invoke.PhpDeprecatedInvocation.marker(this) != null;
     }
 
     public ModuleEntity getModule() {
@@ -92,6 +92,7 @@ public class FunctionEntity extends AbstractFunctionEntity {
 
     @Override
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
+        if (php.runtime.invoke.PhpDeprecatedInvocation.marker(this) != null) return null;
         if (php.runtime.PhpOwnershipExecution.current(env) != null || php.runtime.PhpRuntimeOwnership.isInvoking(env,this)) return null;
         Memory result = getImmutableResultForTypeCheck(module);
         if (result != null && module != null && module.getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5)
@@ -111,6 +112,9 @@ public class FunctionEntity extends AbstractFunctionEntity {
 
     @Override
     public Closure getClosure(Environment env) {
+        if (php.runtime.invoke.PhpDeprecatedInvocation.marker(this) != null)
+            return (Closure) php.runtime.invoke.PhpCallableFactory.fromResolvedFunction(this, env, env.trace())
+                    .toValue(ObjectMemory.class).value;
         final FunctionEntity bind = this;
         final ClosureEntity closureEntity1 = new ClosureEntity(this.getContext());
         closureEntity1.setParent(env.scope.fetchUserClass(Closure.class));

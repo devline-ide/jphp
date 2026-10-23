@@ -68,7 +68,13 @@ public class PhpConstantDeclarationsTest extends JvmCompilerCase {
                 parent.getScope().loadModule(module); parent.getScope().addUserModule(module); parent.registerModule(module);
                 assertEquals(7, module.include(parent).toLong());
                 Environment child = new Environment(parent, new ByteArrayOutputStream());
-                try {assertEquals(7, module.include(child).toLong());}
+                try {
+                    var childModule=lazyModule(child,"class LazyChildOwner {const X=LAZY_VALUE;use LazyTrait;}return [LazyOwner::X,LazyChildOwner::X];",dumped);
+                    child.getScope().loadModule(childModule);child.getScope().addUserModule(childModule);child.registerModule(childModule);
+                    var result=childModule.include(child);
+                    assertEquals(7,result.valueOfIndex(0).toLong());assertEquals(7,result.valueOfIndex(1).toLong());
+                    assertTrue(child.fetchClass("LazyChildOwner",false,PhpLanguageProfile.PHP_8_5).findConstant("X")!=null);
+                }
                 finally {child.doFinal();}
             } finally {parent.doFinal();}
         }
@@ -104,7 +110,9 @@ public class PhpConstantDeclarationsTest extends JvmCompilerCase {
                     var child=new JvmCompiler(env,context).compile(false);
                     env.getScope().loadModule(child);env.getScope().addUserModule(child);env.registerModule(child);
                     assertEquals(7,child.include(env).toLong());
-                    assertTrue(child.findClass("c").findConstant("X").isFinal());
+                    var bound=env.fetchClass("C",false,PhpLanguageProfile.PHP_8_5);
+                    assertNotNull(bound);assertSame(child,bound.getModule());
+                    assertTrue(bound.findConstant("X").isFinal());
                     assertNull(sample[2]);
                 } catch(ErrorException error) {
                     assertEquals(sample[2],error.getMessage());

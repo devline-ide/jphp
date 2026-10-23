@@ -210,7 +210,7 @@ public final class PhpPrimitiveCellPlan {
                         }
                     }
                 } else if(!pureCall(target,helper,type)||discardedCall(target,helper,type)&&invoke.opcode()!=Opcode.INVOKEVIRTUAL) {
-                    if(!emptyClosureConstructor(owner,instructions,at,invoke)&&!emptyClosureFlag(owner,instructions,at,invoke)&&!capturedFactoryCall(owner,method,code,instructions,at,sites)&&!guardedCaptureAllocation(owner,method,code,instructions,at,sites)&&!localTableInitialization(method,code,instructions,at,invoke)&&!guardedSessionCvUnset(method,code,instructions,at,sites,-1,model.thisClass().asInternalName()))closed=false;
+                    if(!classDeclarationCheck(model.thisClass().asInternalName(),method,code,instructions,at)&&!emptyClosureConstructor(owner,instructions,at,invoke)&&!emptyClosureFlag(owner,instructions,at,invoke)&&!capturedFactoryCall(owner,method,code,instructions,at,sites)&&!guardedCaptureAllocation(owner,method,code,instructions,at,sites)&&!localTableInitialization(method,code,instructions,at,invoke)&&!guardedSessionCvUnset(method,code,instructions,at,sites,-1,model.thisClass().asInternalName()))closed=false;
                 }
             }
             if(!seen.equals(sites.keySet()))throw new IOException("CELL row omits/repeats its physical publisher");
@@ -220,6 +220,53 @@ public final class PhpPrimitiveCellPlan {
         }
         return Map.copyOf(result);
     }
+    /** Independent cold proof; a transported complete frame never grants this bridge admission. */
+    public static void validateClassDeclarationChecks(byte[] bytes,String name,String descriptor)throws IOException {
+        var model=ClassFile.of().parse(bytes);
+        for(var method:model.methods())if(method.methodName().equalsString(name)&&method.methodType().equalsString(descriptor)) {
+            if(method.code().isEmpty())return;
+            var code=method.code().orElseThrow();
+            var ops=code.elementList().stream().filter(Instruction.class::isInstance).map(Instruction.class::cast).toList();
+            for(int at=0;at<ops.size();at++)if(ops.get(at) instanceof InvokeInstruction call&&call.name().equalsString("__checkClassDeclaration")
+                    &&!classDeclarationCheck(model.thisClass().asInternalName(),method,code,ops,at))
+                throw new IOException("Static class declaration check changed its physical module operands or control flow");
+            return;
+        }
+        throw new IOException("Static class declaration check member is absent");
+    }
+    private static boolean classDeclarationCheck(String owner,MethodModel method,CodeModel code,List<Instruction> ops,int at) {
+        if(at<6||!invoke(ops.get(at),Opcode.INVOKEVIRTUAL,"php/runtime/env/Environment","__checkClassDeclaration",
+                "(Lphp/runtime/env/TraceInfo;Ljava/lang/String;Ljava/lang/String;)V")||(method.flags().flagsMask()&8)==0
+                ||!(method.methodName().equalsString("__include")||method.methodName().stringValue().matches("__include_chunk_[0-9]+"))
+                ||!method.methodType().equalsString("(Lphp/runtime/env/Environment;[Lphp/runtime/Memory;Lphp/runtime/memory/ArrayMemory;)Lphp/runtime/Memory;"))return false;
+        try {
+            if(!java.lang.reflect.Modifier.isFinal(Environment.class.getMethod("__checkClassDeclaration",
+                    php.runtime.env.TraceInfo.class,String.class,String.class).getModifiers()))return false;
+        }catch(ReflectiveOperationException absent){return false;}
+        if(!load(ops.get(at-6),0)||!(ops.get(at-5) instanceof FieldInstruction trace)||trace.opcode()!=Opcode.GETSTATIC
+                ||!trace.owner().asInternalName().equals(owner)||!trace.name().equalsString("$TRC")
+                ||!trace.type().equalsString("[Lphp/runtime/env/TraceInfo;")
+                ||!(ops.get(at-4) instanceof ConstantInstruction index)||!(index.constantValue() instanceof Integer value)||value<0
+                ||ops.get(at-3).opcode()!=Opcode.AALOAD||!constant(ops.get(at-2),owner)
+                ||!(ops.get(at-1) instanceof ConstantInstruction clazz)||!(clazz.constantValue() instanceof String name)||name.isEmpty())return false;
+        Map<Label,Integer> labels=labels(code);int start=at-6;
+        for(var instruction:ops) {
+            if(instruction instanceof StoreInstruction store&&store.slot()==0
+                    ||instruction instanceof IncrementInstruction increment&&increment.slot()==0)return false;
+            List<Label> targets=new ArrayList<>();
+            if(instruction instanceof BranchInstruction branch)targets.add(branch.target());
+            else if(instruction instanceof TableSwitchInstruction table){targets.add(table.defaultTarget());for(var item:table.cases())targets.add(item.target());}
+            else if(instruction instanceof LookupSwitchInstruction lookup){targets.add(lookup.defaultTarget());for(var item:lookup.cases())targets.add(item.target());}
+            for(var target:targets){Integer ordinal=labels.get(target);if(ordinal==null||ordinal>start&&ordinal<=at)return false;}
+        }
+        for(var element:code.elementList())if(element instanceof ExceptionCatch handler)
+            for(var label:List.of(handler.tryStart(),handler.tryEnd(),handler.handler())) {
+                Integer target=labels.get(label);if(target==null||target>start&&target<=at)return false;
+            }
+        return true;
+    }
+
+
     /** Data-only bridge: exact defined bytes, existing CELL rows, and the guarded active/ordinary unset pair. */
     static boolean hasSessionCvUnset(Class<?> owner,byte[] bytes,String name,String descriptor,int local)throws IOException {
         Member member=read(owner,bytes).get(name+descriptor);if(member==null)return false;

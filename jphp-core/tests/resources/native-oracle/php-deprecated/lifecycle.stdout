@@ -1,0 +1,5 @@
+constructor:[["ok","RouteConstruct"],[["warning",16384,"Method RouteConstruct::__construct() is deprecated, construct"],["constructor-body"]]]
+clone:[["ok","RouteClone"],[["warning",16384,"Method RouteClone::__clone() is deprecated, clone"],["clone-body"]]]
+destructor-unset-native-lifetime:[["ok","after-unset"],[["warning",16384,"Method RouteDestruct::__destruct() is deprecated, destruct"],["destructor-body"]]]
+constructor-throws:[["throw","RuntimeException","route-handler"],[["warning",16384,"Method RouteConstruct::__construct() is deprecated, construct"]]]
+clone-throws:[["throw","RuntimeException","route-handler"],[["warning",16384,"Method RouteClone::__clone() is deprecated, clone"]]]
