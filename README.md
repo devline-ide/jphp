@@ -1,7 +1,7 @@
 JPHP - an implementation of PHP
 ===============================
 
-[![Build Status](https://travis-ci.org/jphp-compiler/jphp.svg?branch=master)](https://travis-ci.org/jphp-compiler/jphp)  [![Download](https://jitpack.io/v/org.develnext/jphp.svg)](https://jitpack.io/#org.develnext/jphp) [![Documentation Status](https://readthedocs.org/projects/jphp-docs/badge/?version=latest)](https://readthedocs.org/projects/jphp-docs/?badge=latest)
+[![Build Status](https://travis-ci.org/jphp-compiler/jphp.svg?branch=master)](https://travis-ci.org/jphp-compiler/jphp)  [![Download](https://jitpack.io/v/org.develnext/jphp.svg)](https://jitpack.io/#org.develnext/jphp)
 
 JPHP is a new implementation for PHP which uses the Java VM. It supports many features of the PHP language (7.0+).
 
@@ -60,8 +60,7 @@ Our project started in October 2013. There were a few reasons for that:
 ### Documentation
 
 - Wiki here: [read](http://j-php.net/wiki/)
-- You can find the latest api documentation here: http://jphp-docs.readthedocs.org/
-- To contribute to the api documentation, you can fork the `docs` project: https://github.com/jphp-compiler/docs
+- Historical API documentation (archived reference, predates this fork): https://github.com/jphp-compiler/docs
 
 
 ### Getting started (Hello World)
