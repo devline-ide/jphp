@@ -89,6 +89,18 @@ public class UXRegion<T extends Region> extends UXParent<Region> {
         getWrappedObject().setPrefHeight(value);
     }
 
+    @Signature
+    @Override
+    protected void setWidth(double value) {
+        getWrappedObject().setPrefWidth(value);
+    }
+
+    @Signature
+    @Override
+    protected void setHeight(double value) {
+        getWrappedObject().setPrefHeight(value);
+    }
+
     @Getter
     public double getPaddingLeft() {
         return getWrappedObject().getPadding().getLeft();
