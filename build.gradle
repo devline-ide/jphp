@@ -1,5 +1,5 @@
 def javaVersion = JavaVersion.VERSION_25
-def projectVersion = '0.9.3'
+def projectVersion = '0.9.4-ozLTeam'
 def sourceRepository = file(System.getProperty('maven.repo.local', "$rootDir/../../.gradle/source-repo"))
 
 allprojects {
