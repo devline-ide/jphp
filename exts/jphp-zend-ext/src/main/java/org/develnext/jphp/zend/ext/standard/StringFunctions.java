@@ -3402,7 +3402,7 @@ public class StringFunctions extends FunctionsContainer {
     }
 
     public static String urlencode(String url) throws UnsupportedEncodingException {
-        return URLEncoder.encode(url, "UTF-8");
+        return URLEncoder.encode(url, StandardCharsets.UTF_8).replace("*", "%2A");
     }
 
     public static String rawurlencode(String url) throws UnsupportedEncodingException {
