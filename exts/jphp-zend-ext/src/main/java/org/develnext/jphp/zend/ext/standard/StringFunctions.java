@@ -3398,7 +3398,28 @@ public class StringFunctions extends FunctionsContainer {
     }
 
     public static String urldecode(String url) throws UnsupportedEncodingException {
-        return URLDecoder.decode(url, "UTF-8");
+        return decodeUrl(url, true);
+    }
+
+    private static boolean urlHexDigit(char value) {
+        return value >= '0' && value <= '9' || value >= 'a' && value <= 'f' || value >= 'A' && value <= 'F';
+    }
+
+    private static String decodeUrl(String url, boolean formEncoded) {
+        StringBuilder escaped = null;
+        for (int i = 0; i < url.length(); i++) {
+            char value = url.charAt(i);
+            boolean invalidPercent = value == '%' && (i + 2 >= url.length()
+                    || !urlHexDigit(url.charAt(i + 1)) || !urlHexDigit(url.charAt(i + 2)));
+            boolean literalPlus = value == '+' && !formEncoded;
+            if (invalidPercent || literalPlus) {
+                if (escaped == null) escaped = new StringBuilder(url.length()).append(url, 0, i);
+                escaped.append(invalidPercent ? "%25" : "%2B");
+            } else if (escaped != null) {
+                escaped.append(value);
+            }
+        }
+        return URLDecoder.decode(escaped == null ? url : escaped.toString(), StandardCharsets.UTF_8);
     }
 
     public static String urlencode(String url) throws UnsupportedEncodingException {
@@ -3413,8 +3434,7 @@ public class StringFunctions extends FunctionsContainer {
     }
 
     public static String rawurldecode(String url) throws UnsupportedEncodingException {
-        // Unlike form decoding, a literal '+' is data. Decode percent escapes only once.
-        return URLDecoder.decode(url.replace("+", "%2B"), StandardCharsets.UTF_8);
+        return decodeUrl(url, false);
     }
 
     public static void setLocale() {
