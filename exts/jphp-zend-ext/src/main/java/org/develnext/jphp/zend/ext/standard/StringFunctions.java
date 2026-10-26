@@ -27,7 +27,9 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
+import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.CRC32;
 import java.util.zip.GZIPInputStream;
@@ -3366,8 +3368,29 @@ public class StringFunctions extends FunctionsContainer {
         return parse_url(url, -1);
     }
 
+    private static final AtomicLong LAST_UNIQID_MICROS = new AtomicLong();
+
+    public static String uniqid(String prefix, boolean moreEntropy) {
+        Instant now = Instant.now();
+        long clockMicros = now.getEpochSecond() * 1_000_000 + now.getNano() / 1_000;
+        long previous;
+        long micros;
+        do {
+            previous = LAST_UNIQID_MICROS.get();
+            micros = Math.max(clockMicros, previous + 1);
+        } while (!LAST_UNIQID_MICROS.compareAndSet(previous, micros));
+
+        String value = prefix + String.format(Locale.ROOT, "%08x%05x",
+                (int) (micros / 1_000_000), micros % 1_000_000);
+        if (moreEntropy) {
+            ThreadLocalRandom random = ThreadLocalRandom.current();
+            value += String.format(Locale.ROOT, "%d.%08d", random.nextInt(10), random.nextInt(100_000_000));
+        }
+        return value;
+    }
+
     public static String uniqid(String prefix) {
-        return prefix + UUID.fromString(String.valueOf(System.currentTimeMillis())).toString().replace("-", "");
+        return uniqid(prefix, false);
     }
 
     public static String uniqid() {
