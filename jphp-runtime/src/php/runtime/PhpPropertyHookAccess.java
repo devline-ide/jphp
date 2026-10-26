@@ -14,7 +14,10 @@ public final class PhpPropertyHookAccess {
   return PhpPropertyHookBodyAccess.isBackingAccess(body,original,env,receiver,property);
  }
  private static Memory invoke(PhpPropertyHooks.Hook hook,Environment env,TraceInfo trace,IObject receiver,Memory... args)throws Throwable{
-  hook.validate();return ObjectInvokeHelper.invokeMethod(receiver,hook.method(),env,trace==null?TraceInfo.UNKNOWN:trace,args,false);
+  hook.validate();
+  if(hook.declaration().getTrait()!=null && (PhpOwnershipExecution.current(env)!=null || env.getRuntimeOwnership()!=null))
+   php.runtime.loader.dump.PhpTraitPropertyHookOrigin.requireOwnershipAdmission(hook,env);
+  return ObjectInvokeHelper.invokeMethod(receiver,hook.method(),env,trace==null?TraceInfo.UNKNOWN:trace,args,false);
  }
  public static void error(Environment env,TraceInfo trace,String text,PropertyEntity property){
   env.exception(trace,BaseError.class,text,property.getClazz().getName(),property.getName());

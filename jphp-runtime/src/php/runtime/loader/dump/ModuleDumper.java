@@ -2,6 +2,8 @@ package php.runtime.loader.dump;
 
 import php.runtime.common.LangMode;
 import php.runtime.common.PhpLanguageProfile;
+import php.runtime.common.PhpOptimizationProfile;
+import php.runtime.common.PhpRuntimeOwnershipMode;
 import php.runtime.env.Context;
 import php.runtime.env.Environment;
 import php.runtime.loader.dump.io.DumpException;
@@ -29,7 +31,9 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     // ABI27 adds the explicit constant-only parameter initializer kind (PDIN3).
     // ABI28 emits the explicit legacy VALUE-copy helper; modern copies preserve independent cursors.
     // ABI29 preserves Deprecated invocation effects and lexical trait-use publication ordering.
-    public final static int COMPILER_ABI_VERSION = 29;
+    // ABI30 records the numeric optimization contract in the header and generated entry context.
+    // ABI31 stores the generated ownership contract; older artifacts retain AUTO.
+    public final static int COMPILER_ABI_VERSION = 31;
     public final static int COMPILER_PROVENANCE_STAMP = 0x43414249; // CABI, in the existing reserved module tail.
     public final static int COMPILER_PROVENANCE_VERSION = 1;
 
@@ -43,15 +47,21 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     public static final class Header {
         private final PhpLanguageProfile profile;
         private final int compilerAbiVersion;
+        private final PhpOptimizationProfile optimizationProfile;
+        private final PhpRuntimeOwnershipMode ownershipMode;
 
-        private Header(PhpLanguageProfile profile, int compilerAbiVersion) {
+        private Header(PhpLanguageProfile profile, int compilerAbiVersion, PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode) {
             this.profile = profile;
             this.compilerAbiVersion = compilerAbiVersion;
+            this.optimizationProfile = optimizationProfile;
+            this.ownershipMode = ownershipMode;
         }
 
         public PhpLanguageProfile getPhpLanguageProfile() { return profile; }
         /** Zero denotes the original header without an explicit ABI, not unknown provenance. */
         public int getCompilerAbiVersion() { return compilerAbiVersion; }
+        public PhpOptimizationProfile getOptimizationProfile() { return optimizationProfile; }
+        public PhpRuntimeOwnershipMode getOwnershipMode() { return ownershipMode; }
     }
 
     protected ConstantDumper constantDumper = new ConstantDumper(context, env, debugInformation);
@@ -91,6 +101,11 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         PhpAttributeDumper.requireDeprecatedCompilerAbi(entity,compilerAbi);
         if (compilerAbi > COMPILER_ABI_VERSION)
             throw new DumpException("Unsupported original compiler ABI: " + compilerAbi);
+        if (entity.getOwnershipMode() != PhpRuntimeOwnershipMode.AUTO && compilerAbi < 31)
+            throw new DumpException("Ownership mode requires original ABI31 provenance");
+        if (entity.getOptimizationProfile() != PhpOptimizationProfile.COMPATIBLE
+                && (compilerAbi < 30 || entity.getPhpLanguageProfile() != PhpLanguageProfile.PHP_8_5))
+            throw new DumpException("Fast numeric module requires original ABI30 and PHP_8_5 semantics");
 
         // Attest before emitting transport bytes. Unknown/historical metadata remains explicitly unavailable.
         byte[] generatorLinkage = includeData && entity.hasValidatedGeneratorLinkage()
@@ -103,6 +118,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         data.writeInt(DUMP_VERSION);
         data.writeInt(COMPILER_ABI_VERSION);
         data.writeInt(entity.getPhpLanguageProfile().getId());
+        data.writeInt(entity.getOptimizationProfile().getId());
+        data.writeInt(entity.getOwnershipMode().getId());
 
         // legacy code.
         data.writeEnum(LangMode.DEFAULT);
@@ -214,6 +231,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
             throw new DumpException("Unsupported JPHP dump version: " + VERSION);
 
         PhpLanguageProfile profile = PhpLanguageProfile.JPHP_LEGACY;
+        PhpOptimizationProfile optimizationProfile = PhpOptimizationProfile.COMPATIBLE;
+        PhpRuntimeOwnershipMode ownershipMode = PhpRuntimeOwnershipMode.AUTO;
         int abi = 0;
         if (VERSION == DUMP_VERSION) {
             abi = data.readInt();
@@ -221,12 +240,16 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
                 throw new DumpException("Unsupported JPHP compiler ABI: " + abi);
             try {
                 profile = PhpLanguageProfile.fromId(data.readInt());
+                if (abi >= 30) optimizationProfile = PhpOptimizationProfile.fromId(data.readInt());
+                if (abi >= 31) ownershipMode = PhpRuntimeOwnershipMode.fromId(data.readInt());
             } catch (IllegalArgumentException e) {
                 throw new DumpException(e.getMessage());
             }
         }
 
-        return new Header(profile, abi);
+        if (optimizationProfile != PhpOptimizationProfile.COMPATIBLE && profile != PhpLanguageProfile.PHP_8_5)
+            throw new DumpException("Fast numeric optimization requires PHP_8_5 language semantics");
+        return new Header(profile, abi, optimizationProfile, ownershipMode);
     }
 
     public static PhpLanguageProfile readLanguageProfileHeader(InputStream input) throws IOException {
@@ -262,6 +285,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         ModuleEntity entity = new ModuleEntity(context);
         entity.setCompiledArtifact(true);
         entity.setPhpLanguageProfile(profile);
+        entity.setOptimizationProfile(header.getOptimizationProfile());
+        entity.setOwnershipMode(header.getOwnershipMode());
         entity.setName(data.readName());
         entity.setInternalName(data.readName());
         entity.setStrictTypes(data.readBoolean());
@@ -352,6 +377,10 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         entity.setData(data.readRawData(Integer.MAX_VALUE));
 
         int compilerAbi = readCompilerProvenance(data.readRawData(1024 * 1024 * 5), header.getCompilerAbiVersion());
+        if (entity.getOwnershipMode() != PhpRuntimeOwnershipMode.AUTO && compilerAbi < 31)
+            throw new DumpException("Ownership mode lacks original ABI31 provenance");
+        if (entity.getOptimizationProfile() != PhpOptimizationProfile.COMPATIBLE && compilerAbi < 30)
+            throw new DumpException("Fast numeric module lacks original ABI30 provenance");
         if (!cold) entity.recordDumpCompilerAbi(compilerAbi, header.getCompilerAbiVersion());
         byte[] deferredLinkage=null;
         if (header.getCompilerAbiVersion() >= 17) {

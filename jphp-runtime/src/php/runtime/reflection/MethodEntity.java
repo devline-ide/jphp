@@ -30,6 +30,9 @@ public class MethodEntity extends AbstractFunctionEntity {
     protected MethodEntity prototype;
 
     protected Method nativeMethod;
+    /** Optional compiler-generated ordinary entry; the admitted native method identity stays unchanged. */
+    private Method scalarEntry;
+    public static final String SCALAR_ENTRY_PREFIX = "__$scalarEntry$";
 
     protected boolean isAbstract;
     protected boolean isFinal;
@@ -207,9 +210,26 @@ public class MethodEntity extends AbstractFunctionEntity {
 
     public void setNativeMethod(Method nativeMethod) {
         this.nativeMethod = nativeMethod;
+        scalarEntry = null;
 
         if (nativeMethod != null) {
             nativeMethod.setAccessible(true);
+            if (java.lang.reflect.Modifier.isStatic(nativeMethod.getModifiers())
+                    && nativeMethod.getReturnType() == Memory.class
+                    && java.util.Arrays.equals(nativeMethod.getParameterTypes(), new Class<?>[] {Environment.class, Memory[].class})) {
+                try {
+                    Method candidate = nativeMethod.getDeclaringClass().getDeclaredMethod(
+                            SCALAR_ENTRY_PREFIX + nativeMethod.getName(), Environment.class, Memory[].class);
+                    if (candidate.isSynthetic() && java.lang.reflect.Modifier.isPublic(candidate.getModifiers())
+                            && java.lang.reflect.Modifier.isStatic(candidate.getModifiers())
+                            && candidate.getReturnType() == Memory.class) {
+                        candidate.setAccessible(true);
+                        scalarEntry = candidate;
+                    }
+                } catch (NoSuchMethodException ignored) {
+                    // Older PHB files and unsupported methods retain their original entry.
+                }
+            }
         }
     }
 
@@ -225,6 +245,7 @@ public class MethodEntity extends AbstractFunctionEntity {
 
     @Override
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
+        php.runtime.PhpOwnershipExecution.requireOwnershipExecution(env,clazz.getModule());
         if (php.runtime.invoke.PhpDeprecatedInvocation.marker(this) != null) return null;
         if (php.runtime.PhpOwnershipExecution.current(env) != null) return null;
         // Relative types require the current receiver/scope; never cache a checked value across calls.
@@ -247,6 +268,7 @@ public class MethodEntity extends AbstractFunctionEntity {
     }
 
     public Memory invokeDynamic(IObject _this, Environment env, TraceInfo trace, Memory... arguments) throws Throwable {
+        php.runtime.PhpOwnershipExecution.requireOwnershipExecution(env,clazz.getModule());
         if (php.runtime.PhpOwnershipExecution.current(env) != null)
             return php.runtime.PhpOwnershipExecution.invokeMethod(this,_this,env,trace,arguments);
         if (php.runtime.PhpRuntimeOwnership.isInvoking(env,this))
@@ -271,7 +293,11 @@ public class MethodEntity extends AbstractFunctionEntity {
                         ? InvokeHelper.checkReturnType(env, trace, Memory.UNDEFINED, this) : Memory.UNDEFINED;
             }
 
-            Memory result = (Memory) nativeMethod.invoke(_this, env, arguments);
+            Method entry = scalarEntry;
+            if (!isStatic || entry == null || clazz.getModule()!=null && clazz.getModule().getOwnershipMode()==php.runtime.common.PhpRuntimeOwnershipMode.CHECKED
+                    || php.runtime.PhpOwnershipExecution.current(env) != null
+                    || php.runtime.PhpRuntimeOwnership.current(env) != null) entry = nativeMethod;
+            Memory result = (Memory) entry.invoke(_this, env, arguments);
 
             return InvokeHelper.checkReturnType(env, trace, result, this);
         } catch (InvocationTargetException e){

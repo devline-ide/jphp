@@ -1785,6 +1785,7 @@ public final class PhpRuntimeOwnership {
         }
         public void registerFunction(php.runtime.reflection.FunctionEntity entity,byte[] bytes,
                 PhpOwnershipExecution.CompleteFrameProtocol protocol) throws Throwable {
+            PhpOwnershipExecution.requireOwnershipAdmission(entity.getModule());
             open();domain.currentContext();Objects.requireNonNull(protocol);if(environment.getClass()!=Environment.class)throw new IllegalArgumentException("Custom Environment callback protocol is incomplete");
             java.lang.reflect.Method member=Objects.requireNonNull(entity.getNativeMethod());
             if(!(member.getDeclaringClass().getClassLoader() instanceof php.runtime.loader.RuntimeClassLoader)
@@ -1851,6 +1852,7 @@ public final class PhpRuntimeOwnership {
             return true;
         }
         public void registerMethod(php.runtime.reflection.MethodEntity entity,byte[] bytes,PhpOwnershipExecution.CompleteFrameProtocol protocol)throws Throwable {
+            PhpOwnershipExecution.requireOwnershipAdmission(entity.getClazz().getModule());
             open();domain.currentContext();Objects.requireNonNull(protocol);if(environment.getClass()!=Environment.class)throw new IllegalArgumentException("Custom Environment callback protocol is incomplete");var member=Objects.requireNonNull(entity.getNativeMethod());
             if(!(member.getDeclaringClass().getClassLoader() instanceof php.runtime.loader.RuntimeClassLoader)
                     ||!((php.runtime.loader.RuntimeClassLoader)member.getDeclaringClass().getClassLoader()).matchesDefinedBytecode(member.getDeclaringClass(),bytes))
@@ -2001,6 +2003,7 @@ public final class PhpRuntimeOwnership {
         }
         public void assignGlobal(String name,Memory semanticValue)throws Throwable{globalAddress(name).assign(semanticValue);}
         public void registerModule(php.runtime.reflection.ModuleEntity entity,byte[] bytes,PhpOwnershipExecution.CompleteFrameProtocol protocol)throws Throwable {
+            PhpOwnershipExecution.requireOwnershipAdmission(entity);
             open();domain.currentContext();if(environment.getClass()!=Environment.class)throw new IllegalArgumentException("Custom Environment callback protocol is incomplete");java.lang.reflect.Method member=entity.getNativeMethod();
             if(!(member.getDeclaringClass().getClassLoader() instanceof php.runtime.loader.RuntimeClassLoader)
                     ||!((php.runtime.loader.RuntimeClassLoader)member.getDeclaringClass().getClassLoader()).matchesDefinedBytecode(member.getDeclaringClass(),bytes))

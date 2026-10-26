@@ -73,6 +73,7 @@ public class FunctionEntity extends AbstractFunctionEntity {
     }
 
     public Memory invoke(Environment env, TraceInfo trace, Memory[] arguments) throws Throwable {
+        php.runtime.PhpOwnershipExecution.requireOwnershipExecution(env,module);
         if (php.runtime.PhpOwnershipExecution.current(env) != null)
             return php.runtime.PhpOwnershipExecution.invokeFunction(this,env,trace,arguments);
         if (php.runtime.PhpRuntimeOwnership.isInvoking(env,this))
@@ -92,6 +93,7 @@ public class FunctionEntity extends AbstractFunctionEntity {
 
     @Override
     public Memory getImmutableResultTyped(Environment env, TraceInfo trace) {
+        php.runtime.PhpOwnershipExecution.requireOwnershipExecution(env,module);
         if (php.runtime.invoke.PhpDeprecatedInvocation.marker(this) != null) return null;
         if (php.runtime.PhpOwnershipExecution.current(env) != null || php.runtime.PhpRuntimeOwnership.isInvoking(env,this)) return null;
         Memory result = getImmutableResultForTypeCheck(module);

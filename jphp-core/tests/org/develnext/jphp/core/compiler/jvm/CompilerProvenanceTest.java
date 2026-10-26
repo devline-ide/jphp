@@ -278,7 +278,7 @@ public class CompilerProvenanceTest extends JvmCompilerCase {
             assertNull(dumper.observed);
             ByteArrayInputStream input = new ByteArrayInputStream(good);
             assertEquals(PhpLanguageProfile.JPHP_LEGACY, ModuleDumper.readLanguageProfileHeader(input));
-            assertEquals(good.length - 16, input.available());
+            assertEquals(good.length - 24, input.available());
             Context invalid = new Context("class BadProvenance{public int $x='bad';}return 1;");
             invalid.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
             JvmCompiler compiler = new JvmCompiler(env, invalid);

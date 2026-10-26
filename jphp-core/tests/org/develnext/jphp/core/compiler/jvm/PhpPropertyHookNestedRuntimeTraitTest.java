@@ -20,6 +20,22 @@ import static org.junit.Assert.*;
 
 /** Genuine prior includes and runtime-composed nested trait donors; native output remains byte exact. */
 public class PhpPropertyHookNestedRuntimeTraitTest extends JvmCompilerCase {
+    /** Semantic positions are stable; retain the actual nodes so corruption changes the physical body. */
+    private static List<AbstractInsnNode> hookPrefix(MethodNode method) {
+        var code=new ArrayList<AbstractInsnNode>();for(AbstractInsnNode node:method.instructions)if(node.getOpcode()>=0)code.add(node);
+        if(code.size()>6 && code.get(6) instanceof MethodInsnNode enter && enter.owner.equals("php/runtime/PhpPropertyWriteContext")
+                && enter.name.equals("enter") && enter.desc.equals("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;ZI)Lphp/runtime/PhpPropertyWriteContext$Frame;")) {
+            assertTrue(code.get(5) instanceof LdcInsnNode literal && literal.cst instanceof Integer id && (id==0||id==1));
+            code.remove(5);
+        }
+        return code;
+    }
+    private static LdcInsnNode numericProfileLiteral(MethodNode method) {
+        var code=new ArrayList<AbstractInsnNode>();for(AbstractInsnNode node:method.instructions)if(node.getOpcode()>=0)code.add(node);
+        assertTrue("Current ABI emits an explicit numeric profile",code.get(5) instanceof LdcInsnNode && code.get(6) instanceof MethodInsnNode enter
+                && enter.owner.equals("php/runtime/PhpPropertyWriteContext") && enter.name.equals("enter") && enter.desc.contains(";ZI)"));
+        return (LdcInsnNode)code.get(5);
+    }
     private static final String KIT="property-hook-nested-runtime";
     private static final String[] FILES={"legacy.php","leaf.php","middle.php","consumer.php","main.php"};
     private static byte[] source(String id,String name)throws Exception {return PhpNativeTestResources.read(KIT+"/"+id+"/"+name);}
@@ -115,9 +131,8 @@ public class PhpPropertyHookNestedRuntimeTraitTest extends JvmCompilerCase {
             // JDK ClassFile removes consecutive identical line entries; they describe the same line map.
             ClassNode redundant=PhpTraitPropertyHookOrigin.readClass(actual);
             MethodNode redundantMethod=redundant.methods.stream().filter(value->value.name.equals(member)).findFirst().orElseThrow();
-            var redundantCode=new ArrayList<AbstractInsnNode>();var lines=new ArrayList<LineNumberNode>();
+            var redundantCode=hookPrefix(redundantMethod);var lines=new ArrayList<LineNumberNode>();
             for(AbstractInsnNode node:redundantMethod.instructions) {
-                if(node.getOpcode()>=0)redundantCode.add(node);
                 if(node instanceof LineNumberNode line)lines.add(line);
             }
             assertFalse("Actual hooked donor has no source line map",lines.isEmpty());
@@ -129,10 +144,10 @@ public class PhpPropertyHookNestedRuntimeTraitTest extends JvmCompilerCase {
             var redundantWriter=new ClassWriter(0);redundant.accept(redundantWriter);
             PhpTraitPropertyHookOrigin.validateRuntimeTarget(source,redundantWriter.toByteArray(),owner,member,env.getScope().getClassLoader());
             assertNull(PhpRuntimeOwnership.current(env));
-            for(String mutation:new String[]{"missing-origin","body","handler","trace-owner","trace-slot","strict","binder","receiver","debug-line","debug-transition","debug-missing","debug-zero"}) {
+            for(String mutation:new String[]{"missing-origin","body","handler","trace-owner","trace-slot","strict","binder","receiver","numeric-profile","debug-line","debug-transition","debug-missing","debug-zero"}) {
                 ClassNode forged=PhpTraitPropertyHookOrigin.readClass(actual);
                 MethodNode method=forged.methods.stream().filter(value->value.name.equals(member)).findFirst().orElseThrow();
-                var code=new ArrayList<AbstractInsnNode>();for(AbstractInsnNode node:method.instructions)if(node.getOpcode()>=0)code.add(node);
+                var code=hookPrefix(method);
                 if(mutation.equals("missing-origin"))method.attrs.removeIf(attribute->attribute.type.equals(PhpTraitPropertyHookOrigin.ATTRIBUTE));
                 else if(mutation.equals("body"))method.instructions.insertBefore(code.get(code.size()-1),new InsnNode(Opcodes.NOP));
                 else if(mutation.equals("handler")){assertFalse(method.tryCatchBlocks.isEmpty());method.tryCatchBlocks.get(0).type="java/lang/RuntimeException";}
@@ -141,6 +156,7 @@ public class PhpPropertyHookNestedRuntimeTraitTest extends JvmCompilerCase {
                 else if(mutation.equals("strict"))method.instructions.set(code.get(4),new InsnNode(Opcodes.ICONST_0));
                 else if(mutation.equals("binder"))((LdcInsnNode)code.get(23)).cst="unrelated-hook";
                 else if(mutation.equals("receiver"))((VarInsnNode)code.get(19)).var=1;
+                else if(mutation.equals("numeric-profile"))numericProfileLiteral(method).cst=99;
                 else {
                     var first=Arrays.stream(method.instructions.toArray()).filter(node->node instanceof LineNumberNode)
                             .map(node->(LineNumberNode)node).findFirst().orElseThrow();

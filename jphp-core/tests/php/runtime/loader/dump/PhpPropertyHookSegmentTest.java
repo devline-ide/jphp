@@ -15,6 +15,26 @@ import static org.junit.Assert.*;
 
 /** Real compiler-derived nested hook method bytes; malformed payloads never publish a partial property. */
 public class PhpPropertyHookSegmentTest extends JvmCompilerCase {
+    private static List<AbstractInsnNode> physicalOpcodes(MethodNode method) {
+        List<AbstractInsnNode> code=new ArrayList<>();for(AbstractInsnNode instruction:method.instructions)if(instruction.getOpcode()>=0)code.add(instruction);
+        return code;
+    }
+    /** Keep actual instruction objects while indexing the stable semantic prefix across ABI29/30. */
+    private static List<AbstractInsnNode> hookPrefix(MethodNode method) {
+        List<AbstractInsnNode> code=physicalOpcodes(method);
+        if(code.size()>6 && code.get(6) instanceof MethodInsnNode enter && enter.owner.equals("php/runtime/PhpPropertyWriteContext")
+                && enter.name.equals("enter") && enter.desc.equals("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;ZI)Lphp/runtime/PhpPropertyWriteContext$Frame;")) {
+            assertTrue(code.get(5) instanceof LdcInsnNode literal && literal.cst instanceof Integer id && (id==0||id==1));
+            code.remove(5);
+        }
+        return code;
+    }
+    private static LdcInsnNode numericProfileLiteral(MethodNode method) {
+        List<AbstractInsnNode> code=physicalOpcodes(method);
+        assertTrue("Current ABI emits an explicit numeric profile",code.get(5) instanceof LdcInsnNode && code.get(6) instanceof MethodInsnNode enter
+                && enter.owner.equals("php/runtime/PhpPropertyWriteContext") && enter.name.equals("enter") && enter.desc.contains(";ZI)"));
+        return (LdcInsnNode)code.get(5);
+    }
     private ClassEntity compile(Environment env)throws Throwable {return compile(env,false);}
     private ClassEntity compile(Environment env,boolean strict)throws Throwable {
         Context context=new Context((strict?"declare(strict_types=1);":"")+"class SegmentHook {public int $x=1 {set=>$value;get=>$this->x;}}");context.setPhpLanguageProfile(PhpLanguageProfile.PHP_8_5);
@@ -73,10 +93,18 @@ public class PhpPropertyHookSegmentTest extends JvmCompilerCase {
             var scope=newScope();scope.setDebugMode(debug);var env=new Environment(scope);
             try {ClassEntity klass=compile(env,strict);PropertyEntity property=klass.findProperty("x");byte[] original=klass.getData();
                 PhpPropertyHookDumper.validateDecodedClass(klass,List.of(property),klass.getOwnedMethods());
-                for(int variant=0;variant<26;variant++) {
+                // The historical three-argument entry remains a valid header as well.
+                ClassNode oldNode=new ClassNode();new ClassReader(original).accept(oldNode,0);
+                MethodNode oldMethod=oldNode.methods.stream().filter(m->m.name.equals(property.getPhpHooks().get().method().getInternalName())).findFirst().orElseThrow();
+                List<AbstractInsnNode> oldCode=physicalOpcodes(oldMethod);
+                if(oldCode.get(6) instanceof MethodInsnNode enter && enter.desc.contains(";ZI)")) {
+                    oldMethod.instructions.remove(oldCode.get(5));enter.desc=enter.desc.replace(";ZI)",";Z)");
+                    PhpPropertyHookDumper.validateBodyHeader(oldNode,oldMethod,physicalOpcodes(oldMethod),property,property.getPhpHooks().get(),strict);
+                }
+                for(int variant=0;variant<28;variant++) {
                     ClassNode node=new ClassNode();new ClassReader(original).accept(node,0);
                     String member=property.getPhpHooks().get().method().getInternalName();MethodNode method=node.methods.stream().filter(m->m.name.equals(member)).findFirst().orElseThrow();
-                    List<AbstractInsnNode> code=new ArrayList<>();for(AbstractInsnNode instruction:method.instructions)if(instruction.getOpcode()>=0)code.add(instruction);
+                    List<AbstractInsnNode> code=hookPrefix(method);
                     assertTrue("Real compiler has the mandatory prefix before hook binding",code.size()>=26);
                     switch(variant) {
                         case 0 -> ((VarInsnNode)code.get(0)).var=0;
@@ -105,6 +133,8 @@ public class PhpPropertyHookSegmentTest extends JvmCompilerCase {
                         case 23 -> node.fields.stream().filter(f->f.name.equals("$TRC")).findFirst().orElseThrow().access=Opcodes.ACC_PRIVATE|Opcodes.ACC_STATIC;
                         case 24 -> {MethodNode clinit=node.methods.stream().filter(m->m.name.equals("<clinit>")).findFirst().orElseThrow();AbstractInsnNode first=clinit.instructions.getFirst();while(first.getOpcode()<0)first=first.getNext();clinit.instructions.set(first,new InsnNode(Opcodes.ICONST_0));}
                         case 25 -> ((LdcInsnNode)code.get(2)).cst=-1;
+                        case 26 -> numericProfileLiteral(method).cst=99;
+                        case 27 -> numericProfileLiteral(method).cst="fast";
                         default -> throw new AssertionError("Uncovered prefix mutation");
                     }
                     var writer=new ClassWriter(0);node.accept(writer);klass.setData(writer.toByteArray());

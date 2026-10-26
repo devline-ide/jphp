@@ -8,6 +8,7 @@ import org.objectweb.asm.tree.*;
 import php.runtime.loader.dump.io.DumpException;
 import php.runtime.reflection.*;
 import php.runtime.reflection.support.PhpPropertyHooks;
+import php.runtime.common.PhpRuntimeOwnershipMode;
 
 /** Cold declaration/physical hook binding checks. No autoload, class definition or ownership certification. */
 final class PhpPropertyHookDumper {
@@ -116,8 +117,11 @@ final class PhpPropertyHookDumper {
             throw new DumpException("Generator hook lacks its exact protected resumed member");
         MethodNode target=matches.get(0);List<AbstractInsnNode> code=new ArrayList<>();
         for(AbstractInsnNode n:target.instructions)if(n.getOpcode()>=0)code.add(n);
+        code=propertyContextHeaderView(code);
         boolean strict=generator.getModule().isStrictTypes();
-        if(code.size()<29 || !load(code.get(0),1)
+        boolean owned=generator.getModule().getOwnershipMode().supportsAdmission();
+        int body=owned?19:7;
+        if(code.size()<body+10 || !load(code.get(0),1)
                 || !(code.get(1) instanceof FieldInsnNode trace) || trace.getOpcode()!=Opcodes.GETSTATIC
                 || !trace.owner.equals(physical.name) || !trace.name.equals("$TRC") || !trace.desc.equals("[Lphp/runtime/env/TraceInfo;")
                 || !(code.get(2) instanceof LdcInsnNode site) || !(site.cst instanceof Integer index)
@@ -126,34 +130,60 @@ final class PhpPropertyHookDumper {
                 || !invoke(code.get(5),"php/runtime/PhpPropertyWriteContext","enter",WRITE_ENTER))
             throw new DumpException("Generator hook has an invalid mandatory write prologue");
         int write=store(code.get(6),target.maxLocals);
-        int entry=ownershipEntry(code,7,physical,target,"php/runtime/PhpOwnershipExecution","php/runtime/PhpOwnershipExecution$Entry");
-        int runtime=ownershipEntry(code,13,physical,target,"php/runtime/PhpRuntimeOwnership","php/runtime/PhpRuntimeOwnership$Frame");
-        if(!load(code.get(19),0) || !load(code.get(20),1) || !constant(code.get(21),selected.declaration().getName())
-                || !integer(code.get(22),1) || !constant(code.get(23),"_run")
-                || !invoke(code.get(24),"php/runtime/PhpPropertyHookBodyAccess","bindGeneratedGenerator",
+        int entry=owned?ownershipEntry(code,7,physical,target,"php/runtime/PhpOwnershipExecution","php/runtime/PhpOwnershipExecution$Entry"):-1;
+        int runtime=owned?ownershipEntry(code,13,physical,target,"php/runtime/PhpRuntimeOwnership","php/runtime/PhpRuntimeOwnership$Frame"):-2;
+        if(!load(code.get(body+0),0) || !load(code.get(body+1),1) || !constant(code.get(body+2),selected.declaration().getName())
+                || !integer(code.get(body+3),1) || !constant(code.get(body+4),"_run")
+                || !invoke(code.get(body+5),"php/runtime/PhpPropertyHookBodyAccess","bindGeneratedGenerator",
                     "(Lphp/runtime/lang/Generator;Lphp/runtime/env/Environment;Ljava/lang/String;ILjava/lang/String;)Lphp/runtime/reflection/support/PhpPropertyHooks$Hook;"))
             throw new DumpException("Generator hook lacks its actual resumed binding header");
-        int binding=store(code.get(25),target.maxLocals);
-        if(!load(code.get(26),0) || !(code.get(27) instanceof MethodInsnNode receiver)
+        int binding=store(code.get(body+6),target.maxLocals);
+        if(!load(code.get(body+7),0) || !(code.get(body+8) instanceof MethodInsnNode receiver)
                 || receiver.getOpcode()!=Opcodes.INVOKEVIRTUAL || receiver.itf || !receiver.owner.equals("php/runtime/lang/Generator")
                 || !receiver.name.equals("__getHookReceiver") || !receiver.desc.equals("()Lphp/runtime/lang/IObject;"))
             throw new DumpException("Generator hook lost its retained receiver operand");
-        int original=store(code.get(28),target.maxLocals);
-        int[] locals={write,entry,runtime,binding,original};
+        int original=store(code.get(body+9),target.maxLocals);
+        int[] locals=owned?new int[]{write,entry,runtime,binding,original}:new int[]{write,binding,original};
         for(int i=0;i<locals.length;i++)for(int j=i+1;j<locals.length;j++)if(locals[i]==locals[j])
             throw new DumpException("Generator hook aliases mandatory protocol locals");
     }
     private static final String WRITE_ENTER="(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)Lphp/runtime/PhpPropertyWriteContext$Frame;";
+    private static final String PROFILE_WRITE_ENTER="(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;ZI)Lphp/runtime/PhpPropertyWriteContext$Frame;";
+
+    /** ABI30 adds one validated profile literal. This view never edits physical instructions or their ordinals. */
+    static List<AbstractInsnNode> propertyContextHeaderView(List<AbstractInsnNode> code) {
+        if(code.size()>6 && code.get(5) instanceof LdcInsnNode literal && literal.cst instanceof Integer profile
+                && (profile==0 || profile==1) && invoke(code.get(6),"php/runtime/PhpPropertyWriteContext","enter",PROFILE_WRITE_ENTER)) {
+            List<AbstractInsnNode> view=new ArrayList<>(code);
+            view.remove(5);
+            view.set(5,new MethodInsnNode(Opcodes.INVOKESTATIC,"php/runtime/PhpPropertyWriteContext","enter",WRITE_ENTER,false));
+            return view;
+        }
+        return code;
+    }
     private static final String ENTRY_ARGS="(Lphp/runtime/env/Environment;Ljava/lang/Class;Ljava/lang/String;Ljava/lang/String;)";
     /** Exactly 7 write-context + 6 scoped-ownership + 6 runtime-ownership operations, then 7 binding operations. */
     static void validateBodyHeader(ClassNode physical,MethodNode target,List<AbstractInsnNode> code,
             PropertyEntity property,PhpPropertyHooks.Hook hook,boolean strict)throws IOException {
-        validateBodyHeader(physical,target,code,property,hook,strict,physical.name,code.size()>2?integerValue(code.get(2)):-1,traceCapacity(physical));
+        validateBodyHeader(physical,target,code,property,hook,strict,property.getClazz().getModule().getOwnershipMode());
+    }
+    /** Cold decoded members are not bound to their ClassEntity yet; the owning module supplies the contract. */
+    static void validateBodyHeader(ClassNode physical,MethodNode target,List<AbstractInsnNode> code,
+            PropertyEntity property,PhpPropertyHooks.Hook hook,boolean strict,PhpRuntimeOwnershipMode ownershipMode)throws IOException {
+        validateBodyHeader(physical,target,code,property,hook,strict,physical.name,code.size()>2?integerValue(code.get(2)):-1,traceCapacity(physical),ownershipMode);
     }
     /** Called only after exact source-pair admission; no marker alone can supply a foreign trace witness. */
     static void validateBodyHeader(ClassNode physical,MethodNode target,List<AbstractInsnNode> code,
             PropertyEntity property,PhpPropertyHooks.Hook hook,boolean strict,String traceOwner,int traceIndex,int traceCapacity)throws IOException {
-        if(code.size()<26 || !load(code.get(0),1)
+        validateBodyHeader(physical,target,code,property,hook,strict,traceOwner,traceIndex,traceCapacity,property.getClazz().getModule().getOwnershipMode());
+    }
+    static void validateBodyHeader(ClassNode physical,MethodNode target,List<AbstractInsnNode> code,
+            PropertyEntity property,PhpPropertyHooks.Hook hook,boolean strict,String traceOwner,int traceIndex,int traceCapacity,
+            PhpRuntimeOwnershipMode ownershipMode)throws IOException {
+        code=propertyContextHeaderView(code);
+        boolean owned=ownershipMode.supportsAdmission();
+        int body=owned?19:7;
+        if(code.size()<body+7 || !load(code.get(0),1)
                 || !(code.get(1) instanceof FieldInsnNode trace) || trace.getOpcode()!=Opcodes.GETSTATIC
                 || !trace.owner.equals(traceOwner) || !trace.name.equals("$TRC") || !trace.desc.equals("[Lphp/runtime/env/TraceInfo;")
                 || !(code.get(2) instanceof LdcInsnNode site) || !(site.cst instanceof Integer index)
@@ -162,15 +192,15 @@ final class PhpPropertyHookDumper {
                 || !invoke(code.get(5),"php/runtime/PhpPropertyWriteContext","enter",WRITE_ENTER))
             throw new DumpException("Physical hook has an invalid mandatory property-write prologue");
         int write=store(code.get(6),target.maxLocals);
-        int entry=ownershipEntry(code,7,physical,target,"php/runtime/PhpOwnershipExecution","php/runtime/PhpOwnershipExecution$Entry");
-        int runtime=ownershipEntry(code,13,physical,target,"php/runtime/PhpRuntimeOwnership","php/runtime/PhpRuntimeOwnership$Frame");
+        int entry=owned?ownershipEntry(code,7,physical,target,"php/runtime/PhpOwnershipExecution","php/runtime/PhpOwnershipExecution$Entry"):-1;
+        int runtime=owned?ownershipEntry(code,13,physical,target,"php/runtime/PhpRuntimeOwnership","php/runtime/PhpRuntimeOwnership$Frame"):-2;
         int kind=hook.kind()==PhpPropertyHooks.Kind.GET?1:2;
-        if(!load(code.get(19),0) || !load(code.get(20),1) || !constant(code.get(21),property.getName())
-                || !integer(code.get(22),kind) || !constant(code.get(23),target.name)
-                || !invoke(code.get(24),"php/runtime/PhpPropertyHookBodyAccess","bindGeneratedMethod",BIND))
+        if(!load(code.get(body+0),0) || !load(code.get(body+1),1) || !constant(code.get(body+2),property.getName())
+                || !integer(code.get(body+3),kind) || !constant(code.get(body+4),target.name)
+                || !invoke(code.get(body+5),"php/runtime/PhpPropertyHookBodyAccess","bindGeneratedMethod",BIND))
             throw new DumpException("Physical hook lacks its exact immutable body binding header");
-        int binding=store(code.get(25),target.maxLocals);
-        if(write==entry || write==runtime || write==binding || entry==runtime || entry==binding || runtime==binding)
+        int binding=store(code.get(body+6),target.maxLocals);
+        if(write==binding || owned && (write==entry || write==runtime || entry==runtime || entry==binding || runtime==binding))
             throw new DumpException("Physical hook aliases mandatory protocol locals");
     }
     private static int ownershipEntry(List<AbstractInsnNode> code,int offset,ClassNode physical,MethodNode target,String owner,String result)throws IOException {

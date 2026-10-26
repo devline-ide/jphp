@@ -57,6 +57,12 @@ final public class CompilerUtils {
     }
 
     public static Memory calcUnary(Environment env, TraceInfo trace, Memory o1, OperatorExprToken operator, PhpLanguageProfile profile){
+        return calcUnary(env, trace, o1, operator, profile,
+                env == null ? php.runtime.common.PhpOptimizationProfile.COMPATIBLE : env.getScope().getPhpOptimizationProfile());
+    }
+
+    public static Memory calcUnary(Environment env, TraceInfo trace, Memory o1, OperatorExprToken operator, PhpLanguageProfile profile,
+                                    php.runtime.common.PhpOptimizationProfile optimizationProfile){
         if (operator.isBinary())
             throw new IllegalArgumentException("Operator is not unary");
 
@@ -70,7 +76,7 @@ final public class CompilerUtils {
             if (operator instanceof IncExprToken || operator instanceof DecExprToken) return null;
             if (operator instanceof UnaryNumericExprToken) {
                 if (!php.runtime.PhpArithmetic.canFoldUnary(o1)) return null;
-                return php.runtime.PhpArithmetic.unary(o1, ((UnaryNumericExprToken) operator).isNegative(), env, trace);
+                return php.runtime.PhpArithmetic.unary(o1, ((UnaryNumericExprToken) operator).isNegative(), env, trace, optimizationProfile.getId());
             }
             if (operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.IntCastExprToken) {
                 if (php.runtime.PhpNumericConversions.warnsInteger(o1)) return null;
@@ -89,6 +95,12 @@ final public class CompilerUtils {
 
     public static Memory calcBinary(Environment env, TraceInfo trace, Memory o1, Memory o2, OperatorExprToken operator,
                                     boolean right, PhpLanguageProfile profile){
+        return calcBinary(env, trace, o1, o2, operator, right, profile,
+                env == null ? php.runtime.common.PhpOptimizationProfile.COMPATIBLE : env.getScope().getPhpOptimizationProfile());
+    }
+
+    public static Memory calcBinary(Environment env, TraceInfo trace, Memory o1, Memory o2, OperatorExprToken operator,
+                                    boolean right, PhpLanguageProfile profile, php.runtime.common.PhpOptimizationProfile optimizationProfile){
         if (!operator.isBinary())
             throw new IllegalArgumentException("Operator is not binary");
 
@@ -117,7 +129,7 @@ final public class CompilerUtils {
         if (profile == PhpLanguageProfile.PHP_8_5 && isPhpArithmetic(operator)) {
             String code = arithmeticCode(operator);
             return php.runtime.PhpArithmetic.canFold(code, o1, o2)
-                    ? php.runtime.PhpArithmetic.binary(o1, o2, code, env, trace) : null;
+                    ? php.runtime.PhpArithmetic.binary(o1, o2, code, env, trace, optimizationProfile.getId()) : null;
         }
         if (profile == PhpLanguageProfile.PHP_8_5 && isPhpComparison(operator)) {
             switch (operator.getCode()) {

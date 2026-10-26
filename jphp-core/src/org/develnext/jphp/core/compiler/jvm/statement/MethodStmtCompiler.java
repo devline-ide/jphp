@@ -695,8 +695,9 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
         prefix.add(new FieldInsnNode(Opcodes.GETSTATIC,clazz.node.name,"$TRC",Type.getDescriptor(TraceInfo[].class)));
         prefix.add(new LdcInsnNode(traceIndex)); prefix.add(new InsnNode(Opcodes.AALOAD));
         prefix.add(new InsnNode(compiler.getModule().isStrictTypes() ? Opcodes.ICONST_1 : Opcodes.ICONST_0));
+        prefix.add(new LdcInsnNode(compiler.getModule().getOptimizationProfile().getId()));
         prefix.add(new MethodInsnNode(Opcodes.INVOKESTATIC, context, "enter",
-                "(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)L"+frame+";", false));
+                "(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;ZI)L"+frame+";", false));
         prefix.add(new VarInsnNode(Opcodes.ASTORE, local.index)); prefix.add(start);
         for (AbstractInsnNode instruction : node.instructions.toArray()) if (instruction.getOpcode() == Opcodes.ARETURN) {
             InsnList cleanup=new InsnList(); cleanup.add(new VarInsnNode(Opcodes.ALOAD, local.index));
@@ -1013,6 +1014,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
             ownership.finish();
             writePropertyWriteContext();
             writeFooter();
+            ScalarMethodCompiler.emit(this);
         }
         return entity;
     }

@@ -60,6 +60,21 @@ public final class PhpOwnershipExecution {
     public static Session current(Environment env){Context c=env.getOwnershipExecutionContext();return c==null?null:c.session;}
     public static Entry currentEntry(Environment env){Context c=env.getOwnershipExecutionContext();return c==null || c.ticket==null?null:c.ticket.entry;}
     public static CallRoots currentCallRoots(Environment env){Context c=env.getOwnershipExecutionContext();return c==null || c.ticket==null?null:c.ticket.roots;}
+    public static void requireOwnershipAdmission(ModuleEntity module) {
+        if (module != null && !module.getOwnershipMode().supportsAdmission())
+            throw new IllegalArgumentException("OFF module cannot enter ownership execution");
+    }
+    public static void requireOwnershipExecution(Environment env,ModuleEntity module) {
+        if (module != null && !module.getOwnershipMode().supportsAdmission()
+                && (current(env) != null || env.getRuntimeOwnership() != null)) requireOwnershipAdmission(module);
+    }
+    private static ModuleEntity ownershipModule(Object entity) {
+        if (entity instanceof ModuleEntity module) return module;
+        if (entity instanceof FunctionEntity function) return function.getModule();
+        if (entity instanceof MethodEntity method) return method.getClazz().getModule();
+        if (entity instanceof php.runtime.loader.dump.PhpAttributeDumper.ArgumentSource source) return source.module();
+        return null;
+    }
     public static Entry enterGenerated(Environment env,Class<?> owner,String name,String descriptor){
         Context c=env.getOwnershipExecutionContext();if(c==null)return null;
         if(c.ticket==null)throw new IllegalStateException("Generated entry needs an exact invocation ticket");return c.ticket.enter(owner,name,descriptor);
@@ -79,12 +94,7 @@ public final class PhpOwnershipExecution {
             if(member.getDeclaringClass()!=owner || !member.getName().equals(javaMember))throw new IllegalArgumentException("Return verifier differs from its actual invocation target");
             return entry.verifyReturnBeforeFinally(raw,mode,evalId,trace);
         }
-        if(!(owner.getClassLoader() instanceof RuntimeClassLoader))throw new IllegalArgumentException("Return verifier owner is not a generated class");
-        var loader=(RuntimeClassLoader)owner.getClassLoader();var function=loader.getFunction(owner.getName());
-        if(function!=null && function.getNativeMethod().getDeclaringClass()==owner && function.getNativeMethod().getName().equals(javaMember))return InvokeHelper.checkReturnType(env,trace,raw,function);
-        var clazz=loader.getClass(owner.getName());
-        if(clazz!=null)for(var method:clazz.getMethods().values()) {var member=method.getNativeMethod();if(member!=null && member.getDeclaringClass()==owner && member.getName().equals(javaMember))return InvokeHelper.checkReturnType(env,trace,raw,method);}
-        throw new IllegalArgumentException("Return verifier has no exact reflected PHP member");
+        return InvokeHelper.verifyReturnBeforeFinally(env,owner,javaMember,trace,raw);
     }
     public static final class Context {
         private final Session session;private final Ticket ticket;private final Thread thread=Thread.currentThread();
@@ -119,6 +129,7 @@ public final class PhpOwnershipExecution {
         public PhpOwnershipValues.Binding cell(ReferenceMemory cell){open();return PhpOwnershipValues.bindCell(domain(),cell,arrays().certificate(cell).node());}
         private PhpOwnershipValues.Binding candidate(Memory raw,Mode mode){if(mode==Mode.BORROW_ADDRESS)throw new IllegalArgumentException("An address is not a VALUE/CELL");return mode==Mode.CELL?cell((ReferenceMemory)raw):value(raw);}
         public Target registerGenerated(Object entity,Method member,byte[] bytes,FramePlan plan,CompleteFrameProtocol protocol)throws Throwable{
+            requireOwnershipAdmission(ownershipModule(entity));
             open();Objects.requireNonNull(entity);Objects.requireNonNull(member);Objects.requireNonNull(bytes);Objects.requireNonNull(plan);Objects.requireNonNull(protocol);
             FramePlan transported=readFramePlan(bytes,member.getName(),descriptor(member));
             if(transported==null || !samePlan(plan,transported))throw new IllegalArgumentException("Method lacks its exact transported execution plan");
@@ -375,7 +386,8 @@ public final class PhpOwnershipExecution {
             var execution=session.participant.enter();Environment.OwnershipExecutionBinding binding=null;Entry created=null;
             try{binding=session.env.bindOwnershipExecutionContext(new Context(session,this));created=new Entry(this);entry=created;scope=new Scope(binding,execution);
                 var inherited=PhpPropertyWriteContext.current(session.env);ModuleEntity module=target==null?null:target.module();
-                propertyContext=PhpPropertyWriteContext.enter(session.env,trace,module==null?inherited!=null && inherited.strict:module.isStrictTypes());
+                propertyContext=PhpPropertyWriteContext.enter(session.env,trace,module==null?inherited!=null && inherited.strict:module.isStrictTypes(),
+                        module==null?(inherited==null?php.runtime.common.PhpOptimizationProfile.COMPATIBLE:inherited.optimizationProfile).getId():module.getOptimizationProfile().getId());
             }catch(Throwable failure){if(created!=null)try{created.frame.unwind(failure);}catch(Throwable cleanup){failure=cleanup;}if(binding!=null)binding.close();execution.close();throw failure;}
         }
         private Entry enter(Class<?> owner,String name,String descriptor){session.open();if(closed || target==null || target.member.getDeclaringClass()!=owner || !target.member.getName().equals(name) || !PhpOwnershipExecution.descriptor(target.member).equals(descriptor) || entered)throw new IllegalArgumentException("Generated entry differs from its one-shot ticket");entered=true;bindCallFrame();return entry;}

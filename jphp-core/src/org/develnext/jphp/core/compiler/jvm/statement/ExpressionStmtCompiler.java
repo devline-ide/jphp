@@ -4060,7 +4060,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 && (operator instanceof IncExprToken || operator instanceof DecExprToken);
         if (mem != null && !modernIncrement) {
             Memory result = CompilerUtils.calcUnary(getCompiler().getEnvironment(), operator.toTraceInfo(getCompiler().getContext()), mem, operator,
-                    getCompiler().getModule().getPhpLanguageProfile());
+                    getCompiler().getModule().getPhpLanguageProfile(), getCompiler().getModule().getOptimizationProfile());
 
             if (operator instanceof ValueIfElseToken) {
                 ValueIfElseToken valueIfElseToken = (ValueIfElseToken) operator;
@@ -4340,8 +4340,9 @@ public class ExpressionStmtCompiler extends StmtCompiler {
                 writePushConstBoolean(((UnaryNumericExprToken) operator).isNegative());
                 writePushEnv();
                 writePushTraceInfo(operator);
+                writePushConstInt(getCompiler().getModule().getOptimizationProfile().getId());
                 writeSysStaticCall(php.runtime.PhpArithmetic.class, "unary", Memory.class,
-                        Memory.class, boolean.class, Environment.class, TraceInfo.class);
+                        Memory.class, boolean.class, Environment.class, TraceInfo.class, int.class);
             } else if (getCompiler().getModule().getPhpLanguageProfile() == php.runtime.common.PhpLanguageProfile.PHP_8_5
                     && (operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.IntCastExprToken
                     || operator instanceof org.develnext.jphp.core.tokenizer.token.expr.operator.cast.DoubleCastExprToken)) {
@@ -4628,7 +4629,7 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             if (o1.getMemory() != null && o2.getMemory() != null) {
                 Memory result = CompilerUtils.calcBinary(
                         getCompiler().getEnvironment(), operator.toTraceInfo(getCompiler().getContext()), o2.getMemory(), o1.getMemory(), operator, false,
-                        getCompiler().getModule().getPhpLanguageProfile()
+                        getCompiler().getModule().getPhpLanguageProfile(), getCompiler().getModule().getOptimizationProfile()
                 );
                 if (result != null) { stackPush(result); return result; }
                 deferredArithmetic = true;
@@ -4813,10 +4814,11 @@ public class ExpressionStmtCompiler extends StmtCompiler {
             writePushConstString(CompilerUtils.arithmeticCode(operator));
             writePushEnv();
             writePushTraceInfo(operator);
+            writePushConstInt(getCompiler().getModule().getOptimizationProfile().getId());
             boolean assign = operator instanceof AssignOperatorExprToken;
             writeSysStaticCall(php.runtime.PhpArithmetic.class,
                     assign && (variable == null || variable.isReference()) ? "assign" : "binary", Memory.class,
-                    Memory.class, Memory.class, String.class, Environment.class, TraceInfo.class);
+                    Memory.class, Memory.class, String.class, Environment.class, TraceInfo.class, int.class);
             setStackPeekAsImmutable();
             if (assign) {
                 if (variable == null || variable.isReference()) {

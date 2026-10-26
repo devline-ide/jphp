@@ -417,12 +417,12 @@ public final class OwnershipFrameCompiler {
     OwnershipFrameCompiler(MethodStmtCompiler method) { this.method = method; }
 
     public boolean runtimeEnabled() {
-        if(runtimeActiveDepth!=0)return false;
+        if(runtimeActiveDepth!=0 || !method.getCompiler().getModule().getOwnershipMode().supportsAdmission())return false;
         return !"<init>".equals(method.node.name)&&!"<clinit>".equals(method.node.name)
                 &&(method.statement!=null||method.isInitializer())&&method.getCompiler().getModule().getPhpLanguageProfile()==PhpLanguageProfile.PHP_8_5;
     }
     public boolean enabled() {
-        return !passiveEmission && !"<init>".equals(method.node.name) && !"<clinit>".equals(method.node.name)
+        return method.getCompiler().getModule().getOwnershipMode().supportsAdmission() && !passiveEmission && !"<init>".equals(method.node.name) && !"<clinit>".equals(method.node.name)
                 && (method.statement != null || method.isInitializer()) && method.getCompiler().getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5;
     }
 
@@ -823,8 +823,13 @@ public final class OwnershipFrameCompiler {
         code.add(new VarInsnNode(ALOAD, method.getLocalVariable("~env").index));
         code.add(new LdcInsnNode(Type.getObjectType(method.clazz.node.name))); code.add(new LdcInsnNode(method.node.name));
         expr.writePushTraceInfo(token); expr.stackPop();
-        code.add(new VarInsnNode(ALOAD, candidate.index)); code.add(new InsnNode(method.getEntity().isReturnReference() ? ICONST_1 : ICONST_0)); code.add(new LdcInsnNode(evalId));
-        code.add(new MethodInsnNode(INVOKESTATIC, EXECUTION, "verifyReturnBeforeFinally", "(Lphp/runtime/env/Environment;Ljava/lang/Class;Ljava/lang/String;Lphp/runtime/env/TraceInfo;" + MEMORY + "II)" + MEMORY, false));
+        code.add(new VarInsnNode(ALOAD, candidate.index));
+        if (enabled()) {
+            code.add(new InsnNode(method.getEntity().isReturnReference() ? ICONST_1 : ICONST_0)); code.add(new LdcInsnNode(evalId));
+            code.add(new MethodInsnNode(INVOKESTATIC, EXECUTION, "verifyReturnBeforeFinally", "(Lphp/runtime/env/Environment;Ljava/lang/Class;Ljava/lang/String;Lphp/runtime/env/TraceInfo;" + MEMORY + "II)" + MEMORY, false));
+        } else {
+            code.add(new MethodInsnNode(INVOKESTATIC, "php/runtime/invoke/InvokeHelper", "verifyReturnBeforeFinally", "(Lphp/runtime/env/Environment;Ljava/lang/Class;Ljava/lang/String;Lphp/runtime/env/TraceInfo;" + MEMORY + ")" + MEMORY, false));
+        }
     }
 
     public void runtimePendingReturn(InsnList code,boolean cell,int evalId) {
@@ -1097,7 +1102,16 @@ public final class OwnershipFrameCompiler {
         if(runtimeConversions.values().stream().anyMatch(nodes->nodes.contains(call)))return true;
         if(runtimeBorrows.values().stream().anyMatch(nodes->nodes.contains(call)))return true;
         if(call.owner.equals(php.runtime.PhpPrimitiveCellPlan.RUNTIME)) return php.runtime.PhpPrimitiveCellPlan.pureCall(call.owner,call.name,call.desc);
-        if(call.owner.equals("php/runtime/PhpPropertyWriteContext"))return call.getOpcode()==INVOKESTATIC&&(call.name.equals("enter")&&call.desc.equals("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)Lphp/runtime/PhpPropertyWriteContext$Frame;")||call.name.equals("leave")&&call.desc.equals("(Lphp/runtime/PhpPropertyWriteContext$Frame;)V"));
+        if(call.owner.equals("php/runtime/PhpPropertyWriteContext")) {
+            if(call.getOpcode()!=INVOKESTATIC)return false;
+            if(call.name.equals("leave"))return call.desc.equals("(Lphp/runtime/PhpPropertyWriteContext$Frame;)V");
+            if(!call.name.equals("enter"))return false;
+            if(call.desc.equals("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)Lphp/runtime/PhpPropertyWriteContext$Frame;"))return true;
+            if(!call.desc.equals("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;ZI)Lphp/runtime/PhpPropertyWriteContext$Frame;"))return false;
+            AbstractInsnNode profile=call.getPrevious();while(profile!=null && profile.getOpcode()<0)profile=profile.getPrevious();
+            return profile instanceof LdcInsnNode literal && literal.cst instanceof Integer id
+                    && id==method.getCompiler().getModule().getOptimizationProfile().getId();
+        }
         if(runtimeStaticAddresses.contains(call)&&method.clazz.isClosure()&&call.owner.equals(method.clazz.node.name))return call.name.equals("getStatic")&&call.desc.equals("(Ljava/lang/String;)"+MEMORY)||call.name.equals("getOrCreateStatic")&&call.desc.equals("(Ljava/lang/String;"+MEMORY+")"+MEMORY);
         if(call.owner.equals(RUNTIME)&&call.name.equals("nativeEnterBody"))return call.desc.equals("(Lphp/runtime/PhpRuntimeOwnership$NativePacket;)Lphp/runtime/PhpRuntimeOwnership$NativeBody;");
         if(call.owner.equals(RUNTIME)&&call.name.equals("nativeLeaveBody"))return call.desc.equals("(Lphp/runtime/PhpRuntimeOwnership$NativeBody;)V");

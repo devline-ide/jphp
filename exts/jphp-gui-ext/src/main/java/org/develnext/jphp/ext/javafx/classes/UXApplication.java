@@ -326,8 +326,12 @@ public class UXApplication extends BaseWrapper<Application> {
 
         @Override
         public void stop() throws Exception {
-            super.stop();
-            shutdown = true;
+            try {
+                JavaFXRuntime.applicationStopping();
+            } finally {
+                shutdown = true;
+                super.stop();
+            }
         }
     }
 }

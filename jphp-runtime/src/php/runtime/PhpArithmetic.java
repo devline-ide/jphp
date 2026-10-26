@@ -2,6 +2,7 @@ package php.runtime;
 
 import php.runtime.env.Environment;
 import php.runtime.env.TraceInfo;
+import php.runtime.common.PhpOptimizationProfile;
 import php.runtime.exceptions.support.ErrorType;
 import php.runtime.invoke.ObjectInvokeHelper;
 import php.runtime.invoke.cache.PropertyCallCache;
@@ -42,6 +43,12 @@ public final class PhpArithmetic {
     }
 
     public static Memory binary(Memory left, Memory right, String operator, Environment env, TraceInfo trace) {
+        return binary(left, right, operator, env, trace, optimizationProfile(env, trace).getId());
+    }
+
+    /** Explicit profile for generated operations and constant folding, independent of caller state. */
+    public static Memory binary(Memory left, Memory right, String operator, Environment env, TraceInfo trace, int optimizationProfileId) {
+        boolean wrap = PhpOptimizationProfile.fromId(optimizationProfileId) == PhpOptimizationProfile.FAST_INT64_WRAP;
         left = left.toValue(); right = right.toValue();
         if (operator.equals("plus") && left.isArray() && right.isArray()) return left.plus(right);
         Memory a = number(left, operator, left, right, env, trace);
@@ -55,9 +62,9 @@ public final class PhpArithmetic {
         Memory b = number(right, operator, left, right, env, trace);
         boolean integers = a.type == Memory.Type.INT && b.type == Memory.Type.INT;
         switch (operator) {
-            case "plus": return integers ? OperatorUtils.plus(a.toLong(), b.toLong()) : DoubleMemory.valueOf(a.toDouble() + b.toDouble());
-            case "minus": return integers ? OperatorUtils.minus(a.toLong(), b.toLong()) : DoubleMemory.valueOf(a.toDouble() - b.toDouble());
-            case "mul": return integers ? OperatorUtils.mul(a.toLong(), b.toLong()) : DoubleMemory.valueOf(a.toDouble() * b.toDouble());
+            case "plus": return integers ? wrap ? LongMemory.valueOf(a.toLong() + b.toLong()) : OperatorUtils.plus(a.toLong(), b.toLong()) : DoubleMemory.valueOf(a.toDouble() + b.toDouble());
+            case "minus": return integers ? wrap ? LongMemory.valueOf(a.toLong() - b.toLong()) : OperatorUtils.minus(a.toLong(), b.toLong()) : DoubleMemory.valueOf(a.toDouble() - b.toDouble());
+            case "mul": return integers ? wrap ? LongMemory.valueOf(a.toLong() * b.toLong()) : OperatorUtils.mul(a.toLong(), b.toLong()) : DoubleMemory.valueOf(a.toDouble() * b.toDouble());
             case "div":
                 if (b.toDouble() == 0) env.exception(trace, BaseDivisionByZeroError.class, "Division by zero");
                 if (integers) {
@@ -76,16 +83,31 @@ public final class PhpArithmetic {
     }
 
     public static Memory unary(Memory value, boolean negative, Environment env, TraceInfo trace) {
+        return unary(value, negative, env, trace, optimizationProfile(env, trace).getId());
+    }
+
+    public static Memory unary(Memory value, boolean negative, Environment env, TraceInfo trace, int optimizationProfileId) {
+        boolean wrap = PhpOptimizationProfile.fromId(optimizationProfileId) == PhpOptimizationProfile.FAST_INT64_WRAP;
         Memory number = number(value.toValue(), negative ? "negative" : "positive", value, null, env, trace);
+        if (negative && wrap && number.type == Memory.Type.INT) return LongMemory.valueOf(-number.toLong());
         return negative ? number.negative() : number;
+    }
+
+    private static PhpOptimizationProfile optimizationProfile(Environment env, TraceInfo trace) {
+        PhpPropertyWriteContext.Frame frame = PhpPropertyWriteContext.current(env);
+        if (frame != null) return frame.optimizationProfile;
+        return env == null ? PhpOptimizationProfile.COMPATIBLE : env.getModuleManager().getOptimizationProfile(trace);
     }
 
     /** PHP 8.5 value semantics; callers own the writable target and commit boundary. */
     public static Memory increment(Memory value, boolean decrement, Environment env, TraceInfo trace) {
         value = value.toValue();
         if (value.isUndefined()) value = Memory.NULL;
-        if (value.type == Memory.Type.INT) return decrement
-                ? OperatorUtils.minus(value.toLong(), 1) : OperatorUtils.plus(value.toLong(), 1);
+        if (value.type == Memory.Type.INT) {
+            if (optimizationProfile(env, trace) == PhpOptimizationProfile.FAST_INT64_WRAP)
+                return LongMemory.valueOf(decrement ? value.toLong() - 1 : value.toLong() + 1);
+            return decrement ? OperatorUtils.minus(value.toLong(), 1) : OperatorUtils.plus(value.toLong(), 1);
+        }
         if (value.type == Memory.Type.DOUBLE) return DoubleMemory.valueOf(value.toDouble() + (decrement ? -1 : 1));
         if (value.isNull() && !decrement) return Memory.CONST_INT_1;
         if (value.type == Memory.Type.BOOL || value.isNull()) {
@@ -153,7 +175,8 @@ public final class PhpArithmetic {
         Memory before = cell.toValue().toImmutable();
         if (before instanceof php.runtime.memory.CharMemory)
             env.exception(trace, BaseError.class, "Cannot increment/decrement string offsets");
-        target.checkIncrementOverflow(before, decrement, env, trace);
+        if (optimizationProfile(env, trace) != PhpOptimizationProfile.FAST_INT64_WRAP)
+            target.checkIncrementOverflow(before, decrement, env, trace);
         boolean diagnostic = before.type == Memory.Type.BOOL || decrement && before.isNull()
                 || before.isString() && !PhpNumericString.isNumeric(before instanceof php.runtime.memory.BinaryMemory
                         ? before.toBinaryString() : before.toString());
@@ -194,6 +217,11 @@ public final class PhpArithmetic {
 
     public static Memory assign(Memory target, Memory right, String operator, Environment env, TraceInfo trace) {
         Memory result = binary(target, right, operator, env, trace);
+        return target.assign(result).toImmutable();
+    }
+
+    public static Memory assign(Memory target, Memory right, String operator, Environment env, TraceInfo trace, int optimizationProfileId) {
+        Memory result = binary(target, right, operator, env, trace, optimizationProfileId);
         return target.assign(result).toImmutable();
     }
 
@@ -256,7 +284,8 @@ public final class PhpArithmetic {
     private static Memory incrementRuntimeReference(PhpRuntimeOwnership.Frame frame,php.runtime.memory.ReferenceMemory target,
             boolean decrement,boolean post,Environment env,TraceInfo trace)throws Throwable {
         Memory before=target.getReference().toValue().toImmutable();
-        target.checkIncrementOverflow(before,decrement,env,trace);
+        if (optimizationProfile(env, trace) != PhpOptimizationProfile.FAST_INT64_WRAP)
+            target.checkIncrementOverflow(before,decrement,env,trace);
         boolean diagnostic=before.type==Memory.Type.BOOL||decrement&&before.isNull()
                 ||before.isString()&&!PhpNumericString.isNumeric(before instanceof php.runtime.memory.BinaryMemory?before.toBinaryString():before.toString());
         if(!diagnostic)return incrementReference(target,decrement,post,env,trace);

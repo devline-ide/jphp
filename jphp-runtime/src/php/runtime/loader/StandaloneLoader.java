@@ -263,7 +263,7 @@ public class StandaloneLoader {
 
         try (BufferedInputStream buffered = new BufferedInputStream(input)) {
             if (rejectModern) {
-                buffered.mark(16);
+                buffered.mark(20); // ABI30 includes the numeric optimization profile after language profile.
                 if (ModuleDumper.readLanguageProfileHeader(buffered) == PhpLanguageProfile.PHP_8_5) return null;
                 buffered.reset();
             }

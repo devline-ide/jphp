@@ -2,6 +2,8 @@ package php.runtime.env;
 
 import php.runtime.common.Constants;
 import php.runtime.common.PhpLanguageProfile;
+import php.runtime.common.PhpOptimizationProfile;
+import php.runtime.common.PhpRuntimeOwnershipMode;
 
 import java.io.*;
 import java.nio.charset.Charset;
@@ -18,6 +20,8 @@ public class Context {
     private String moduleName;
     private InputStream inputStream;
     private PhpLanguageProfile phpLanguageProfile;
+    private PhpOptimizationProfile phpOptimizationProfile;
+    private PhpRuntimeOwnershipMode phpOwnershipMode;
     private String contentModuleName;
     private Map<String, String> implicitClassImports = Collections.emptyMap();
     private String implicitClassImportsFingerprint = "";
@@ -77,6 +81,20 @@ public class Context {
     public void setPhpLanguageProfile(PhpLanguageProfile profile) {
         phpLanguageProfile = profile;
     }
+
+    public PhpOptimizationProfile getPhpOptimizationProfile(CompileScope scope) {
+        return phpOptimizationProfile == null ? (scope == null ? PhpOptimizationProfile.COMPATIBLE : scope.getPhpOptimizationProfile()) : phpOptimizationProfile;
+    }
+
+    public void setPhpOptimizationProfile(PhpOptimizationProfile profile) {
+        phpOptimizationProfile = profile;
+    }
+
+    public PhpRuntimeOwnershipMode getPhpOwnershipMode(CompileScope scope) {
+        return phpOwnershipMode == null ? (scope == null ? PhpRuntimeOwnershipMode.AUTO : scope.getPhpOwnershipMode()) : phpOwnershipMode;
+    }
+
+    public void setPhpOwnershipMode(PhpRuntimeOwnershipMode mode) { phpOwnershipMode = mode; }
 
     /**
      * Optional CLASS imports for this source only. Aliases are the class basenames.

@@ -59,6 +59,8 @@ Our project started in October 2013. There were a few reasons for that:
 
 ### Documentation
 
+- Fork decisions and intentional PHP differences: [JPHP_SEMANTIC_DEVIATIONS.md](JPHP_SEMANTIC_DEVIATIONS.md). Read this before PHP-version compatibility or performance changes.
+- Local guarded numeric loops: [JPHP_OPTIMIZATION_FEATURES.md](JPHP_OPTIMIZATION_FEATURES.md). Includes eligibility, fallback, measurement limits and the rejected array-read experiment.
 - Wiki here: [read](http://j-php.net/wiki/)
 - Historical API documentation (archived reference, predates this fork): https://github.com/jphp-compiler/docs
 

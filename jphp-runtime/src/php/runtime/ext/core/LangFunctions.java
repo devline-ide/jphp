@@ -70,7 +70,8 @@ public class LangFunctions extends FunctionsContainer {
     public static Memory eval(Environment env, TraceInfo trace, @Runtime.GetLocals ArrayMemory locals, String code)
             throws Throwable {
         try {
-            return env.eval(code, locals, env.getModuleManager().getPhpLanguageProfile(trace));
+            return env.eval(code, locals, env.getModuleManager().getPhpLanguageProfile(trace),
+                    env.getModuleManager().getOptimizationProfile(trace), env.getModuleManager().getOwnershipMode(trace));
         } catch (ErrorException e) {
             if (e.getType() == ErrorType.E_PARSE) {
                 if (env.isHandleErrors(ErrorType.E_PARSE))

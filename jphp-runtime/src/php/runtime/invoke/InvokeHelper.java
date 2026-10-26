@@ -29,6 +29,16 @@ final public class InvokeHelper {
     private InvokeHelper() {
     }
 
+    /** Ordinary PHP return validation precedes finally, independently of ownership instrumentation. */
+    public static Memory verifyReturnBeforeFinally(Environment env,Class<?> owner,String javaMember,TraceInfo trace,Memory raw) {
+        if(!(owner.getClassLoader() instanceof php.runtime.loader.RuntimeClassLoader))throw new IllegalArgumentException("Return verifier owner is not a generated class");
+        var loader=(php.runtime.loader.RuntimeClassLoader)owner.getClassLoader();var function=loader.getFunction(owner.getName());
+        if(function!=null && function.getNativeMethod().getDeclaringClass()==owner && function.getNativeMethod().getName().equals(javaMember))return checkReturnType(env,trace,raw,function);
+        var clazz=loader.getClass(owner.getName());
+        if(clazz!=null)for(var method:clazz.getMethods().values()) {var member=method.getNativeMethod();if(member!=null && member.getDeclaringClass()==owner && member.getName().equals(javaMember))return checkReturnType(env,trace,raw,method);}
+        throw new IllegalArgumentException("Return verifier has no exact reflected PHP member");
+    }
+
     public static Memory normalizeExplicitReturn(Memory value) {
         if (!value.isUndefined()) return value;
         if (value instanceof php.runtime.memory.ReferenceMemory) {

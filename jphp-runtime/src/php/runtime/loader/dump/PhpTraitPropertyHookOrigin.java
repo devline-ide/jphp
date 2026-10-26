@@ -9,6 +9,7 @@ import php.runtime.reflection.support.PhpTypeDeclaration;
 import php.runtime.reflection.*;
 import php.runtime.env.Environment;
 import php.runtime.common.PhpLanguageProfile;
+import php.runtime.common.PhpRuntimeOwnershipMode;
 import php.runtime.common.PhpClassNames;
 import php.runtime.loader.dump.io.DumpException;
 import java.security.MessageDigest;
@@ -26,8 +27,8 @@ public final class PhpTraitPropertyHookOrigin {
     public static final String ATTRIBUTE="JPHP_Trait_Property_Hook_Origin_v1";
     private PhpTraitPropertyHookOrigin() {}
     public record Source(ClassNode physical,MethodNode method,PhpPropertyHooks.Hook hook,byte[] bytes,boolean strict,String protocolOwner,
-                         TraceOrigin trace,int traceCapacity) {}
-    private record Admission(boolean strict,TraceOrigin trace,int capacity) {}
+                         TraceOrigin trace,int traceCapacity,PhpRuntimeOwnershipMode ownershipMode) {}
+    private record Admission(boolean strict,TraceOrigin trace,int capacity,PhpRuntimeOwnershipMode ownershipMode) {}
     private record Origin(String module,String trait,String owner,String member,String hash,boolean strict,int sourceTrace,int targetTrace,
                           int mode,String traceOwner,String targetTemplate,String targetMember) {
         Origin(String module,String trait,String owner,String member,String hash,boolean strict,int sourceTrace,int targetTrace) {
@@ -41,6 +42,20 @@ public final class PhpTraitPropertyHookOrigin {
                 new ProtocolAttribute(CELL,new byte[0]),new ProtocolAttribute(STATIC_SITES,new byte[0]),
                 new OriginAttribute(new byte[0])},0);
         return physical;
+    }
+    /** Active execution checks the exact physical donor, never merely the consumer module mode. */
+    public static void requireOwnershipAdmission(PhpPropertyHooks.Hook hook,Environment env) {
+        var owner=hook.method().getClazz();
+        php.runtime.PhpOwnershipExecution.requireOwnershipAdmission(owner.getModule());
+        try {
+            ClassNode physical=readClass(owner.getData());
+            var matches=physical.methods.stream().filter(method->method.name.equals(hook.method().getInternalName())).toList();
+            if(matches.size()!=1)throw new IllegalArgumentException("Hook lacks its exact physical ownership source");
+            Admission actual=admit(owner,physical,matches.getFirst(),hook.declaration(),hook,env,null,new HashSet<>());
+            if(!actual.ownershipMode().supportsAdmission())throw new IllegalArgumentException("Physical OFF trait hook cannot enter ownership execution");
+        }catch(IOException|LinkageError invalid) {
+            throw new IllegalArgumentException("Hook ownership source cannot be admitted",invalid);
+        }
     }
     public static Source source(PhpPropertyHooks.Hook hook,Environment env) {
         return source(hook,env,new HashSet<>());
@@ -79,10 +94,10 @@ public final class PhpTraitPropertyHookOrigin {
         try {
             admitted=admit(donor,physical,actual,hook.declaration(),hook,env,graph,visited);
             PhpPropertyHookDumper.validateBodyHeader(physical,actual,code,hook.declaration(),hook,admitted.strict(),
-                    admitted.trace().owner(),admitted.trace().index(),admitted.capacity());
+                    admitted.trace().owner(),admitted.trace().index(),admitted.capacity(),admitted.ownershipMode());
         }catch(IOException malformed){throw new IllegalStateException("Invalid actual donor hook protocol",malformed);}
         return new Source(physical,actual,hook,bytes.clone(),admitted.strict(),donor.getCompiledInternalName().replace('.','/'),
-                admitted.trace(),admitted.capacity());
+                admitted.trace(),admitted.capacity(),admitted.ownershipMode());
     }
 
     /** Only attested entry/CELL/binder operands and the header trace-table operand change; opcode ordinals stay intact. */
@@ -96,7 +111,9 @@ public final class PhpTraitPropertyHookOrigin {
         targetOwner=targetOwner.replace('.','/');
         List<AbstractInsnNode> code=opcodes(node);
         List<Integer> before=code.stream().map(AbstractInsnNode::getOpcode).toList();
-        if(code.size()<26 || !load(code.get(0),1) || !(code.get(1) instanceof FieldInsnNode trace)
+        boolean owned=source.ownershipMode().supportsAdmission();
+        int body=owned?19:7;
+        if(code.size()<body+7 || !load(code.get(0),1) || !(code.get(1) instanceof FieldInsnNode trace)
                 || trace.getOpcode()!=Opcodes.GETSTATIC || !trace.owner.equals(source.trace().owner())
                 || !trace.name.equals("$TRC") || !trace.desc.equals("[Lphp/runtime/env/TraceInfo;")
                 || !(code.get(2) instanceof LdcInsnNode site) || !(site.cst instanceof Integer sourceTrace) || sourceTrace!=source.trace().index()
@@ -106,17 +123,17 @@ public final class PhpTraitPropertyHookOrigin {
                     "(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)Lphp/runtime/PhpPropertyWriteContext$Frame;"))
             throw new IllegalStateException("Copied trait hook property-write header changed");
         int write=store(code.get(6),node.maxLocals);
-        int scoped=entry(code,7,node,sourceOwner,sourceMethod,targetOwner,targetMethod,
-                "php/runtime/PhpOwnershipExecution","php/runtime/PhpOwnershipExecution$Entry");
-        int runtime=entry(code,13,node,sourceOwner,sourceMethod,targetOwner,targetMethod,
-                "php/runtime/PhpRuntimeOwnership","php/runtime/PhpRuntimeOwnership$Frame");
+        int scoped=owned?entry(code,7,node,sourceOwner,sourceMethod,targetOwner,targetMethod,
+                "php/runtime/PhpOwnershipExecution","php/runtime/PhpOwnershipExecution$Entry"):-1;
+        int runtime=owned?entry(code,13,node,sourceOwner,sourceMethod,targetOwner,targetMethod,
+                "php/runtime/PhpRuntimeOwnership","php/runtime/PhpRuntimeOwnership$Frame"):-2;
         int kind=hook.kind()==PhpPropertyHooks.Kind.GET?1:2;
-        if(!load(code.get(19),0) || !load(code.get(20),1) || !constant(code.get(21),hook.declaration().getName())
-                || integer(code.get(22))!=kind || !constant(code.get(23),sourceMethod)
-                || !call(code.get(24),"php/runtime/PhpPropertyHookBodyAccess","bindGeneratedMethod",BIND))
+        if(!load(code.get(body+0),0) || !load(code.get(body+1),1) || !constant(code.get(body+2),hook.declaration().getName())
+                || integer(code.get(body+3))!=kind || !constant(code.get(body+4),sourceMethod)
+                || !call(code.get(body+5),"php/runtime/PhpPropertyHookBodyAccess","bindGeneratedMethod",BIND))
             throw new IllegalStateException("Copied trait hook exact property/kind/member binding changed");
-        int binding=store(code.get(25),node.maxLocals);
-        if(Set.of(write,scoped,runtime,binding).size()!=4)
+        int binding=store(code.get(body+6),node.maxLocals);
+        if(owned ? Set.of(write,scoped,runtime,binding).size()!=4 : write==binding)
             throw new IllegalStateException("Copied trait hook mandatory protocol locals overlap");
         int binders=0,entries=0;
         for(int at=0;at<code.size();at++)if(code.get(at) instanceof MethodInsnNode invoke) {
@@ -133,7 +150,7 @@ public final class PhpTraitPropertyHookOrigin {
                 clazz.cst=Type.getObjectType(targetOwner);((LdcInsnNode)code.get(at-3)).cst=targetMethod;
             }
         }
-        if(binders!=1 || entries!=2)throw new IllegalStateException("Copied trait hook has duplicate or missing mandatory entries");
+        if(binders!=1 || entries!=(owned?2:0))throw new IllegalStateException("Copied trait hook has duplicate or missing mandatory entries");
         Set<String> found=new HashSet<>();
         if(node.attrs!=null)for(int at=0;at<node.attrs.size();at++) {
             Attribute attribute=node.attrs.get(at);
@@ -143,10 +160,10 @@ public final class PhpTraitPropertyHookOrigin {
                 node.attrs.set(at,protocol.rebind(source.protocolOwner(),sourceMethod,targetProtocolTemplate,targetMethod,DESC));
             }
         }
-        if(!found.contains(FRAME) || !found.contains(RUNTIME))
+        if(owned ? !found.contains(FRAME) || !found.contains(RUNTIME) : found.contains(FRAME) || found.contains(RUNTIME))
             throw new IllegalStateException("Copied trait hook lacks its actual ownership protocol metadata");
         if(!retained) {trace.owner=targetOwner;site.cst=targetTrace;}
-        ((LdcInsnNode)code.get(23)).cst=targetMethod;
+        ((LdcInsnNode)code.get(body+4)).cst=targetMethod;
         if(retained && node.localVariables!=null) for(LocalVariableNode local:node.localVariables)
             if(local.index==0 && local.name.equals("~this"))local.desc="L"+targetOwner+";";
         if(!before.equals(opcodes(node).stream().map(AbstractInsnNode::getOpcode).toList()))
@@ -192,7 +209,8 @@ public final class PhpTraitPropertyHookOrigin {
         return capacity;
     }
     private static List<AbstractInsnNode> opcodes(MethodNode node) {
-        var result=new ArrayList<AbstractInsnNode>();for(AbstractInsnNode item:node.instructions)if(item.getOpcode()>=0)result.add(item);return result;
+        var result=new ArrayList<AbstractInsnNode>();for(AbstractInsnNode item:node.instructions)if(item.getOpcode()>=0)result.add(item);
+        return PhpPropertyHookDumper.propertyContextHeaderView(result);
     }
     private static boolean load(AbstractInsnNode node,int slot) {return node instanceof VarInsnNode v && v.getOpcode()==Opcodes.ALOAD && v.var==slot;}
     private static int store(AbstractInsnNode node,int maximum) {
@@ -327,13 +345,13 @@ public final class PhpTraitPropertyHookOrigin {
                     && importedTraceSlots(physical,slot)>0)
                 throw new DumpException("Imported trait hook trace requires its exact source witness");
             // Ordinary bodies retain the original physical-prefix gate and its diagnostics.
-            PhpPropertyHookDumper.validateBodyHeader(physical,target,code,property,hook,owner.getModule().isStrictTypes());
+            PhpPropertyHookDumper.validateBodyHeader(physical,target,code,property,hook,owner.getModule().isStrictTypes(),owner.getModule().getOwnershipMode());
             return;
         }
         try {
             Admission admitted=admit(owner,physical,target,property,hook,env,null,new HashSet<>());
             PhpPropertyHookDumper.validateBodyHeader(physical,target,opcodes(target),property,hook,admitted.strict(),
-                    admitted.trace().owner(),admitted.trace().index(),admitted.capacity());
+                    admitted.trace().owner(),admitted.trace().index(),admitted.capacity(),admitted.ownershipMode());
         }catch(RuntimeException|LinkageError invalid) {
             var failure=new DumpException("Invalid exact trait hook body/source witness: "+invalid.getClass().getSimpleName()+": "+invalid.getMessage());
             failure.initCause(invalid);throw failure;
@@ -348,7 +366,7 @@ public final class PhpTraitPropertyHookOrigin {
                     && importedTraceSlots(physical,slot)>0)
                 throw new DumpException("Imported trait hook trace requires its exact source witness");
             int site=code.size()>2?integer(code.get(2)):-1;
-            return new Admission(owner.getModule().isStrictTypes(),new TraceOrigin(physical.name,site),traceCapacity(physical));
+            return new Admission(owner.getModule().isStrictTypes(),new TraceOrigin(physical.name,site),traceCapacity(physical),owner.getModule().getOwnershipMode());
         }
         if(visited.size()>=1024)throw new DumpException("Trait hook source witness graph exceeds its bounded depth");
         if(!origin.targetTemplate().isEmpty() && (!origin.targetTemplate().equals(owner.getCompiledInternalName().replace('.','/'))
@@ -375,7 +393,7 @@ public final class PhpTraitPropertyHookOrigin {
                 throw new DumpException("Trait hook source class bytes or strict context changed");
             validateMetadata(selected,hook);
             List<AbstractInsnNode> actual=opcodes(target);
-            if(actual.size()<26 || !(actual.get(2) instanceof LdcInsnNode at) || !Integer.valueOf(origin.targetTrace()).equals(at.cst))
+            if(actual.size()<(source.ownershipMode().supportsAdmission()?26:14) || !(actual.get(2) instanceof LdcInsnNode at) || !Integer.valueOf(origin.targetTrace()).equals(at.cst))
                 throw new DumpException("Trait hook consumer trace site differs from its exact copy");
             MethodNode expected=cloneMethod(source.method());expected.name=target.name;
             String targetProtocolTemplate=origin.targetTemplate().isEmpty()?physical.name:origin.targetTemplate();
@@ -391,8 +409,8 @@ public final class PhpTraitPropertyHookOrigin {
                         +"; expected-instructions="+opcodes(expected).size()+"; actual-instructions="+opcodes(target).size()
                         +"; expected-handlers="+expected.tryCatchBlocks.size()+"; actual-handlers="+target.tryCatchBlocks.size());
             return origin.mode()==2
-                    ? new Admission(origin.strict(),source.trace(),source.traceCapacity())
-                    : new Admission(origin.strict(),new TraceOrigin(physical.name,origin.targetTrace()),traceCapacity(physical));
+                    ? new Admission(origin.strict(),source.trace(),source.traceCapacity(),source.ownershipMode())
+                    : new Admission(origin.strict(),new TraceOrigin(physical.name,origin.targetTrace()),traceCapacity(physical),source.ownershipMode());
         } finally {visited.remove(key);}
     }
     private static void validateMetadata(PhpPropertyHooks.Hook source,PhpPropertyHooks.Hook target)throws IOException {
@@ -637,7 +655,7 @@ public final class PhpTraitPropertyHookOrigin {
                         +source.physical().name+"#"+source.method().name+" -> "+physical.name+"#"+targetMember
                         +"; expected-sha256="+hash(expectedBody)+"; actual-sha256="+hash(actualBody));
             PhpPropertyHookDumper.validateBodyHeader(physical,actual,opcodes(actual),source.hook().declaration(),source.hook(),source.strict(),
-                    source.trace().owner(),source.trace().index(),source.traceCapacity());
+                    source.trace().owner(),source.trace().index(),source.traceCapacity(),source.ownershipMode());
         }catch(IOException malformed) {
             throw new LinkageError("Invalid exact runtime trait hook source/target pair: "
                     +malformed.getClass().getSimpleName()+": "+malformed.getMessage(),malformed);

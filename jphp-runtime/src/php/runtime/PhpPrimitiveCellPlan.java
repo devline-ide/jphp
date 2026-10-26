@@ -576,7 +576,10 @@ public final class PhpPrimitiveCellPlan {
         Map<Label,Integer> labels=labels(code);
         for(int at=0;at<instructions.size();at++)if(instructions.get(at) instanceof InvokeInstruction call
                 &&call.owner().asInternalName().equals(context)&&call.name().equalsString("enter")) {
-            if(enter>=0||call.opcode()!=Opcode.INVOKESTATIC||!call.type().equalsString("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)Lphp/runtime/PhpPropertyWriteContext$Frame;")
+            boolean ordinary=call.type().equalsString("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;Z)Lphp/runtime/PhpPropertyWriteContext$Frame;");
+            boolean profiled=call.type().equalsString("(Lphp/runtime/env/Environment;Lphp/runtime/env/TraceInfo;ZI)Lphp/runtime/PhpPropertyWriteContext$Frame;")
+                    && at>0 && (constant(instructions.get(at-1),0)||constant(instructions.get(at-1),1));
+            if(enter>=0||call.opcode()!=Opcode.INVOKESTATIC||(!ordinary&&!profiled)
                     ||at+1>=instructions.size()||!(instructions.get(at+1) instanceof StoreInstruction store)||store.typeKind()!=TypeKind.REFERENCE)return false;
             frame=store.slot();enter=at;
         }

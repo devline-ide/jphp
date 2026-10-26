@@ -5,6 +5,8 @@ import php.runtime.common.PhpClassNames;
 import php.runtime.Memory;
 import php.runtime.common.LangMode;
 import php.runtime.common.PhpLanguageProfile;
+import php.runtime.common.PhpOptimizationProfile;
+import php.runtime.common.PhpRuntimeOwnershipMode;
 import php.runtime.env.Context;
 import php.runtime.env.DieException;
 import php.runtime.env.Environment;
@@ -27,6 +29,8 @@ public class ModuleEntity extends Entity {
 
     private boolean strictTypes = false;
     private PhpLanguageProfile phpLanguageProfile = PhpLanguageProfile.JPHP_LEGACY;
+    private PhpOptimizationProfile optimizationProfile = PhpOptimizationProfile.COMPATIBLE;
+    private PhpRuntimeOwnershipMode ownershipMode = PhpRuntimeOwnershipMode.AUTO;
     private boolean compiledArtifact;
     private volatile boolean generatorLinkageValidated;
     private volatile CompilerProvenance compilerProvenance = CompilerProvenance.UNKNOWN;
@@ -112,6 +116,7 @@ public class ModuleEntity extends Entity {
     }
 
     public Memory include(Environment env, ArrayMemory locals) throws Throwable {
+        php.runtime.PhpOwnershipExecution.requireOwnershipExecution(env,this);
         if (php.runtime.PhpOwnershipExecution.current(env) != null)
             return php.runtime.PhpOwnershipExecution.invokeModule(this,env,locals);
         if(php.runtime.PhpRuntimeOwnership.isIncluding(env,this))return php.runtime.PhpRuntimeOwnership.includeBody(this,env,locals);
@@ -127,6 +132,7 @@ public class ModuleEntity extends Entity {
     }
 
     public Memory include(Environment env) throws Throwable {
+        php.runtime.PhpOwnershipExecution.requireOwnershipExecution(env,this);
         if (php.runtime.PhpOwnershipExecution.current(env) != null)
             return php.runtime.PhpOwnershipExecution.invokeModule(this,env,env.getGlobals());
         if(php.runtime.PhpRuntimeOwnership.isIncluding(env,this))return php.runtime.PhpRuntimeOwnership.includeBody(this,env,env.getGlobals());
@@ -206,6 +212,18 @@ public class ModuleEntity extends Entity {
 
     public void setPhpLanguageProfile(PhpLanguageProfile profile) {
         phpLanguageProfile = Objects.requireNonNull(profile, "profile");
+    }
+
+    public PhpOptimizationProfile getOptimizationProfile() { return optimizationProfile; }
+
+    public void setOptimizationProfile(PhpOptimizationProfile profile) {
+        optimizationProfile = Objects.requireNonNull(profile, "profile");
+    }
+
+    public PhpRuntimeOwnershipMode getOwnershipMode() { return ownershipMode; }
+
+    public void setOwnershipMode(PhpRuntimeOwnershipMode mode) {
+        ownershipMode = Objects.requireNonNull(mode, "mode");
     }
 
     public void setLoaded(boolean loaded) {

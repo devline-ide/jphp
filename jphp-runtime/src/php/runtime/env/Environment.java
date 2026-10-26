@@ -1784,7 +1784,7 @@ public class Environment {
     public ModuleEntity importModule(Context context) throws Throwable {
         try(var admission=enterCallbackDomain()) {
             context.freezeImplicitClassImports();String name=context.getModuleName();
-            ModuleEntity module=name==null?null:scope.findCachedModule(name,false,context.getPhpLanguageProfile(scope),context.getImplicitClassImportsFingerprint());
+            ModuleEntity module=name==null?null:scope.findCachedModule(name,false,context.getPhpLanguageProfile(scope),context.getImplicitClassImportsFingerprint(),context.getPhpOptimizationProfile(scope),context.getPhpOwnershipMode(scope));
             if(module==null)try(var loading=scope.beginModuleLoad(context,false)) {
                 AbstractCompiler compiler=scope.createCompiler(this,context);module=compiler.compile(false);
                 scope.loadModule(module);scope.addUserModule(module);
@@ -1803,8 +1803,21 @@ public class Environment {
     }
 
     public Memory eval(String code, ArrayMemory locals, php.runtime.common.PhpLanguageProfile profile) throws Throwable {
+        return eval(code, locals, profile, scope.getPhpOptimizationProfile());
+    }
+
+    public Memory eval(String code, ArrayMemory locals, php.runtime.common.PhpLanguageProfile profile,
+                       php.runtime.common.PhpOptimizationProfile optimizationProfile) throws Throwable {
+        return eval(code, locals, profile, optimizationProfile, scope.getPhpOwnershipMode());
+    }
+
+    public Memory eval(String code, ArrayMemory locals, php.runtime.common.PhpLanguageProfile profile,
+                       php.runtime.common.PhpOptimizationProfile optimizationProfile,
+                       php.runtime.common.PhpRuntimeOwnershipMode ownershipMode) throws Throwable {
         Context context = new Context(code);
         context.setPhpLanguageProfile(profile);
+        context.setPhpOptimizationProfile(optimizationProfile);
+        context.setPhpOwnershipMode(ownershipMode);
         AbstractCompiler compiler = scope.createCompiler(this, context);
         
         ModuleEntity module = compiler.compile();
