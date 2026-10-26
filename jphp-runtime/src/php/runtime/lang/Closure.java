@@ -376,8 +376,8 @@ public abstract class Closure extends BaseObject implements IStaticVariables, IC
         ParameterEntity.validateTypeHinting(env, 2, args, HintType.OBJECT, true);
 
         Closure newClosure = (Closure) closure.clone();
-        newClosure.self = args[0];
-        newClosure.scope = args[1].toString();
+        newClosure.self = args[1];
+        newClosure.scope = args[2].toString();
         return new ObjectMemory(newClosure);
     }
 
