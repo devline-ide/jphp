@@ -3413,10 +3413,8 @@ public class StringFunctions extends FunctionsContainer {
     }
 
     public static String rawurldecode(String url) throws UnsupportedEncodingException {
-        return URLDecoder.decode(url, "UTF-8")
-                // OAuth encodes some characters differently:
-                .replace("%20", "+").replace("%2A", "*")
-                .replace("~", "%7E");
+        // Unlike form decoding, a literal '+' is data. Decode percent escapes only once.
+        return URLDecoder.decode(url.replace("+", "%2B"), StandardCharsets.UTF_8);
     }
 
     public static void setLocale() {
