@@ -18,7 +18,7 @@ import java.util.TimerTask;
 
 @Name("php\\time\\Timer")
 public class WrapTimer extends BaseWrapper<TimerTask> {
-    private static Timer timer = new Timer("php\\time\\Timer");
+    private static Timer timer = new Timer("php\\time\\Timer", true);
 
     public WrapTimer(Environment env, TimerTask wrappedObject) {
         super(env, wrappedObject);
@@ -179,7 +179,7 @@ public class WrapTimer extends BaseWrapper<TimerTask> {
         timer.cancel();
         timer.purge();
 
-        timer = new Timer("php\\time\\Timer");
+        timer = new Timer("php\\time\\Timer", true);
     }
 
     public static void shutdownAll() {
