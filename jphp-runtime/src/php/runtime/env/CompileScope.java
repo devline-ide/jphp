@@ -472,7 +472,14 @@ public class CompileScope {
         }
     }
 
-    synchronized public void registerExtension(Extension extension) {
+    public void registerExtension(Extension extension) {
+        // Registration callbacks may wrap classes. Enter their domain before the scope monitor.
+        try (var admission = enterClassLookupDomain()) {
+            registerExtensionInClassDomain(extension);
+        }
+    }
+
+    private synchronized void registerExtensionInClassDomain(Extension extension) {
         long t = System.currentTimeMillis();
 
         if (extensions.containsKey(extension.getName()))
