@@ -19,6 +19,7 @@ import php.runtime.reflection.ClassEntity;
 import php.runtime.reflection.support.ReflectionUtils;
 
 import javax.xml.parsers.DocumentBuilder;
+import javax.xml.XMLConstants;
 import javax.xml.parsers.DocumentBuilderFactory;
 import javax.xml.parsers.ParserConfigurationException;
 import javax.xml.transform.*;
@@ -45,12 +46,21 @@ public class WrapXmlProcessor extends WrapProcessor {
     @Signature(@Arg(value = "flags", optional = @Optional("0")))
     public Memory __construct(final Environment env, Memory... args) throws ParserConfigurationException, TransformerConfigurationException {
         transformerFactory = TransformerFactory.newInstance();
+        transformerFactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        transformerFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_STYLESHEET, "");
         transformer = transformerFactory.newTransformer();
 
         transformer.setOutputProperty(OutputKeys.INDENT, "yes");
         transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2");
 
         builderFactory = DocumentBuilderFactory.newInstance();
+        builderFactory.setFeature(XMLConstants.FEATURE_SECURE_PROCESSING, true);
+        builderFactory.setFeature("http://apache.org/xml/features/disallow-doctype-decl", true);
+        builderFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_DTD, "");
+        builderFactory.setAttribute(XMLConstants.ACCESS_EXTERNAL_SCHEMA, "");
+        builderFactory.setXIncludeAware(false);
+        builderFactory.setExpandEntityReferences(false);
         builder = builderFactory.newDocumentBuilder();
         builder.setErrorHandler(new ErrorHandler() {
             @Override
