@@ -275,6 +275,12 @@ final public class ObjectInvokeHelper {
     public static Memory invokeMethod(IObject iObject, MethodEntity method,
                                       Environment env, TraceInfo trace, Memory[] args, boolean checkAccess,
                                       boolean internalCall,boolean discarded) throws Throwable {
+        return invokeMethod(iObject, method, env, trace, args, checkAccess, internalCall, discarded, false);
+    }
+
+    static Memory invokeMethod(IObject iObject, MethodEntity method,
+                                Environment env, TraceInfo trace, Memory[] args, boolean checkAccess,
+                                boolean internalCall, boolean discarded, boolean ownedVector) throws Throwable {
         ClassEntity clazz = iObject.getReflection();
         if (method == null)
             method = clazz.methodMagicInvoke;
@@ -301,7 +307,7 @@ final public class ObjectInvokeHelper {
         if(discarded)PhpNoDiscardInvocation.beforeBody(env,trace,method);
         Memory[] passed = InvokeArgumentHelper.makeArguments(
                 env, args, method, method.getParameters(args == null ? 0 : args.length), originClassName, originMethodName,
-                argumentScope(iObject, method, className), trace, internalCall
+                argumentScope(iObject, method, className), trace, internalCall, ownedVector
         );
 
         Memory result = method.getImmutableResultTyped(env, trace);

@@ -18,7 +18,7 @@ public class PhpStrictConstantReadEffectsTest {
     @BeforeClass public static void physicalOrigins()throws Exception {
         assertEquals(PhpPortableTestInputs.runtimeOrigin(),Path.of(Environment.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath());
         assertEquals(PhpPortableTestInputs.coreOrigin(),Path.of(JvmCompiler.class.getProtectionDomain().getCodeSource().getLocation().toURI()).toRealPath());
-        assertEquals(31,ModuleDumper.class.getField("COMPILER_ABI_VERSION").getInt(null));
+        assertEquals(32,ModuleDumper.class.getField("COMPILER_ABI_VERSION").getInt(null));
     }
     private static byte[] resource(String name)throws Exception {
         try(var input=PhpStrictConstantReadEffectsTest.class.getClassLoader().getResourceAsStream("strict-read-focused/"+name)) {
@@ -32,10 +32,10 @@ public class PhpStrictConstantReadEffectsTest {
     }
     private static ModuleEntity compile(Environment env,String source,boolean phb,boolean debug,PhpLanguageProfile profile)throws Throwable {
         var context=new Context(source);context.setPhpLanguageProfile(profile);var module=new JvmCompiler(env,context).compile(false);
-        assertEquals(31,module.getCompilerProvenance().getCompilerAbiVersion());
+        assertEquals(32,module.getCompilerProvenance().getCompilerAbiVersion());
         if(phb) {
             var bytes=new ByteArrayOutputStream();var dump=new ModuleDumper(context,env,debug);dump.save(module,bytes);
-            assertEquals(31,ModuleDumper.readHeader(new ByteArrayInputStream(bytes.toByteArray())).getCompilerAbiVersion());
+            assertEquals(32,ModuleDumper.readHeader(new ByteArrayInputStream(bytes.toByteArray())).getCompilerAbiVersion());
             module=dump.load(new ByteArrayInputStream(bytes.toByteArray()));
         }
         assertEquals(profile,module.getPhpLanguageProfile());

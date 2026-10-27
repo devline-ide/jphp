@@ -73,6 +73,11 @@ public class InvokeArgumentHelper {
     }
 
     private static Memory[] argsToPassed(Environment env, TraceInfo trace, Memory[] args, ParameterEntity[] parameters) {
+        return argsToPassed(env, trace, args, parameters, false);
+    }
+
+    private static Memory[] argsToPassed(Environment env, TraceInfo trace, Memory[] args, ParameterEntity[] parameters,
+                                         boolean ownedVector) {
         Memory[] passed = args;
 
         if ((args == null && parameters.length > 0) || (args != null && args.length < parameters.length)) {
@@ -85,7 +90,14 @@ public class InvokeArgumentHelper {
 
         // Argument slots may be cached by a compiled call site. Only Memory references,
         // not the caller's array itself, may be shared with parameter preparation.
-        return passed == args && args != null ? args.clone() : passed;
+        return !ownedVector && passed == args && args != null ? args.clone() : passed;
+    }
+
+    private static Memory[] preparedArgument(Memory[] passed, Memory[] original, int index, Memory value) {
+        if (passed[index] == value) return passed;
+        if (passed == original) passed = passed.clone();
+        passed[index] = value;
+        return passed;
     }
 
     private static Memory makeArg(Environment env, TraceInfo trace, ParameterEntity param,
@@ -227,6 +239,13 @@ public class InvokeArgumentHelper {
     public static Memory[] makeArguments(Environment env, Memory[] args, MethodEntity method,
                                          ParameterEntity[] parameters, String originClassName, String originMethodName,
                                          String staticClassName, TraceInfo trace, boolean internalCall) {
+        return makeArguments(env, args, method, parameters, originClassName, originMethodName, staticClassName,
+                trace, internalCall, false);
+    }
+
+    static Memory[] makeArguments(Environment env, Memory[] args, MethodEntity method,
+                                   ParameterEntity[] parameters, String originClassName, String originMethodName,
+                                   String staticClassName, TraceInfo trace, boolean internalCall, boolean ownedVector) {
         if(php.runtime.PhpEnums.generatedMethod(method)) {
             var bound=BoundArguments.current(env,args,method);
             if(bound!=null && bound.signature().completeNames())bound.requirePreparation(parameters);
@@ -242,7 +261,7 @@ public class InvokeArgumentHelper {
         if (member == null || (member.getDeclaringClass() != php.runtime.lang.spl.iterator.ArrayIterator.class
                     && member.getDeclaringClass() != php.runtime.lang.spl.iterator.ArrayObject.class)
                 || env.getModuleManager().getPhpLanguageProfile(trace) != php.runtime.common.PhpLanguageProfile.PHP_8_5)
-            return makeArgumentsForTarget(env, args, method, parameters, originClassName, originMethodName, staticClassName, trace, internalCall);
+            return makeArgumentsForTarget(env, args, method, parameters, originClassName, originMethodName, staticClassName, trace, internalCall, ownedVector);
         var bound = BoundArguments.current(env, args, method);
         if (bound != null && bound.signature().completeNames()) bound.requirePreparation(parameters);
         args = unpackArgs(env, trace, args, parameters);
@@ -300,13 +319,21 @@ public class InvokeArgumentHelper {
                                                    ParameterEntity[] parameters, String originClassName,
                                                    String originMethodName, String staticClassName,
                                                    TraceInfo trace, boolean internalCall) {
+        return makeArgumentsForTarget(env, args, target, parameters, originClassName, originMethodName,
+                staticClassName, trace, internalCall, false);
+    }
+
+    static Memory[] makeArgumentsForTarget(Environment env, Memory[] args, Object target,
+                                           ParameterEntity[] parameters, String originClassName,
+                                           String originMethodName, String staticClassName,
+                                           TraceInfo trace, boolean internalCall, boolean ownedVector) {
         var bound = BoundArguments.current(env, args, target);
         if (bound != null && bound.signature().completeNames()) {
             bound.requirePreparation(parameters);
             return makeBoundArguments(env, trace, bound, parameters, originClassName, originMethodName,
                     staticClassName, internalCall);
         }
-        return makeArguments(env, args, parameters, originClassName, originMethodName, staticClassName, trace, internalCall);
+        return makeArguments(env, args, parameters, originClassName, originMethodName, staticClassName, trace, internalCall, ownedVector);
     }
 
     public static Memory[] makeArguments(Environment env, Memory[] args,
@@ -319,12 +346,19 @@ public class InvokeArgumentHelper {
     public static Memory[] makeArguments(Environment env, Memory[] args, ParameterEntity[] parameters,
                                          String originClassName, String originMethodName, String staticClassName,
                                          TraceInfo trace, boolean internalCall) {
+        return makeArguments(env, args, parameters, originClassName, originMethodName, staticClassName,
+                trace, internalCall, false);
+    }
+
+    private static Memory[] makeArguments(Environment env, Memory[] args, ParameterEntity[] parameters,
+                                          String originClassName, String originMethodName, String staticClassName,
+                                          TraceInfo trace, boolean internalCall, boolean ownedVector) {
         if (parameters == null) {
             return args;
         }
         args = unpackArgs(env, trace, args, parameters);
         int suppliedCount = args == null ? 0 : args.length;
-        Memory[] passed = argsToPassed(env, trace, args, parameters);
+        Memory[] passed = argsToPassed(env, trace, args, parameters, ownedVector);
 
         int i = 0;
 
@@ -373,18 +407,21 @@ public class InvokeArgumentHelper {
                         }
                     }
 
-                    passed[_i] = variadicArgs;
+                    passed = preparedArgument(passed, args, _i, variadicArgs);
 
                     break;
                 }
 
-                passed[i] = makeArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName,
+                Memory prepared = makeArg(env, trace, param, arg, i, originClassName, originMethodName, staticClassName,
                         internalCall, suppliedCount, parameters);
+                passed = preparedArgument(passed, args, i, prepared);
                 i++;
             }
 
             if (!variadicMemoryExists) {
-                makeImmutable(passed, parameters);
+                for (int j = parameters.length; j < passed.length; j++) {
+                    passed = preparedArgument(passed, args, j, passed[j].toImmutable());
+                }
             }
         }
 
@@ -458,12 +495,6 @@ public class InvokeArgumentHelper {
         }
         bound.prepared(args);
         return args;
-    }
-
-    private static void makeImmutable(Memory[] passed, ParameterEntity[] parameters) {
-        for (int j = parameters.length ; j < passed.length; j++) {
-            passed[j] = passed[j].toImmutable();
-        }
     }
 
     public static Memory[] unpackArgs(Environment env, TraceInfo trace, Memory[] passed, ParameterEntity[] parameters) {

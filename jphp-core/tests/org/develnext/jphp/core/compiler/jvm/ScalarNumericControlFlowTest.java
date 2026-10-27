@@ -131,6 +131,48 @@ public class ScalarNumericControlFlowTest extends JvmCompilerCase {
         }
     }
 
+    @Test public void recursivePureCallsRequireClosedResultsAndCompletePurity()throws Throwable {
+        String methods="public static function fib(int $n):int{if($n<2){return $n;}return self::fib($n-1)+self::fib($n-2);}"
+                +"public static function even(int $n):bool{if($n===0){return true;}return self::odd($n-1);}"
+                +"public static function odd(int $n):bool{if($n===0){return false;}return self::even($n-1);}"
+                +"public static function inferredRecursion(int $n){if($n===0){return 0;}return self::inferredRecursion($n-1);}"
+                +"public static function unsafeA(int $n):int{if($n===0){echo 'effect';return 0;}return self::unsafeB($n-1);}"
+                +"public static function unsafeB(int $n):int{return self::unsafeA($n);}"
+                +"public static function overflowing(int $n,$sum){if($n===0){return $sum;}return self::overflowing($n-1,$sum+1);}";
+        String expression="[NumericFlow::fib(10),NumericFlow::fib(0),NumericFlow::even(8),NumericFlow::odd(8),"
+                +"NumericFlow::inferredRecursion(3),NumericFlow::overflowing(2,PHP_INT_MAX)]";
+        for(var profile:PhpOptimizationProfile.values())for(boolean dumped:new boolean[]{false,true})
+            try(var baseline=new Fixture(methods,expression,profile,dumped,PhpRuntimeOwnershipMode.CHECKED);
+                var f=new Fixture(methods,expression,profile,dumped)){
+                f.supported("fib","even","odd");
+                assertNull(f.kernel("inferredrecursion"));assertNull(f.kernel("unsafea"));assertNull(f.kernel("unsafeb"));
+                for(int i=0;i<6;i++)assertTrue("recursive value "+i,
+                        baseline.result.valueOfIndex(null,i).toValue().identical(f.result.valueOfIndex(null,i).toValue()));
+            }
+    }
+
+    @Test public void untypedIntegerShapesPreserveOtherValuesAndOverflowAcrossSourceAndPhb()throws Throwable {
+        String methods="public static function untyped($seed,$n){$sum=$seed;for($i=0;$i<$n;$i++){$sum+=$i;}return $sum;}"
+                +"public static function distance($a,$b){$d=$a-$b;return $d*$d;}"
+                +"public static function addUntyped($a,$b){return $a+$b;}"
+                +"public static function identity($a){return $a;}";
+        String expression="[NumericFlow::untyped(3,5),NumericFlow::untyped(3,0),NumericFlow::untyped(1.5,3),"
+                +"NumericFlow::untyped('4',3),NumericFlow::untyped(true,3),NumericFlow::distance(-3,4),"
+                +"NumericFlow::distance(1.5,0.5),NumericFlow::identity('text'),NumericFlow::identity([7]),"
+                +"(function(){$x=4;$alias=&$x;return [NumericFlow::untyped($alias,3),$x];})(),"
+                +"NumericFlow::addUntyped(PHP_INT_MAX,1)]";
+        for(var profile:PhpOptimizationProfile.values())for(boolean dumped:new boolean[]{false,true})
+            try(var baseline=new Fixture(methods,expression,profile,dumped,PhpRuntimeOwnershipMode.CHECKED);
+                var f=new Fixture(methods,expression,profile,dumped)){
+                f.supported("untyped","distance","adduntyped","identity");
+                for(int i=0;i<11;i++){
+                    Memory expected=baseline.result.valueOfIndex(null,i).toValue(),actual=f.result.valueOfIndex(null,i).toValue();
+                    assertEquals("untyped kind "+i,expected.type,actual.type);
+                    assertTrue("untyped value "+i,expected.identical(actual));
+                }
+            }
+    }
+
     @Test public void truthinessAndShortCircuitPreserveNaNZeroAndOverflowSkipping()throws Throwable {
         String methods="public static function truth(float $x):int{if($x){return 1;}return 0;}"
                 +"public static function skip(bool $run,int $a):bool{return $run && ($a+1)>0;}"

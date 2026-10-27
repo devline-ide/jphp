@@ -104,9 +104,14 @@ public final class PhpArithmetic {
         value = value.toValue();
         if (value.isUndefined()) value = Memory.NULL;
         if (value.type == Memory.Type.INT) {
+            long integer = value.toLong();
+            // Both profiles agree away from the one overflow boundary. Loop counters
+            // need no property context/module lookup on their ordinary increments.
+            if (integer != (decrement ? Long.MIN_VALUE : Long.MAX_VALUE))
+                return LongMemory.valueOf(decrement ? integer - 1 : integer + 1);
             if (optimizationProfile(env, trace) == PhpOptimizationProfile.FAST_INT64_WRAP)
-                return LongMemory.valueOf(decrement ? value.toLong() - 1 : value.toLong() + 1);
-            return decrement ? OperatorUtils.minus(value.toLong(), 1) : OperatorUtils.plus(value.toLong(), 1);
+                return LongMemory.valueOf(decrement ? integer - 1 : integer + 1);
+            return decrement ? OperatorUtils.minus(integer, 1) : OperatorUtils.plus(integer, 1);
         }
         if (value.type == Memory.Type.DOUBLE) return DoubleMemory.valueOf(value.toDouble() + (decrement ? -1 : 1));
         if (value.isNull() && !decrement) return Memory.CONST_INT_1;
@@ -175,7 +180,8 @@ public final class PhpArithmetic {
         Memory before = cell.toValue().toImmutable();
         if (before instanceof php.runtime.memory.CharMemory)
             env.exception(trace, BaseError.class, "Cannot increment/decrement string offsets");
-        if (optimizationProfile(env, trace) != PhpOptimizationProfile.FAST_INT64_WRAP)
+        if (before.type == Memory.Type.INT && before.toLong() == (decrement ? Long.MIN_VALUE : Long.MAX_VALUE)
+                && optimizationProfile(env, trace) != PhpOptimizationProfile.FAST_INT64_WRAP)
             target.checkIncrementOverflow(before, decrement, env, trace);
         boolean diagnostic = before.type == Memory.Type.BOOL || decrement && before.isNull()
                 || before.isString() && !PhpNumericString.isNumeric(before instanceof php.runtime.memory.BinaryMemory
@@ -284,7 +290,8 @@ public final class PhpArithmetic {
     private static Memory incrementRuntimeReference(PhpRuntimeOwnership.Frame frame,php.runtime.memory.ReferenceMemory target,
             boolean decrement,boolean post,Environment env,TraceInfo trace)throws Throwable {
         Memory before=target.getReference().toValue().toImmutable();
-        if (optimizationProfile(env, trace) != PhpOptimizationProfile.FAST_INT64_WRAP)
+        if (before.type == Memory.Type.INT && before.toLong() == (decrement ? Long.MIN_VALUE : Long.MAX_VALUE)
+                && optimizationProfile(env, trace) != PhpOptimizationProfile.FAST_INT64_WRAP)
             target.checkIncrementOverflow(before,decrement,env,trace);
         boolean diagnostic=before.type==Memory.Type.BOOL||decrement&&before.isNull()
                 ||before.isString()&&!PhpNumericString.isNumeric(before instanceof php.runtime.memory.BinaryMemory?before.toBinaryString():before.toString());

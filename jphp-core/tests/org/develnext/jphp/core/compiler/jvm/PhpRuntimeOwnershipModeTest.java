@@ -245,12 +245,12 @@ public class PhpRuntimeOwnershipModeTest extends JvmCompilerCase {
         }finally{env.doFinal();Files.deleteIfExists(owner);Files.deleteIfExists(part);Files.deleteIfExists(sdk);Files.deleteIfExists(directory);}
     }
 
-    @Test public void abi31StoresModeAndOldHeadersDefaultAuto()throws Throwable {
+    @Test public void currentAbiStoresModeAndOldHeadersDefaultAuto()throws Throwable {
         var env=new Environment(newScope(),OutputStream.nullOutputStream());
         try {
             ModuleEntity module=new JvmCompiler(env,context("return 1;",PhpRuntimeOwnershipMode.OFF)).compile(false);
             var bytes=new ByteArrayOutputStream();new ModuleDumper(module.getContext(),env,true).save(module,bytes);
-            byte[] encoded=bytes.toByteArray();assertEquals(31,ByteBuffer.wrap(encoded).getInt(8));
+            byte[] encoded=bytes.toByteArray();assertEquals(32,ByteBuffer.wrap(encoded).getInt(8));
             assertSame(PhpRuntimeOwnershipMode.OFF,ModuleDumper.readHeader(new ByteArrayInputStream(encoded)).getOwnershipMode());
             ByteBuffer.wrap(encoded).putInt(20,99);assertThrows(DumpException.class,()->ModuleDumper.readHeader(new ByteArrayInputStream(encoded)));
             for(int abi:new int[]{1,29,30}) {

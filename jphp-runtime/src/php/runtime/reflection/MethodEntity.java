@@ -32,6 +32,8 @@ public class MethodEntity extends AbstractFunctionEntity {
     protected Method nativeMethod;
     /** Optional compiler-generated ordinary entry; the admitted native method identity stays unchanged. */
     private Method scalarEntry;
+    private java.lang.invoke.MethodHandle nativeInvocation;
+    private java.lang.invoke.MethodHandle scalarInvocation;
     public static final String SCALAR_ENTRY_PREFIX = "__$scalarEntry$";
 
     protected boolean isAbstract;
@@ -211,9 +213,12 @@ public class MethodEntity extends AbstractFunctionEntity {
     public void setNativeMethod(Method nativeMethod) {
         this.nativeMethod = nativeMethod;
         scalarEntry = null;
+        nativeInvocation = null;
+        scalarInvocation = null;
 
         if (nativeMethod != null) {
             nativeMethod.setAccessible(true);
+            nativeInvocation = invocationHandle(nativeMethod);
             if (java.lang.reflect.Modifier.isStatic(nativeMethod.getModifiers())
                     && nativeMethod.getReturnType() == Memory.class
                     && java.util.Arrays.equals(nativeMethod.getParameterTypes(), new Class<?>[] {Environment.class, Memory[].class})) {
@@ -225,11 +230,26 @@ public class MethodEntity extends AbstractFunctionEntity {
                             && candidate.getReturnType() == Memory.class) {
                         candidate.setAccessible(true);
                         scalarEntry = candidate;
+                        scalarInvocation = invocationHandle(candidate);
                     }
                 } catch (NoSuchMethodException ignored) {
                     // Older PHB files and unsupported methods retain their original entry.
                 }
             }
+        }
+    }
+
+    /** Retain reflected member identity for admission, but avoid a varargs vector per ordinary call. */
+    private static java.lang.invoke.MethodHandle invocationHandle(Method method) {
+        if (method.getReturnType() != Memory.class || !java.util.Arrays.equals(method.getParameterTypes(),
+                new Class<?>[] {Environment.class, Memory[].class})) return null;
+        try {
+            var handle = java.lang.invoke.MethodHandles.lookup().unreflect(method);
+            if (java.lang.reflect.Modifier.isStatic(method.getModifiers()))
+                handle = java.lang.invoke.MethodHandles.dropArguments(handle, 0, Object.class);
+            return handle.asType(java.lang.invoke.MethodType.methodType(Memory.class, Object.class, Environment.class, Memory[].class));
+        } catch (IllegalAccessException | java.lang.invoke.WrongMethodTypeException unavailable) {
+            return null;
         }
     }
 
@@ -297,7 +317,21 @@ public class MethodEntity extends AbstractFunctionEntity {
             if (!isStatic || entry == null || clazz.getModule()!=null && clazz.getModule().getOwnershipMode()==php.runtime.common.PhpRuntimeOwnershipMode.CHECKED
                     || php.runtime.PhpOwnershipExecution.current(env) != null
                     || php.runtime.PhpRuntimeOwnership.current(env) != null) entry = nativeMethod;
-            Memory result = (Memory) entry.invoke(_this, env, arguments);
+            java.lang.invoke.MethodHandle invocation = entry == scalarEntry ? scalarInvocation : nativeInvocation;
+            boolean staticEntry = java.lang.reflect.Modifier.isStatic(entry.getModifiers());
+            // Reflection remains authoritative when an external caller changes
+            // access or supplies an incompatible receiver through the public API.
+            if ((!staticEntry && (_this == null || !entry.getDeclaringClass().isInstance(_this)))
+                    || !entry.canAccess(staticEntry ? null : _this)) invocation = null;
+            Memory result;
+            if (invocation == null) result = (Memory) entry.invoke(_this, env, arguments);
+            else {
+                try { result = (Memory) invocation.invokeExact((Object) _this, env, arguments); }
+                catch (Throwable failure) {
+                    // Reflection used to wrap body failures before PHP/Java exception translation.
+                    return env.__throwException(new InvocationTargetException(failure));
+                }
+            }
 
             return InvokeHelper.checkReturnType(env, trace, result, this);
         } catch (InvocationTargetException e){

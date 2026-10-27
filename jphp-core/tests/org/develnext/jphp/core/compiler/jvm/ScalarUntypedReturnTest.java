@@ -45,9 +45,9 @@ public class ScalarUntypedReturnTest extends JvmCompilerCase {
                 assertEquals(numeric==PhpOptimizationProfile.COMPATIBLE?Memory.Type.DOUBLE:Memory.Type.INT,overflow.type);
                 if(numeric==PhpOptimizationProfile.FAST_INT64_WRAP)assertEquals(Long.MIN_VALUE,overflow.toLong());
                 var clazz=env.fetchClass("InferredScalar",false,PhpLanguageProfile.PHP_8_5);var code=new ClassNode();new ClassReader(clazz.getData()).accept(code,0);
-                for(String name:new String[]{"add","sum","literal","positive","blend","helper"})
+                for(String name:new String[]{"add","sum","literal","positive","blend","helper","dynamic"})
                     assertEquals(name+" mode="+mode,mode!=PhpRuntimeOwnershipMode.CHECKED,code.methods.stream().anyMatch(method->method.name.startsWith("__$scalar$"+name+"$")));
-                for(String name:new String[]{"dynamic","optional","effects","reference","instance"})
+                for(String name:new String[]{"optional","effects","reference","instance"})
                     assertFalse(name+" unexpectedly inferred",code.methods.stream().anyMatch(method->method.name.startsWith("__$scalar$"+name+"$")));
             }finally{env.doFinal();}
         }

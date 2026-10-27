@@ -33,7 +33,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     // ABI29 preserves Deprecated invocation effects and lexical trait-use publication ordering.
     // ABI30 records the numeric optimization contract in the header and generated entry context.
     // ABI31 stores the generated ownership contract; older artifacts retain AUTO.
-    public final static int COMPILER_ABI_VERSION = 31;
+    public final static int COMPILER_ABI_VERSION = 32;
     public final static int COMPILER_PROVENANCE_STAMP = 0x43414249; // CABI, in the existing reserved module tail.
     public final static int COMPILER_PROVENANCE_VERSION = 1;
 

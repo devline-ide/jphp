@@ -41,6 +41,7 @@ public final class PhpCallFrame implements AutoCloseable {
     private PhpArgumentBinder binder;
     private BoundArguments bound;
     private boolean closed, invoked;
+    private boolean argumentsTransferred;
     private php.runtime.memory.ObjectMemory constructedObject;
     private final php.runtime.PhpOwnershipExecution.CallRoots ownershipRoots;
     private php.runtime.PhpOwnershipExecution.Entry ownershipEntry;
@@ -130,7 +131,7 @@ public final class PhpCallFrame implements AutoCloseable {
                                              Memory name, MethodCallCache cache, int index,
                                              boolean forwarding, int capacity) {
         requirePassiveResolution(env);
-        return staticResolved(env, trace, PhpMethodResolver.resolveClass(new php.runtime.memory.StringMemory(className), env, trace),
+        return staticResolved(env, trace, PhpMethodResolver.resolveClass(className, env, trace),
                 name, cache, index, forwarding, capacity);
     }
 
@@ -883,7 +884,10 @@ public final class PhpCallFrame implements AutoCloseable {
         if (bound != null) bound.release();
         if (binder != null) binder.release();
         php.runtime.PhpPrimitiveCellRuntime.callClosed(this);
-        Arrays.fill(arguments, null);size = 0;binder = null;bound = null;constructedObject = null;
+        // A generator may retain the transferred vector. Detach it without clearing its slots.
+        if (argumentsTransferred) arguments = null;
+        else Arrays.fill(arguments, null);
+        size = 0;binder = null;bound = null;constructedObject = null;
     }
 
     /** Convert foreign callback failures before they cross generated PHP catch/finally tables. */
@@ -972,6 +976,40 @@ public final class PhpCallFrame implements AutoCloseable {
 
     public Memory invokePrepared(Memory[] passed) throws Throwable {return invokePrepared(passed,false);}
     public Memory invokePreparedDiscarded(Memory[] passed) throws Throwable {return invokePrepared(passed,true);}
+    private static boolean generatedMethod(php.runtime.reflection.MethodEntity method) {
+        return method.getClass() == php.runtime.reflection.MethodEntity.class && method.getNativeMethod() != null
+                && method.getNativeMethod().getDeclaringClass().getClassLoader() instanceof php.runtime.loader.RuntimeClassLoader;
+    }
+
+    private boolean ownsPositionalVector(Memory[] passed) {
+        if (passed != arguments || binder != null || bound != null || trace == null) return false;
+        if (function != null) return function.getClass() == FunctionEntity.class && function.getNativeMethod() != null
+                && function.getNativeMethod().getDeclaringClass().getClassLoader() instanceof php.runtime.loader.RuntimeClassLoader;
+        if (invoker != null && invoker.getClass() == StaticMethodInvoker.class)
+            return generatedMethod(((StaticMethodInvoker) invoker).getMethod());
+        if (invoker != null && invoker.getClass() == DynamicMethodInvoker.class) {
+            var dynamic = (DynamicMethodInvoker) invoker;
+            return generatedMethod(dynamic.getMethod())
+                    && !(dynamic.getObject() instanceof PhpCallableFactory.CapturedClosure);
+        }
+        return false;
+    }
+
+    private Memory invokeOwnedVector(Memory[] passed, boolean discarded) throws Throwable {
+        argumentsTransferred = true;
+        if (function != null) return InvokeHelper.call(env, trace, function, passed, false, discarded, true);
+        if (discarded) beforeRetainedDiscardedInvocation(invoker);
+        if (invoker instanceof StaticMethodInvoker statik) {
+            String calledClass = discarded || env.getModuleManager().getPhpLanguageProfile(trace)
+                    == php.runtime.common.PhpLanguageProfile.PHP_8_5 ? statik.getCalledClass() : null;
+            return InvokeHelper.callStatic(env, trace, statik.getMethod(), calledClass, passed,
+                    false, false, discarded, true);
+        }
+        var dynamic = (DynamicMethodInvoker) invoker;
+        return ObjectInvokeHelper.invokeMethod(dynamic.getObject(), dynamic.getMethod(), env, trace, passed,
+                false, false, discarded, true);
+    }
+
     private Memory invokePrepared(Memory[] passed,boolean discarded) throws Throwable {
         if(needsPrimitiveInvocation()&&PRIMITIVE_INVOCATION.get()!=this)return invokePrimitiveCold(passed,2,discarded);
         primitiveBoundary();
@@ -989,7 +1027,8 @@ public final class PhpCallFrame implements AutoCloseable {
             if(constructedObject!=null && constructedObject.value instanceof php.runtime.lang.exception.BaseBaseException exception
                     && env.getModuleManager().getPhpLanguageProfile(trace)==php.runtime.common.PhpLanguageProfile.PHP_8_5)
                 exception.setTraceInfo(env,trace);
-            result = function != null ? InvokeHelper.call(env, trace, function, passed,false,discarded)
+            result = ownsPositionalVector(passed) ? invokeOwnedVector(passed, discarded)
+                    : function != null ? InvokeHelper.call(env, trace, function, passed,false,discarded)
                     : invokeFallback(passed,discarded,false);
         } catch (Throwable failure) {
             if (constructedObject != null) PhpObjectLifecycle.failConstruction(constructedObject.value, failure);

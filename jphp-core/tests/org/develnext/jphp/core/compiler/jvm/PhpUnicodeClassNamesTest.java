@@ -123,6 +123,30 @@ public class PhpUnicodeClassNamesTest extends JvmCompilerCase {
         } finally { if (child != null) child.doFinal(); parent.doFinal(); }
     }
 
+    @Test public void testBoundedCanonicalCacheCollisionsAndConcurrentLookups() throws Throwable {
+        assertEquals("Aa".hashCode(), "BB".hashCode());
+        for(int i=0;i<300;i++) {
+            assertEquals("aa",PhpClassNames.canonicalKey("Aa"));
+            assertEquals("bb",PhpClassNames.canonicalKey("BB"));
+        }
+        String oversized="AbÉΣ".repeat(100);
+        assertEquals("abÉΣ".repeat(100),PhpClassNames.canonicalKey(oversized));
+        var executor=java.util.concurrent.Executors.newFixedThreadPool(4);
+        try {
+            var jobs=new java.util.ArrayList<java.util.concurrent.Future<?>>();
+            for(int worker=0;worker<4;worker++) {
+                final int id=worker;
+                jobs.add(executor.submit(()->{
+                    for(int i=0;i<2000;i++) {
+                        String suffix=id+"_"+i;
+                        assertEquals("ns\\mixedÉΣ_"+suffix,PhpClassNames.canonicalKey("Ns\\MiXeDÉΣ_"+suffix));
+                    }
+                }));
+            }
+            for(var job:jobs)job.get();
+        } finally {executor.shutdownNow();}
+    }
+
     @Test public void testTurkishLocaleModernClassAndLazyNativeCache() throws Throwable {
         Locale previous = Locale.getDefault();
         try {

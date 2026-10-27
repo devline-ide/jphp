@@ -28,7 +28,9 @@ public final class PhpPropertyWriteContext {
     public static void leave(Frame frame) {
         if (CURRENT.get() != frame) throw new IllegalStateException("Unbalanced PHP property write context");
         PhpPrimitiveCellRuntime.leaving(frame);
-        if (frame.previous == null) CURRENT.remove(); else CURRENT.set(frame.previous);
+        // A null slot retains no environment/frame, and avoids rebuilding the
+        // ThreadLocal entry at every top-level PHP invocation.
+        CURRENT.set(frame.previous);
     }
     public static Frame current(Environment env) {
         var frame=CURRENT.get(); return frame != null && (env == null || frame.environment == env) ? frame : null;

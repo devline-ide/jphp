@@ -235,19 +235,7 @@ final public class InvokeHelper {
     public static Memory checkReturnType(Environment env, TraceInfo trace, Memory result, final MethodEntity method) {
         return checkReturnType(
                 env, trace, result,
-                new Function<String>() {
-                    @Override
-                    public String call() {
-                        ClassEntity clazz = method.getClazz();
-
-                        switch (clazz.getType()) {
-                            case CLOSURE:
-                                return "{closure}";
-                            default:
-                                return clazz.getName() + "::" + method.getName();
-                        }
-                    }
-                },
+                method,
                 method.getReturnTypeChecker(), method.isReturnTypeNullable(),
                 method.getClazz().getModule() != null && method.getClazz().getModule().isStrictTypes(),
                 method.getClazz().getModule() != null && method.getClazz().getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5
@@ -257,12 +245,7 @@ final public class InvokeHelper {
     public static Memory checkReturnType(Environment env, TraceInfo trace, Memory result, final FunctionEntity function) {
         return checkReturnType(
                 env, trace, result,
-                new Function<String>() {
-                    @Override
-                    public String call() {
-                        return function.getName();
-                    }
-                },
+                function,
                 function.getReturnTypeChecker(), function.isReturnTypeNullable(),
                 function.getModule() != null && function.getModule().isStrictTypes(),
                 function.getModule() != null && function.getModule().getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5
@@ -277,21 +260,31 @@ final public class InvokeHelper {
                 module != null && module.getPhpLanguageProfile() == PhpLanguageProfile.PHP_8_5);
     }
 
-    private static Memory checkReturnType(Environment env, TraceInfo trace, Memory result, Function<String> callName,
+    @SuppressWarnings("unchecked")
+    private static String returnCallName(Object target) {
+        if (target instanceof MethodEntity method) {
+            ClassEntity clazz = method.getClazz();
+            return clazz.getType() == ClassEntity.Type.CLOSURE ? "{closure}" : clazz.getName() + "::" + method.getName();
+        }
+        if (target instanceof FunctionEntity function) return function.getName();
+        return ((Function<String>) target).call();
+    }
+
+    private static Memory checkReturnType(Environment env, TraceInfo trace, Memory result, Object callName,
                                          TypeChecker typeChecker, boolean nullable, boolean strict, boolean modern) {
         if (typeChecker == null) {
             return result;
         }
 
         if (typeChecker instanceof TypeChecker.Simple && ((TypeChecker.Simple) typeChecker).getType() == HintType.NEVER) {
-            env.exception(trace, BaseTypeError.class, "%s(): never-returning function must not implicitly return", callName.call());
+            env.exception(trace, BaseTypeError.class, "%s(): never-returning function must not implicitly return", returnCallName(callName));
             return null;
         }
 
         if (modern && result.isUndefined() && !(typeChecker instanceof TypeChecker.Simple
                 && ((TypeChecker.Simple) typeChecker).getType() == HintType.VOID)) {
             env.exception(trace, BaseTypeError.class, "%s(): Return value must be of type %s, none returned",
-                    callName.call(), php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(typeChecker, nullable).getRuntimeErrorSignature(env, null));
+                    returnCallName(callName), php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(typeChecker, nullable).getRuntimeErrorSignature(env, null));
             return null;
         }
 
@@ -309,10 +302,10 @@ final public class InvokeHelper {
                     given = result.isNull() ? "null" : result.getRealType() == Memory.Type.INT ? "int"
                             : result.getRealType() == Memory.Type.BOOL ? (result.toBoolean() ? "true" : "false") : given;
                     env.exception(trace, BaseTypeError.class, "%s(): Return value must be of type %s, %s returned",
-                            callName.call(), php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(typeChecker, nullable).getRuntimeErrorSignature(env, null), given);
+                            returnCallName(callName), php.runtime.reflection.support.PhpTypeDeclaration.fromChecker(typeChecker, nullable).getRuntimeErrorSignature(env, null), given);
                 } else {
                     env.exception(trace, BaseTypeError.class,
-                            Messages.ERR_RETURN_TYPE_INVALID.fetch(callName.call(), typeChecker.getHumanString(), given));
+                            Messages.ERR_RETURN_TYPE_INVALID.fetch(returnCallName(callName), typeChecker.getHumanString(), given));
                 }
 
                 return null;
@@ -344,6 +337,11 @@ final public class InvokeHelper {
 
     public static Memory call(Environment env, TraceInfo trace, FunctionEntity function, Memory[] args, boolean internalCall,boolean discarded)
             throws Throwable {
+        return call(env, trace, function, args, internalCall, discarded, false);
+    }
+
+    static Memory call(Environment env, TraceInfo trace, FunctionEntity function, Memory[] args, boolean internalCall,
+                        boolean discarded, boolean ownedVector) throws Throwable {
         PhpDeprecatedInvocation.beforeFunction(env, trace, function);
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
         Memory result = modern ? null : function.getImmutableResultTyped(env, trace);
@@ -362,7 +360,7 @@ final public class InvokeHelper {
                 ? bound == null || !bound.signature().completeNames() ? args
                         : InvokeArgumentHelper.makeBoundNativeArguments(env, trace, bound)
                 : InvokeArgumentHelper.makeArgumentsForTarget(
-                        env, args, function, function.getParameters(), function.getName(), null, null, trace, internalCall
+                        env, args, function, function.getParameters(), function.getName(), null, null, trace, internalCall, ownedVector
                 );
 
         if (modern) result = function.getImmutableResultTyped(env, trace);
@@ -464,7 +462,15 @@ final public class InvokeHelper {
         String calledClass = forwarding ? env.getLateStatic() : originClassName;
         boolean modern = env.getModuleManager().getPhpLanguageProfile(trace) == PhpLanguageProfile.PHP_8_5;
         if (modern) {
-            ClassEntity receiver = PhpMethodResolver.resolveClass(new StringMemory(originClassName), env, trace);
+            ClassEntity receiver = PhpMethodResolver.resolveClass(originClassName, env, trace);
+            // A cache entry certifies this exact receiver, name and lexical scope. Keep the
+            // normal argument/deprecation/return-type boundary without a temporary Invoker.
+            MethodEntity cached = callCache == null ? null
+                    : callCache.getDeclared(env, cacheIndex, receiver, originMethodName, env.getLastClassOnStack());
+            if (cached != null && trace != null) {
+                return callStatic(env, trace, cached,
+                        forwarding ? calledClass : receiver.getName(), args, false);
+            }
             return PhpMethodResolver.stat(receiver, new StringMemory(originMethodName), env, trace,
                     callCache, cacheIndex, forwarding).call(args);
         }
@@ -585,6 +591,12 @@ final public class InvokeHelper {
     }
     public static Memory callStatic(Environment env, TraceInfo trace, MethodEntity method, @Nullable String staticClass,
                                     Memory[] args, boolean checkAccess, boolean internalCall,boolean discarded) throws Throwable {
+        return callStatic(env, trace, method, staticClass, args, checkAccess, internalCall, discarded, false);
+    }
+
+    static Memory callStatic(Environment env, TraceInfo trace, MethodEntity method, @Nullable String staticClass,
+                              Memory[] args, boolean checkAccess, boolean internalCall, boolean discarded,
+                              boolean ownedVector) throws Throwable {
         if (checkAccess)
             checkAccess(env, trace, method);
         PhpDeprecatedInvocation.beforeFunction(env, trace, method);
@@ -603,7 +615,7 @@ final public class InvokeHelper {
 
         if(discarded)PhpNoDiscardInvocation.beforeBody(env,trace,method);
         Memory[] passed = InvokeArgumentHelper.makeArguments(
-                env, args, method, method.getParameters(), originClassName, originMethodName, staticClass, trace, internalCall
+                env, args, method, method.getParameters(), originClassName, originMethodName, staticClass, trace, internalCall, ownedVector
         );
         if (modern) {
             result = method.getImmutableResultTyped(env, trace);

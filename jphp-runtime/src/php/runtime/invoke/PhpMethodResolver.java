@@ -55,8 +55,16 @@ public final class PhpMethodResolver {
             return null;
         }
         String name = value.toString();
+        return resolveClass(name, env, trace, callback);
+    }
+
+    public static ClassEntity resolveClass(String name, Environment env, TraceInfo trace) {
+        return resolveClass(name, env, trace, false);
+    }
+
+    private static ClassEntity resolveClass(String name, Environment env, TraceInfo trace, boolean callback) {
         String lookup = name.startsWith("\\") ? name.substring(1) : name;
-        ClassEntity clazz = env.fetchClass(lookup, lookup.toLowerCase(Locale.ROOT), true);
+        ClassEntity clazz = env.fetchClass(lookup, php.runtime.common.PhpClassNames.canonicalKey(lookup), true);
         if (clazz == null) reject(env,trace,callback,"class \""+name+"\" not found","Class \"%s\" not found",name);
         return clazz;
     }

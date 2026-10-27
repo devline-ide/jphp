@@ -644,13 +644,15 @@ public class ReferenceMemory extends Memory {
 
     protected ReferenceMemory(Type type, Memory value) {
         super(type);
-        php.runtime.PhpPrimitiveCellRuntime.beforeUntrackedConstruction(value);
+        if (value instanceof ReferenceMemory || value instanceof ObjectMemory)
+            php.runtime.PhpPrimitiveCellRuntime.beforeUntrackedConstruction(value);
         this._value = value == null ? NULL : value;
     }
 
     public ReferenceMemory(Memory value) {
         super(Type.REFERENCE);
-        php.runtime.PhpPrimitiveCellRuntime.beforeUntrackedConstruction(value);
+        if (value instanceof ReferenceMemory || value instanceof ObjectMemory)
+            php.runtime.PhpPrimitiveCellRuntime.beforeUntrackedConstruction(value);
         this._value = value == null ? Memory.NULL : value;
     }
 
@@ -668,7 +670,11 @@ public class ReferenceMemory extends Memory {
     }
 
     public Memory getValue() {
-        php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
+        // An unattached direct scalar/array cannot expose a sparse CELL or
+        // closure capture. Retain the full ingress check for aliases/objects.
+        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE
+                || _value instanceof ReferenceMemory || _value instanceof ObjectMemory)
+            php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
         return _value;
     }
 
@@ -695,6 +701,12 @@ public class ReferenceMemory extends Memory {
         var origin=getSyntheticGlobalsOrigin();if (origin != null) {origin.retire();authority(null);}
     }
     private Memory storeRaw(Memory value) {
+        if ((ownershipAuthority == null || ownershipAuthority == SHARED_REFERENCE)
+                && !(_value instanceof ReferenceMemory) && !(_value instanceof ObjectMemory)
+                && !(value instanceof ReferenceMemory) && !(value instanceof ObjectMemory)) {
+            _value=value;
+            return value;
+        }
         php.runtime.PhpPrimitiveCellRuntime.beforeRawStore(this,value);
         retireSyntheticGlobalsOrigin();_value=value;
         Object active=ownershipAuthority instanceof NativeGlobalAuthority ? ((NativeGlobalAuthority)ownershipAuthority).payload : ownershipAuthority;
@@ -774,7 +786,12 @@ public class ReferenceMemory extends Memory {
     }
 
     /** Ownership adapters may inspect a carrier without evaluating its overridden PHP getter. */
-    public final Memory getRawValue() { php.runtime.PhpPrimitiveCellRuntime.beforeRawRead(this);return _value; }
+    public final Memory getRawValue() {
+        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE
+                || _value instanceof ReferenceMemory || _value instanceof ObjectMemory)
+            php.runtime.PhpPrimitiveCellRuntime.beforeRawRead(this);
+        return _value;
+    }
     public final Memory readPrimitiveRaw(php.runtime.PhpPrimitiveCellRuntime.ReadAccess access) { access.validate();return _value; }
     public final php.runtime.PhpPrimitiveCellRuntime.Attachment getPrimitiveCellAttachment() {
         return authority() instanceof php.runtime.PhpPrimitiveCellRuntime.Attachment ? (php.runtime.PhpPrimitiveCellRuntime.Attachment)authority() : null;
@@ -824,6 +841,7 @@ public class ReferenceMemory extends Memory {
         rejectUnmanagedOwnershipMutation();retireSyntheticGlobalsOrigin();authority(SHARED_REFERENCE);
     }
     private void rejectUnmanagedOwnershipMutation() {
+        if (ownershipAuthority == null || ownershipAuthority == SHARED_REFERENCE) return;
         rejectGlobalTableBorrow();
         var origin=getSyntheticGlobalsOrigin();
         if (origin != null) {origin.validateCarrier(this);return;}
@@ -1641,7 +1659,9 @@ public class ReferenceMemory extends Memory {
     }
 
     public ReferenceMemory getReference(){
-        php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
+        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE
+                || _value instanceof ReferenceMemory || _value instanceof ObjectMemory)
+            php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
         if (getValue().type == Type.REFERENCE){
             return ((ReferenceMemory)getValue()).getReference();
         } else

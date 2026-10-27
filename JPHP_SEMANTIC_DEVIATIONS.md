@@ -11,9 +11,11 @@ This is a decision ledger, not a claim that every current incompatibility is
 intentional. It is not an exhaustive audit of the existing fork. The initial
 ledger on 2026-10-25 recorded proposals without runtime changes. OPT-001 through
 OPT-004 and DEV-001 were verified in a captured local working tree on 2026-10-26.
-They are not committed, tagged or released; the first implementing commit and
-release version are still unassigned. Later staged entries, including DEV-002,
-retain their own verification status and are outside that scalar/numeric capture.
+That capture preceded a source commit or release. The first implementing source
+commit is now `39bcd48d`, which also contains later ownership/control-flow work;
+it does not reproduce the historical ABI-30 capture by itself. A release/tag is
+not established by these local receipts. Later entries retain their own
+verification status and are outside that original scalar/numeric capture.
 
 Before updating the compiler/runtime for a newer PHP version, read this file.
 An upstream PHP difference alone is not sufficient reason to undo an accepted
@@ -94,7 +96,8 @@ working tree, not a published release or every subsequent change by other agents
 ### DEV-001: fixed-width integer overflow policy
 
 - **Status:** accepted on 2026-10-25; implemented and verified locally on
-  2026-10-26. First implementing commit/release: unassigned, changes uncommitted.
+  2026-10-26. First implementing source commit: `39bcd48d` (also includes later
+  compiler work). Release version/tag: not established by these receipts.
 - **PHP reference:** integer arithmetic outside the integer range returns a
   floating-point value: <https://www.php.net/manual/en/language.types.integer.php>.
   Typed return rules may subsequently affect the function result.
@@ -316,3 +319,105 @@ opportunity, not a substitute for measuring the emitted design:
   the explicit owning module before decoded methods are class-bound. Broader
   existing regressions and performance A/B remain pending; no release commit or
   end-to-end performance gain is established by this focused receipt.
+
+## OPT-005: primitive numeric loops and structured branches
+
+- **Status:** implemented and verified locally on 2026-10-26. First source
+  commit: `39bcd48d`. This extends the earlier straight-line OPT-001..004 scope;
+  historical frozen receipts continue to describe their original artifacts.
+- **Contract:** supported pure typed-static PHP_8_5 methods may retain primitive
+  locals through `for`, `while`, `do/while`, `if/else`, early returns and nested
+  constant-level `break`/`continue`. Supported updates, bitwise operations and
+  short-circuit conditions participate in the same guarded sibling mechanism.
+- **No new semantic deviation:** COMPATIBLE/AUTO remain defaults, overflow uses
+  the original pure fallback, inferred return kinds must agree exactly, and
+  local type/definite-assignment proof is required. Debug/ownership guards and
+  the original PHP ABI stay intact. Unsupported effects, aliases and dispatch
+  retain ordinary execution. There is no new PHB metadata format or setting.
+- **Existing arithmetic boundary:** shifts outside `[0,63]` fall back to the
+  ordinary fork implementation. This pass does not silently fix a generic
+  compatibility difference or declare that old difference intentional.
+- **Proof:** 362 selected tests/52 classes pass with no failures/errors/skips,
+  including independent CHECKED comparisons, source/PHB, both numeric profiles,
+  exceptional paths and emitted JVM verification. Six actual packaged Main
+  checks pass, including source and PHB application results and clean exit.
+- **Measured scope:** final COMPATIBLE/AUTO A/B against the already optimized
+  ownership-r1 baseline uses three rotated JVM forks, at least two seconds of
+  warmup and 21 samples per workload/variant, each at least 200 ms. Ordinary PHP
+  helper-loop calls improve from 73052.81 to 545.29 ns/call (133.97x), allocating
+  93369.25 -> 672 bytes/call. Numeric for/sum is 4.39x, nested loops 21.78x,
+  while/break/continue 4.30x and branch-heavy loops 6.73x. General arrays and the
+  untyped game-distance control are approximately unchanged. No game-FPS,
+  retained-RAM, startup or cross-platform improvement is established.
+- **Tradeoff:** original bodies and added siblings can increase generated
+  bytecode size and compilation work. Faster warmed loops are not proof of
+  smaller PHB files or lower retained memory.
+- **Feature record:** [JPHP_OPTIMIZATION_FEATURES.md](JPHP_OPTIMIZATION_FEATURES.md).
+  Source: `ScalarControlFlowCompiler` and `ScalarMethodCompiler`. Tests:
+  `ScalarNumericControlFlowTest` and `ScalarControlFlowSafetyTest`. Coordinating
+  evidence: `build/php-loop-benchmark-20261026-r2/proof.json` with provenance and
+  snapshots, plus `docs/audits/jphp-loop-optimization-20261026.md`.
+
+The separately measured packed-array read shortcut was rejected and removed.
+Its observations and four preserved array-contract tests are recorded in the
+feature document/audit. Do not restore it as an assumed optimization or present
+the exploratory array/runtime receipt as the final delivery.
+
+## 2026-10-27 general runtime candidate (compiler ABI 32)
+
+This working-tree follow-up addresses the independent master-2020 comparison,
+not the older incremental scalar/ownership baseline. Verification receipts live
+in the coordinating IDE workspace under `build/jphp-general-perf-20261027-r1`.
+The frozen master is `eefaac6d8195025ba53c2b7b0996a9c128b2ffb7`; the frozen
+prechange current source is `0ddb33655da3c6f9c0e4f80acf123099ebfe6fb0`.
+No release or implementing commit is asserted for these uncommitted changes.
+
+- **OPT-006, general runtime paths:** bounded ASCII-name normalization reuse,
+  ordinary cached static dispatch, lazy return-error naming, reflected-member
+  invocation handles, frame-owned positional argument-vector transfer, shorter
+  untracked-reference paths, packed-copy capacity and single-append lowering
+  reduce repeated work. These are intended to preserve existing language
+  semantics, including mixed language profiles, visibility, called class,
+  deprecation, NoDiscard, coercion, references, COW, readonly/property checks,
+  generator/capture lifetime and exception translation. They do not authorize
+  bypassing these rules. Named/unpacked, native/custom invokers and explicit
+  ownership protocols keep their established paths where the proof does not
+  cover them. Java/cached caller-owned argument arrays are never borrowed.
+- **OPT-007, guarded numeric shapes and recursion:** the existing pure static
+  scalar compiler may assume a primitive integer for an untyped parameter only
+  behind its exact `LongMemory` entry guard. Other PHP values retain the ordinary
+  implementation. Recursive calls require closed declared scalar results and
+  complete analysis of every participating body, plus the existing resolver's
+  non-overridable-target restrictions. Inferred recursive return types and
+  cycles containing unsupported effects retain ordinary dispatch. Compatible
+  overflow replays the original pure body; the accepted wrapping profile keeps
+  its existing explicit behavior. Debug and active ownership guards remain.
+- **Compatibility:** no new Zend-PHP divergence or user setting is introduced.
+  In particular, an omitted PHP parameter type does not become an integer type.
+  Compiler ABI 32 invalidates newly generated/cached output consistently; old
+  PHB files retain their recorded compiler provenance and ordinary fallback.
+- **Verification status:** frozen `candidate-r5` passes 171 of 172 selected tests
+  in each SOURCE/PHB lane, with no skipped tests. The only failure is the exact
+  same 24 cyclic-reference serialization mismatches reproduced on the frozen
+  prechange source. The separate 1519 boundary checks pass. All full states in
+  the copied Stonewatch model agree across eight seeds and six JVM processes.
+  The unchanged 19-workload local control passes all oracles, but its single
+  fork and background activity do not establish final timing coefficients.
+  Independent three-fork verification is delegated with explicit provenance
+  in `independent-verification-handoff.json`. The historical master fails JVM
+  verification in the unchanged full
+  Stonewatch model, so that application comparison cannot establish a speedup
+  against master. Do not disable verification or patch the game to hide this.
+
+The first experiment to reuse arbitrary prepared argument arrays was rejected:
+a generator may retain a vector after its call frame closes. The replacement
+is restricted to a vector physically owned by a generated call frame, detached
+without clearing after transfer; coercion/default/reference slot replacement
+still copies before changing the original SEND vector. Preserve the associated
+`PositionalVectorLifetimeTest` and cached-vector isolation tests.
+
+The bounded local application check allocates 13,570,857 -> 9,725,683 bytes per
+map/build/64-tick/state-serialization operation (28.33% less). Its timing median
+is 32.081 -> 25.366 ms, but one of three paired JVM comparisons reverses that
+direction, and external activity was observed. Treat timing as directional
+only. This neither establishes faster rendering nor reduced retained RAM.

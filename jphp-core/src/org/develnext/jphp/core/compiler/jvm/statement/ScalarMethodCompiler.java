@@ -149,10 +149,14 @@ public final class ScalarMethodCompiler {
     private static final class Analysis {
         final ClassStmtCompiler clazz;
         final Set<MethodStmtToken> visiting=Collections.newSetFromMap(new IdentityHashMap<>());
+        final Map<MethodStmtToken,Plan> recursiveSignatures=new IdentityHashMap<>();
         final Map<MethodStmtToken,Plan> completed=new IdentityHashMap<>();
         Analysis(ClassStmtCompiler clazz){this.clazz=clazz;}
         Plan method(MethodStmtToken statement){
             Plan known=completed.get(statement);if(known!=null)return known;
+            if(visiting.contains(statement)) {
+                Plan recursive=recursiveSignatures.get(statement);require(recursive!=null);return recursive;
+            }
             require(visiting.size()<16 && visiting.add(statement));
             try {
                 require(statement!=null && statement.getClazz()==clazz.statement && statement.isStatic() && !statement.isAbstract() && !statement.isGenerator()
@@ -167,15 +171,24 @@ public final class ScalarMethodCompiler {
                 for(ArgumentStmtToken argument:statement.getArguments()){
                     require(!argument.isReference() && !argument.isVariadic() && !argument.isOptional() && argument.getValue()==null && argument.getHintTypeClass()==null
                             && argument.getPhpAttributes().isEmpty() && !clazz.getCompiler().getScope().superGlobals.contains(argument.getName().getName()));
-                    Kind type=kind(argument.getHintType(),argument.getDeclaredType());Local local=new Local(argument.getName().getName(),type,slot);
+                    // Untyped parameters may specialize only the exact LongMemory shape.
+                    // The entry guard retains ordinary PHP evaluation for every other value.
+                    Kind type=argument.getHintType()==null && argument.getDeclaredType()==null
+                            ? Kind.LONG : kind(argument.getHintType(),argument.getDeclaredType());
+                    Local local=new Local(argument.getName().getName(),type,slot);
                     require(locals.putIfAbsent(local.name,local)==null);parameters.add(local);slot+=type.width();
                 }
+                // A declared scalar result closes the recursive call signature. Every
+                // participating body must still pass the same complete purity analysis.
+                if(result!=null)recursiveSignatures.put(statement,new Plan(clazz.node.name,
+                        "__$scalar$"+php.runtime.common.PhpClassNames.canonicalKey(statement.getName().getName())+"$"+clazz.getCompiler().getModule().getOptimizationProfile().getId(),
+                        result,parameters,null,new ArrayList<>(locals.values())));
                 ScalarControlFlowCompiler flow=new ScalarControlFlowCompiler(locals,result,this::expression,this::tokens,clazz.getCompiler().getScope().superGlobals);
                 ScalarControlFlowCompiler.Block body=flow.analyze(statement.getBody());
                 require(!body.fallsThrough() && flow.result()!=null);
                 Plan plan=new Plan(clazz.node.name,"__$scalar$"+php.runtime.common.PhpClassNames.canonicalKey(statement.getName().getName())+"$"+clazz.getCompiler().getModule().getOptimizationProfile().getId(),flow.result(),parameters,body,flow.locals());
                 completed.put(statement,plan);return plan;
-            }finally{visiting.remove(statement);}
+            }finally{visiting.remove(statement);recursiveSignatures.remove(statement);}
         }
         List<Token> tokens(ExprStmtToken expression){
             require(expression!=null);if(expression.getAsmExpr()==null)expression.updateAsmExpr(clazz.getCompiler().getEnvironment(),clazz.getCompiler().getContext());

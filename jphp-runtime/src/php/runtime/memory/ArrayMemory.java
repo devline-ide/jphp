@@ -625,7 +625,7 @@ public class ArrayMemory extends Memory implements Iterable<ReferenceMemory> {
     }
 
     public ArrayMemory duplicate() {
-        ArrayMemory result = new ArrayMemory();
+        ArrayMemory result = map == null ? createListed(size) : new ArrayMemory();
         result.lastLongIndex = lastLongIndex;
         result.nextFreeElement = nextFreeElement;
         result.size = size;

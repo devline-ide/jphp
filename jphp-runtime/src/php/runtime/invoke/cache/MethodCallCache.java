@@ -5,6 +5,15 @@ import php.runtime.reflection.ClassEntity;
 import php.runtime.reflection.MethodEntity;
 
 public class MethodCallCache extends CallCache<MethodEntity> {
+    /** Exact declaration spelling needs no temporary lower-case name on the common source-call path. */
+    public MethodEntity getDeclared(Environment env, int index, ClassEntity receiver, String name, ClassEntity scope) {
+        Item item = getItem(env, index);
+        if (!(item instanceof MethodItem)) return null;
+        MethodItem bound = (MethodItem) item;
+        MethodEntity method = (MethodEntity) bound.data;
+        return bound.receiver == receiver && bound.scope == scope && method.getName().equals(name) ? method : null;
+    }
+
     public MethodEntity get(Environment env, int index, ClassEntity receiver, String name, ClassEntity scope) {
         Item item = getItem(env, index);
         if (!(item instanceof MethodItem)) return null;

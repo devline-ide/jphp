@@ -24,11 +24,26 @@ public final class NullCoalesceAssignment {
     private final TraceInfo trace;
     private final String className, staticProperty;
     private final boolean lateStatic;
-    private final List<Step> steps = new ArrayList<>();
+    // Most assignments address one offset. Keep it in the target itself and
+    // allocate a collection only for a genuinely nested path.
+    private Step firstStep;
+    private List<Step> remainingSteps;
+    private static final Step APPEND_STEP = new Step(null, null);
     private Memory value;
     private PhpRuntimeOwnership.Frame runtimeFrame;
     private int runtimeSite = -1, runtimeRootLocal = -1;
     private boolean runtimeGlobals;
+
+    private void addStep(Step step) {
+        if (firstStep == null) firstStep = step;
+        else {
+            if (remainingSteps == null) remainingSteps = new ArrayList<>(2);
+            remainingSteps.add(step);
+        }
+    }
+
+    private int stepCount() { return firstStep == null ? 0 : remainingSteps == null ? 1 : 1 + remainingSteps.size(); }
+    private Step step(int index) { return index == 0 ? firstStep : remainingSteps.get(index - 1); }
 
     private NullCoalesceAssignment(Memory root, String className, String staticProperty, boolean lateStatic,
                                    Environment env, TraceInfo trace) throws Throwable {
@@ -66,10 +81,10 @@ public final class NullCoalesceAssignment {
 
     public Memory assignGlobalRuntime(Memory assigned,PhpRuntimeOwnership.Frame frame,int sourceEvalId,int sourceLocalId,int mode) throws Throwable {
         if(frame==null)return mode==1?assignRef(assigned):assign(assigned);
-        if(!runtimeGlobals||frame!=runtimeFrame||steps.size()!=1||steps.get(0).key==null
-                ||steps.get(0).property!=null||steps.get(0).variable!=null)
+        if(!runtimeGlobals||frame!=runtimeFrame||stepCount()!=1||firstStep.key==null
+                ||firstStep.property!=null||firstStep.variable!=null)
             throw new IllegalArgumentException("Named GLOBALS requires its exact literal addressed target");
-        return frame.assignGlobal(runtimeSite,runtimeRootLocal,root,steps.get(0).key,assigned,sourceEvalId,sourceLocalId,mode);
+        return frame.assignGlobal(runtimeSite,runtimeRootLocal,root,firstStep.key,assigned,sourceEvalId,sourceLocalId,mode);
     }
 
     public static NullCoalesceAssignment staticProperty(String clazz, String property, boolean lateStatic,
@@ -79,22 +94,22 @@ public final class NullCoalesceAssignment {
 
     public NullCoalesceAssignment index(Memory key) throws Throwable {
         key = key.toImmutable();
-        steps.add(new Step(key, null));
+        addStep(new Step(key, null));
         return this;
     }
 
     public NullCoalesceAssignment indexVariable(Memory key, String name) {
-        steps.add(new Step(key, null, name));
+        addStep(new Step(key, null, name));
         return this;
     }
 
     public NullCoalesceAssignment propertyVariable(Memory name, String variable) {
-        steps.add(new Step(name, null, variable, true));
+        addStep(new Step(name, null, variable, true));
         return this;
     }
 
     public NullCoalesceAssignment append() {
-        steps.add(new Step(null, null));
+        addStep(APPEND_STEP);
         return this;
     }
 
@@ -124,7 +139,7 @@ public final class NullCoalesceAssignment {
     }
 
     public NullCoalesceAssignment property(String name) throws Throwable {
-        steps.add(new Step(null, name));
+        addStep(new Step(null, name));
         return this;
     }
 
@@ -137,7 +152,8 @@ public final class NullCoalesceAssignment {
     public boolean needsAssignment() throws Throwable {
         value = className == null ? root.toValue() : ObjectInvokeHelper.issetStaticProperty(className,
                 className.toLowerCase(Locale.ROOT), staticProperty, env, trace, null, 0, lateStatic).toValue();
-        for (Step step : steps) {
+        for (int i = 0; i < stepCount(); i++) {
+            Step step = step(i);
             if (step.property == null) value = readIndex(value, step.key);
             else value = ObjectInvokeHelper.getQuietProperty(value, step.property, env, trace, null, 0).toValue();
         }
@@ -146,12 +162,24 @@ public final class NullCoalesceAssignment {
     public Memory value() { return value.toImmutable(); }
 
     public Memory assign(Memory assigned) throws Throwable {
+        if (runtimeFrame == null && className == null && remainingSteps == null && firstStep == APPEND_STEP)
+            return assignAppend(assigned);
         return write(assigned, false);
+    }
+
+    private Memory assignAppend(Memory assigned) throws Throwable {
+        Memory result = assigned.toImmutable();
+        if (root instanceof php.runtime.memory.ReferenceMemory)
+            ((php.runtime.memory.ReferenceMemory) root).checkPhpReadonlyArrayWrite();
+        Memory actual = root.toValue();
+        if (actual.isArray())
+            return actual.toValue(ArrayMemory.class).refOfPushPhp8(env, trace).assign(result).toImmutable();
+        return writePrepared(result, false, null, -1, actual);
     }
 
     public Memory assignRuntime(Memory assigned, PhpRuntimeOwnership.Frame frame, int sourceEvalId) throws Throwable {
         if (frame == null) return assign(assigned);
-        if (frame != runtimeFrame || steps.size()!=1 || steps.get(0).property!=null || steps.get(0).variable!=null)
+        if (frame != runtimeFrame || stepCount()!=1 || firstStep.property!=null || firstStep.variable!=null)
             throw new IllegalArgumentException("ARRAY ENTRY requires its exact single addressed target");
         frame.requireArrayTarget(runtimeSite,runtimeRootLocal,root);
         Memory value=assigned.toImmutable();
@@ -186,7 +214,7 @@ public final class NullCoalesceAssignment {
                 frame.requireArrayTarget(runtimeSite,runtimeRootLocal,root);
                 frame.requireArrayValue(sourceEvalId,assigned);
                 result=frame.writableArrayTarget(runtimeSite,runtimeRootLocal,root)
-                        .assignRuntimeEntry(steps.get(0).key,assigned,frame,sourceEvalId,env,trace);
+                        .assignRuntimeEntry(firstStep.key,assigned,frame,sourceEvalId,env,trace);
             }
         } catch(Throwable failure){primary=frame.authority().domain().graph().composeFailure(primary,failure);}
         if(primary!=null)throw primary;
@@ -205,21 +233,26 @@ public final class NullCoalesceAssignment {
         Memory result = byReference && assigned instanceof php.runtime.memory.ReferenceMemory
                 ? ((php.runtime.memory.ReferenceMemory) assigned).getReferenceForBinding()
                 : byReference || frame != null ? assigned : assigned.toImmutable();
-        Memory container = className == null ? root : steps.isEmpty() && !byReference
+        return writePrepared(result, byReference, frame, sourceEvalId, null);
+    }
+
+    private Memory writePrepared(Memory result, boolean byReference, PhpRuntimeOwnership.Frame frame, int sourceEvalId,
+                                 Memory firstActual) throws Throwable {
+        Memory container = className == null ? root : firstStep == null && !byReference
                 ?ObjectInvokeHelper.directStaticProperty(className,className.toLowerCase(Locale.ROOT),staticProperty,env,trace,null,0,lateStatic)
                 :ObjectInvokeHelper.getStaticProperty(className,className.toLowerCase(Locale.ROOT),staticProperty,env,trace,null,0,lateStatic);
-        if (steps.isEmpty()) {
+        if (firstStep == null) {
             if (byReference) container.assignRef(result); else result=container.assign(result);
         } else {
-            for (int i = 0; i < steps.size(); i++) {
-                Step step = steps.get(i);
-                boolean last = i == steps.size() - 1;
+            for (int i = 0; i < stepCount(); i++) {
+                Step step = step(i);
+                boolean last = i == stepCount() - 1;
                 if (step.variable != null && step.key.isUndefined()) env.warning(trace, "Undefined variable $%s", step.variable);
                 String property = step.dynamicProperty ? step.key.toString() : step.property;
                 if (property == null) {
-                    if(container instanceof php.runtime.memory.ReferenceMemory)
+                    if((i != 0 || firstActual == null) && container instanceof php.runtime.memory.ReferenceMemory)
                         ((php.runtime.memory.ReferenceMemory)container).checkPhpReadonlyArrayWrite();
-                    Memory actual = container.toValue();
+                    Memory actual = i == 0 && firstActual != null ? firstActual : container.toValue();
                     if (actual.isNull() || actual.getRealType() == Memory.Type.BOOL && !actual.toBoolean()) {
                         if (!actual.isNull() && last) env.error(trace, ErrorType.E_DEPRECATED, "Automatic conversion of false to array is deprecated");
                         if (container instanceof php.runtime.memory.ReferenceMemory)
