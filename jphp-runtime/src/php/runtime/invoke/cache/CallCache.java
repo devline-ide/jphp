@@ -6,6 +6,30 @@ import php.runtime.reflection.support.Entity;
 import java.lang.ref.WeakReference;
 
 abstract public class CallCache<T extends Entity> {
+    private static final ClassValue<Boolean> BASE_ROW_LOOKUP = new ClassValue<Boolean>() {
+        @Override protected Boolean computeValue(Class<?> type) {
+            try {
+                return type.getMethod("getCallCacheRow", CallCache.class, boolean.class).getDeclaringClass() == Environment.class;
+            } catch (ReflectiveOperationException | SecurityException | LinkageError unavailable) {
+                return false;
+            }
+        }
+    };
+    private static final class RowMemo {
+        final WeakReference<Environment> environment;
+        final WeakReference<Row> row;
+        RowMemo(Environment environment, Row row) {
+            this.environment = new WeakReference<>(environment);
+            this.row = new WeakReference<>(row);
+        }
+        boolean live() {
+            Environment owner = environment.get();
+            return owner != null && row.get() != null && owner.isCallCacheActive();
+        }
+    }
+    // One immutable weak pair, never a static-cache root for row -> Entity -> Environment cycles.
+    private volatile RowMemo preferredRow;
+
     /**
      * Retained only for binary linkage of existing Java subclasses. This matrix is no longer populated.
      * Custom storage readers must migrate to getItem(Environment, int); compiled PHP get/put ABI is unchanged.
@@ -13,7 +37,7 @@ abstract public class CallCache<T extends Entity> {
     @Deprecated
     protected Item[][] cache;
 
-    /** An Environment-owned row; a static CallCache must never retain this object. */
+    /** An Environment-owned row; a static CallCache must never strongly retain this object. */
     public static final class Row {
         private Item[] data;
         public Row() { }
@@ -27,7 +51,7 @@ abstract public class CallCache<T extends Entity> {
 
     /** Returns one stable item, including its receiver/scope metadata, under the row's monitor. */
     protected Item getItem(Environment env, int index) {
-        Row row = env.getCallCacheRow(this, false);
+        Row row = row(env, false);
         if (row == null) return null;
         synchronized (row) {
             Item[] data = row.data;
@@ -53,7 +77,7 @@ abstract public class CallCache<T extends Entity> {
     }
 
     protected void putItem(Environment env, int index, Item item) {
-        Row row = env.getCallCacheRow(this, true);
+        Row row = row(env, true);
         if (row == null) return; // A finalized Environment can still execute fallback calls without resurrecting cache state.
         synchronized (row) {
             Item[] data = row.data;
@@ -66,6 +90,26 @@ abstract public class CallCache<T extends Entity> {
             }
             data[index] = item;
         }
+    }
+
+    private Row row(Environment env, boolean create) {
+        RowMemo memo = preferredRow;
+        if (memo != null) {
+            Environment owner = memo.environment.get();
+            Row remembered = memo.row.get();
+            if (owner != null && remembered != null && owner.isCallCacheActive()) {
+                // Other live environments keep their normal lookup without allocating replacement memos.
+                return owner == env ? remembered : env.getCallCacheRow(this, create);
+            }
+        }
+        Row resolved = env.getCallCacheRow(this, create);
+        if (resolved != null && BASE_ROW_LOOKUP.get(env.getClass())) {
+            synchronized (this) {
+                RowMemo current = preferredRow;
+                if (current == null || !current.live()) preferredRow = new RowMemo(env, resolved);
+            }
+        }
+        return resolved;
     }
 
     protected static class Item {

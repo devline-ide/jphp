@@ -710,3 +710,51 @@ benchmark/class/seed-specific admission is used.
 See coordinating docs/php-kotlin-kernels.md, devline-php-optimizer tests,
 phpKotlinKernelsPipelineCheck and phpKernelSettingsPersistenceCheck. Timing
 receipts belong to build/php-numeric-arrays-20261028-r2 and are not game FPS.
+
+### ABI34 runtime call-cache row reuse (2026-10-28, local candidate)
+
+The selected general-runtime candidate adds one immutable weak Environment/Row
+memo to each CallCache. Both references are weak; the Environment remains the
+row owner. A live first owner retains the memo slot while other environments use
+the original lookup, avoiding replacement allocation on alternating environments.
+Row locking, exact Item.env validation, receiver/scope checks and virtual cache
+hooks remain. A ClassValue permits memoization only when getCallCacheRow is the
+inherited Environment implementation. Java overrides retain their full lookup
+path. Volatile retirement state prevents reuse or resurrection after finalization
+starts. There is no new PHP-language deviation or compiler ABI/flag change.
+
+Cache-only SOURCE/PHB each pass 14 selected tests, including weak cyclic owner
+collection, environment isolation, concurrent get/put, custom hooks and retirement
+failure. The packaged JAR passes 1519 boundary checks and correctness checks of
+all 19 earlier workloads. A separate trial cached the existing checker for a
+single int/float/bool/string declaration: its SOURCE/PHB 32-test lanes pass, but
+it did not establish an additional performance benefit and was removed. Its
+three new regression tests also pass on the selected cache-only artifact in both
+lanes. A proposed closure factory shortcut was not applied because skipped caller
+getters can execute Java hooks or ownership validation.
+
+The four-variant control retains master2020, frozen ABI34 ON, cache-only ON and
+cache-plus-checker ON: 12 fresh JVMs, ten unchanged known workloads, 128 rows,
+2s warmup, seven samples >=200ms and full oracle validation on every invocation.
+All 840 samples pass. The private optimizer JAR remains frozen at 9e910f2a;
+the later dynamic-array private provider is not measured in this control.
+Cache-only improves weighted8, weighted33, repeat, world1, world2 and reference
+in all three paired processes. World2 median JVM time changes 2.163 -> 1.612 ms
+(paired ratios 1.070/1.342/1.805); references 1656 -> 1279 ns
+(1.030/1.589/1.325), still slower than master's 365.5 ns. Other directions are
+mixed. Against master the candidate still wins only five of ten workloads.
+The general performance objective is not complete. CPU spans 15.5-90.6%, median
+41.6%, including benchmark/JIT/GC and background work; timings are window-specific.
+Allocated bytes are not retained RAM, and this does not measure renderer FPS.
+
+The immutable selected core SHA-256 is
+878a6402eb033bcfab0d60c3740e480563031dd608cf382a2140ab9002a2a7f3.
+Evidence is under build/jphp-general-perf-20261027-r1/abi34-dispatch/:
+cache-only/provenance.json, runtime-classpath.txt beside it, control-handoff/
+(report.md and handoff.json), control-cpu.json and selection.json. The historical
+handoff is explicitly UNSELECTED; selection.json records the subsequent root
+choice for independent combined validation, not an IDE release or installation.
+The working files for this change match the selected snapshot. An unrelated
+ClassWrapper.java nullable-annotation fix appeared concurrently and is preserved
+in the workspace, but is not present in this measured artifact. Use the frozen
+JAR for reproduction; a new workspace build would include that separate change.

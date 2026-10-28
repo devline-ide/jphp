@@ -146,7 +146,7 @@ public class Environment {
     private static final ThreadLocal<ThreadBinding> executionBindings = new ThreadLocal<>();
     private final Set<ThreadBinding> threadBindings = new HashSet<>();
     private ThreadBinding constructionBinding;
-    private boolean finalizationStarted;
+    private volatile boolean finalizationStarted;
     private final PhpOperationGate finalizationGate = new PhpOperationGate();
     private PhpExecutionLineage.Token finalizationOwner;
     private volatile boolean finalizationComplete;
@@ -217,6 +217,9 @@ public class Environment {
             if (previous == null) contexts.remove();else contexts.set(previous);closed=true;
         }
     }
+
+    /** Weak row memos may bypass lookup only while this Environment still owns its cache storage. */
+    public final boolean isCallCacheActive() { return !finalizationStarted && !finalizationComplete; }
 
     /** Runtime cache storage is owned by this Environment, never by a compiled class's static cache. */
     public CallCache.Row getCallCacheRow(CallCache<?> cache, boolean create) {

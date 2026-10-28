@@ -363,7 +363,18 @@ public class ClassWrapper {
             entity = new WrapCompileMethodEntity(classEntity.getExtension());
         }
 
-        entity.addMethod(method, skipConflicts);
+        if (entity.addMethod(method, skipConflicts)) {
+            ParameterEntity[] parameters = entity.getParameters(CompileMethodEntity.getPhpArgumentCount(method));
+            Class<?>[] types = interfaceMethod.getParameterTypes();
+            java.lang.annotation.Annotation[][] annotations = interfaceMethod.getParameterAnnotations();
+            int argument = 0;
+            for (int i = 0; i < types.length; i++) {
+                if (types[i] == Environment.class || types[i] == php.runtime.env.TraceInfo.class
+                        || ReflectionUtils.getAnnotation(annotations[i], php.runtime.annotation.Runtime.GetLocals.class) != null) continue;
+                if (ReflectionUtils.getAnnotation(annotations[i], Reflection.Nullable.class) != null) parameters[argument].setNullable(true);
+                argument++;
+            }
+        }
         entity.setName(name);
         if (_entity == null) {
             entity.setClazz(classEntity);
