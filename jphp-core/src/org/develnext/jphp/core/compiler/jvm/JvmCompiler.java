@@ -59,6 +59,7 @@ public class JvmCompiler extends AbstractCompiler {
         this.module.setPhpLanguageProfile(context.getPhpLanguageProfile(scope));
         this.module.setOptimizationProfile(context.getPhpOptimizationProfile(scope));
         this.module.setOwnershipMode(context.getPhpOwnershipMode(scope));
+        this.module.setArrayOptimizationEnabled(context.isPhpArrayOptimizationEnabled(scope));
         if (this.module.getOptimizationProfile() != php.runtime.common.PhpOptimizationProfile.COMPATIBLE
                 && this.module.getPhpLanguageProfile() != php.runtime.common.PhpLanguageProfile.PHP_8_5)
             throw new IllegalArgumentException("Fast numeric optimization requires PHP_8_5 language semantics");

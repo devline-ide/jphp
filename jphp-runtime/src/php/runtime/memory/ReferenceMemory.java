@@ -669,11 +669,37 @@ public class ReferenceMemory extends Memory {
         return new ReferenceMemory(getValue().toImmutable());
     }
 
+    /** Two plain raw carriers cannot expose a sparse CELL or captured object. */
+    private boolean needsPrimitiveRead() {
+        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE) return true;
+        Memory payload = _value;
+        if (payload instanceof ReferenceMemory) {
+            ReferenceMemory target = (ReferenceMemory) payload;
+            if (target.ownershipAuthority != null && target.ownershipAuthority != SHARED_REFERENCE) return true;
+            payload = target._value;
+        }
+        return payload instanceof ReferenceMemory || payload instanceof ObjectMemory;
+    }
+
+    /** Read-only numeric proof; foreign metadata and virtual getters retain ordinary dispatch. */
+    public final LongMemory peekPlainLongValue() {
+        if (getClass() != ReferenceMemory.class || ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE)
+            return null;
+        Memory payload = _value;
+        if (payload instanceof ReferenceMemory) {
+            ReferenceMemory target = (ReferenceMemory) payload;
+            if (target.getClass() != ReferenceMemory.class
+                    || target.ownershipAuthority != null && target.ownershipAuthority != SHARED_REFERENCE)
+                return null;
+            payload = target._value;
+        }
+        return payload.getClass() == LongMemory.class ? (LongMemory) payload : null;
+    }
+
     public Memory getValue() {
         // An unattached direct scalar/array cannot expose a sparse CELL or
         // closure capture. Retain the full ingress check for aliases/objects.
-        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE
-                || _value instanceof ReferenceMemory || _value instanceof ObjectMemory)
+        if (needsPrimitiveRead())
             php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
         return _value;
     }
@@ -787,8 +813,7 @@ public class ReferenceMemory extends Memory {
 
     /** Ownership adapters may inspect a carrier without evaluating its overridden PHP getter. */
     public final Memory getRawValue() {
-        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE
-                || _value instanceof ReferenceMemory || _value instanceof ObjectMemory)
+        if (needsPrimitiveRead())
             php.runtime.PhpPrimitiveCellRuntime.beforeRawRead(this);
         return _value;
     }
@@ -1659,8 +1684,7 @@ public class ReferenceMemory extends Memory {
     }
 
     public ReferenceMemory getReference(){
-        if (ownershipAuthority != null && ownershipAuthority != SHARED_REFERENCE
-                || _value instanceof ReferenceMemory || _value instanceof ObjectMemory)
+        if (needsPrimitiveRead())
             php.runtime.PhpPrimitiveCellRuntime.beforeStructuralRead(this);
         if (getValue().type == Type.REFERENCE){
             return ((ReferenceMemory)getValue()).getReference();

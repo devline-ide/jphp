@@ -10,6 +10,7 @@ import javafx.scene.text.Font;
 import javafx.scene.text.TextAlignment;
 import org.develnext.jphp.ext.javafx.JavaFXExtension;
 import org.develnext.jphp.ext.javafx.classes.text.UXFont;
+import php.runtime.Memory;
 import php.runtime.annotation.Reflection;
 import php.runtime.annotation.Reflection.*;
 import php.runtime.env.Environment;
@@ -74,6 +75,10 @@ public class UXLabeled<T extends Labeled> extends UXControl<Labeled> {
     @Setter
     public void setTextColor(Color color) {
         getWrappedObject().setTextFill(color);
+        if (data("--property-textColor-setter").isNotNull()) {
+            try { super.__set(__env__, "textColor", Memory.wrap(__env__, color)); }
+            catch (Throwable failure) { __env__.forwardThrow(failure); }
+        }
     }
 
     @Getter

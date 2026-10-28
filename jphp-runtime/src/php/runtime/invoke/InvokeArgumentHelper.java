@@ -24,16 +24,28 @@ import php.runtime.reflection.ParameterEntity;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReferenceArray;
 
 public class InvokeArgumentHelper {
     private static final String INVALID_TYPE_MESSAGE = "Only arrays and Traversables can be unpacked";
+    private record ClosureName(String file, int line, String display) {}
+    // Diagnostics repeat for every closure call. Retain only a bounded set of
+    // small strings, never declarations, source contexts or environments.
+    private static final AtomicReferenceArray<ClosureName> CLOSURE_NAMES = new AtomicReferenceArray<>(256);
 
     public static String closureCallName(php.runtime.lang.Closure closure) {
         if (closure instanceof PhpCallableFactory.CapturedClosure)
             return ((PhpCallableFactory.CapturedClosure) closure).getCallName();
         TraceInfo declaration = closure.getReflection().getTrace();
-        return declaration == null || declaration.isUnknown() ? "{closure}"
-                : "{closure:" + declaration.getFileName() + ":" + (declaration.getStartLine() + 1) + "}";
+        if (declaration == null || declaration.isUnknown()) return "{closure}";
+        String file = declaration.getFileName();
+        int line = declaration.getStartLine();
+        int slot = (31 * file.hashCode() + line) & (CLOSURE_NAMES.length() - 1);
+        ClosureName cached = CLOSURE_NAMES.get(slot);
+        if (cached != null && cached.line == line && cached.file.equals(file)) return cached.display;
+        String display = "{closure:" + file + ":" + (line + 1) + "}";
+        if (file.length() <= 1024) CLOSURE_NAMES.set(slot, new ClosureName(file, line, display));
+        return display;
     }
 
     public static Memory[] argumentsByValue(Memory[] args) {

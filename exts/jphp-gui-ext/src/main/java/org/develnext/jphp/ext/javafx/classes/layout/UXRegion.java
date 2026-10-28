@@ -9,6 +9,7 @@ import javafx.scene.paint.Color;
 import javafx.scene.paint.Paint;
 import org.develnext.jphp.ext.javafx.JavaFXExtension;
 import org.develnext.jphp.ext.javafx.classes.UXParent;
+import php.runtime.Memory;
 import php.runtime.annotation.Reflection.*;
 import php.runtime.env.Environment;
 import php.runtime.reflection.ClassEntity;
@@ -177,6 +178,10 @@ public class UXRegion<T extends Region> extends UXParent<Region> {
             getWrappedObject().setBackground(null);
         } else {
             getWrappedObject().setBackground(new Background(new BackgroundFill(color, CornerRadii.EMPTY, Insets.EMPTY)));
+        }
+        if (data("--property-backgroundColor-setter").isNotNull()) {
+            try { super.__set(__env__, "backgroundColor", Memory.wrap(__env__, color)); }
+            catch (Throwable failure) { __env__.forwardThrow(failure); }
         }
     }
 

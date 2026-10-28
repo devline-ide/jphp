@@ -88,14 +88,19 @@ public class LongMemory extends Memory {
 
     @Override
     public String toString() {
-        if (value >= 0 && value < MAX_CACHE_STRING) {
-            String value = STRING_VALUES[(int) this.value];
+        return toString(value);
+    }
 
-            if (value == null) {
-                value = STRING_VALUES[(int) this.value] = String.valueOf(this.value);
+    /** Reuse the same bounded decimal cache for compiler primitive string operands. */
+    public static String toString(long value) {
+        if (value >= 0 && value < MAX_CACHE_STRING) {
+            String text = STRING_VALUES[(int) value];
+
+            if (text == null) {
+                text = STRING_VALUES[(int) value] = String.valueOf(value);
             }
 
-            return value;
+            return text;
         }
 
         return String.valueOf(value);

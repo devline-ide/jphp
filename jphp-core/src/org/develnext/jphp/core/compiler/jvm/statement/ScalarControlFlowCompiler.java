@@ -78,6 +78,11 @@ final class ScalarControlFlowCompiler {
         nextSlot=parameters.values().stream().mapToInt(local->local.slot()+local.kind().width()).max().orElse(0);
     }
     Kind result(){return result;}
+    Block reduction(Value value, int line) {
+        if (result == null) result = value.kind();
+        require(assignable(value.kind(), result));
+        return new Block(List.of(new Return(line, value)), false);
+    }
     List<Local> locals(){return List.copyOf(allocated.values());}
     Block analyze(BodyStmtToken body){return block(body,new LinkedHashMap<>(entry));}
     private Value value(ExprStmtToken token,Map<String,Local> definite){return expression.apply(tokens.apply(token),definite);}

@@ -18,6 +18,7 @@ public final class ModuleCacheKey {
     private final String importsFingerprint;
     private final PhpOptimizationProfile optimizationProfile;
     private final PhpRuntimeOwnershipMode ownershipMode;
+    private final boolean arrayOptimization;
 
     public ModuleCacheKey(String path, boolean compiled, PhpLanguageProfile profile) {
         this(path, compiled, profile, "");
@@ -34,12 +35,18 @@ public final class ModuleCacheKey {
 
     public ModuleCacheKey(String path, boolean compiled, PhpLanguageProfile profile, String importsFingerprint,
                           PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode) {
+        this(path, compiled, profile, importsFingerprint, optimizationProfile, ownershipMode, false);
+    }
+
+    public ModuleCacheKey(String path, boolean compiled, PhpLanguageProfile profile, String importsFingerprint,
+                          PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode, boolean arrayOptimization) {
         this.path = normalize(path);
         this.compiled = compiled;
         this.profile = compiled ? null : Objects.requireNonNull(profile);
         this.importsFingerprint = compiled ? "" : Objects.requireNonNull(importsFingerprint);
         this.optimizationProfile = compiled ? null : Objects.requireNonNull(optimizationProfile);
         this.ownershipMode = compiled ? null : Objects.requireNonNull(ownershipMode);
+        this.arrayOptimization = !compiled && arrayOptimization;
     }
 
     public static String normalize(String path) {
@@ -55,8 +62,8 @@ public final class ModuleCacheKey {
         if (!(other instanceof ModuleCacheKey)) return false;
         ModuleCacheKey key = (ModuleCacheKey) other;
         return compiled == key.compiled && profile == key.profile && path.equals(key.path)
-                && importsFingerprint.equals(key.importsFingerprint) && optimizationProfile == key.optimizationProfile && ownershipMode == key.ownershipMode;
+                && importsFingerprint.equals(key.importsFingerprint) && optimizationProfile == key.optimizationProfile && ownershipMode == key.ownershipMode && arrayOptimization == key.arrayOptimization;
     }
 
-    @Override public int hashCode() { return Objects.hash(path, compiled, profile, importsFingerprint, optimizationProfile, ownershipMode); }
+    @Override public int hashCode() { return Objects.hash(path, compiled, profile, importsFingerprint, optimizationProfile, ownershipMode, arrayOptimization); }
 }

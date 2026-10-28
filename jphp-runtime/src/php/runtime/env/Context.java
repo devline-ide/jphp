@@ -22,6 +22,7 @@ public class Context {
     private PhpLanguageProfile phpLanguageProfile;
     private PhpOptimizationProfile phpOptimizationProfile;
     private PhpRuntimeOwnershipMode phpOwnershipMode;
+    private Boolean phpArrayOptimizationEnabled;
     private String contentModuleName;
     private Map<String, String> implicitClassImports = Collections.emptyMap();
     private String implicitClassImportsFingerprint = "";
@@ -95,6 +96,12 @@ public class Context {
     }
 
     public void setPhpOwnershipMode(PhpRuntimeOwnershipMode mode) { phpOwnershipMode = mode; }
+
+    public boolean isPhpArrayOptimizationEnabled(CompileScope scope) {
+        return phpArrayOptimizationEnabled == null ? scope != null && scope.isPhpArrayOptimizationEnabled() : phpArrayOptimizationEnabled;
+    }
+
+    public void setPhpArrayOptimizationEnabled(boolean enabled) { phpArrayOptimizationEnabled = enabled; }
 
     /**
      * Optional CLASS imports for this source only. Aliases are the class basenames.

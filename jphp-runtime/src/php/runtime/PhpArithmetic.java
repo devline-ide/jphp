@@ -222,11 +222,25 @@ public final class PhpArithmetic {
     }
 
     public static Memory assign(Memory target, Memory right, String operator, Environment env, TraceInfo trace) {
-        Memory result = binary(target, right, operator, env, trace);
-        return target.assign(result).toImmutable();
+        return assign(target, right, operator, env, trace, optimizationProfile(env, trace).getId());
     }
 
     public static Memory assign(Memory target, Memory right, String operator, Environment env, TraceInfo trace, int optimizationProfileId) {
+        // Only standard raw carriers admit a read with no virtual getter or
+        // sparse ownership ingress. All publication/type/readonly checks still
+        // belong to the normal target assignment below.
+        if (target instanceof php.runtime.memory.ReferenceMemory && right != null && right.getClass() == LongMemory.class
+                && (operator == "plus" || operator == "minus" || operator == "mul")) {
+            LongMemory left = ((php.runtime.memory.ReferenceMemory) target).peekPlainLongValue();
+            if (left != null) {
+                boolean wrap = PhpOptimizationProfile.fromId(optimizationProfileId) == PhpOptimizationProfile.FAST_INT64_WRAP;
+                long a = left.value, b = ((LongMemory) right).value;
+                Memory result = operator == "plus" ? wrap ? LongMemory.valueOf(a + b) : OperatorUtils.plus(a, b)
+                        : operator == "minus" ? wrap ? LongMemory.valueOf(a - b) : OperatorUtils.minus(a, b)
+                        : wrap ? LongMemory.valueOf(a * b) : OperatorUtils.mul(a, b);
+                return target.assign(result).toImmutable();
+            }
+        }
         Memory result = binary(target, right, operator, env, trace, optimizationProfileId);
         return target.assign(result).toImmutable();
     }

@@ -4,6 +4,7 @@ import php.runtime.env.Environment;
 import php.runtime.env.TraceInfo;
 import php.runtime.exceptions.support.ErrorType;
 import php.runtime.memory.BinaryMemory;
+import php.runtime.memory.LongMemory;
 import php.runtime.memory.PhpByteStringMemory;
 import php.runtime.memory.StringMemory;
 
@@ -42,7 +43,7 @@ public final class PhpByteStringValues {
         Memory actual=((Memory)value).toValue();
         if (actual instanceof PhpByteStringMemory) return actual;
         if (actual.isString() && !(actual instanceof BinaryMemory)) return actual.toString();
-        if (actual.type==Memory.Type.INT) return Long.toString(actual.toLong());
+        if (actual.type==Memory.Type.INT) return LongMemory.toString(actual.toLong());
         if (actual.type==Memory.Type.DOUBLE) return doubleString(actual.toDouble(),env,trace);
         if (actual.type==Memory.Type.BOOL) return actual.toBoolean() ? "1" : "";
         if (actual.isNull()) return "";
@@ -70,8 +71,8 @@ public final class PhpByteStringValues {
     public static Object concat(Object left,Object right,Environment env,TraceInfo trace)throws Throwable {
         Object a=stringObject(left,env,trace);Object b=stringObject(right,env,trace);return join(a,b);
     }
-    public static Object concat(Object left,long right,Environment env,TraceInfo trace)throws Throwable {return join(stringObject(left,env,trace),Long.toString(right));}
-    public static Object concat(long left,Object right,Environment env,TraceInfo trace)throws Throwable {return join(Long.toString(left),stringObject(right,env,trace));}
+    public static Object concat(Object left,long right,Environment env,TraceInfo trace)throws Throwable {return join(stringObject(left,env,trace),LongMemory.toString(right));}
+    public static Object concat(long left,Object right,Environment env,TraceInfo trace)throws Throwable {return join(LongMemory.toString(left),stringObject(right,env,trace));}
     public static Object concat(Object left,double right,Environment env,TraceInfo trace)throws Throwable {Object a=stringObject(left,env,trace);return join(a,doubleString(right,env,trace));}
     public static Object concat(double left,Object right,Environment env,TraceInfo trace)throws Throwable {String a=doubleString(left,env,trace);return join(a,stringObject(right,env,trace));}
     public static Object concat(Object left,boolean right,Environment env,TraceInfo trace)throws Throwable {return join(stringObject(left,env,trace),right ? "1" : "");}
@@ -83,19 +84,19 @@ public final class PhpByteStringValues {
     public static Memory assign(Memory left,double right,Environment env,TraceInfo trace)throws Throwable {PhpStringOffsets.requireAssignOp(left,env,trace);return left.assign(box(concat(left,right,env,trace)));}
     public static Memory assign(Memory left,boolean right,Environment env,TraceInfo trace)throws Throwable {PhpStringOffsets.requireAssignOp(left,env,trace);return left.assign(box(concat(left,right,env,trace)));}
     public static Memory assign(Memory left,char right,Environment env,TraceInfo trace)throws Throwable {PhpStringOffsets.requireAssignOp(left,env,trace);return left.assign(box(concat(left,right,env,trace)));}
-    public static Object concat(long left,long right,Environment env,TraceInfo trace){String a=Long.toString(left);String b=Long.toString(right);return a.concat(b);}
-    public static Object concat(long left,double right,Environment env,TraceInfo trace){String a=Long.toString(left);String b=doubleString(right,env,trace);return a.concat(b);}
-    public static Object concat(long left,boolean right,Environment env,TraceInfo trace){String a=Long.toString(left);String b=(right ? "1" : "");return a.concat(b);}
-    public static Object concat(long left,char right,Environment env,TraceInfo trace){String a=Long.toString(left);String b=String.valueOf(right);return a.concat(b);}
-    public static Object concat(double left,long right,Environment env,TraceInfo trace){String a=doubleString(left,env,trace);String b=Long.toString(right);return a.concat(b);}
+    public static Object concat(long left,long right,Environment env,TraceInfo trace){String a=LongMemory.toString(left);String b=LongMemory.toString(right);return a.concat(b);}
+    public static Object concat(long left,double right,Environment env,TraceInfo trace){String a=LongMemory.toString(left);String b=doubleString(right,env,trace);return a.concat(b);}
+    public static Object concat(long left,boolean right,Environment env,TraceInfo trace){String a=LongMemory.toString(left);String b=(right ? "1" : "");return a.concat(b);}
+    public static Object concat(long left,char right,Environment env,TraceInfo trace){String a=LongMemory.toString(left);String b=String.valueOf(right);return a.concat(b);}
+    public static Object concat(double left,long right,Environment env,TraceInfo trace){String a=doubleString(left,env,trace);String b=LongMemory.toString(right);return a.concat(b);}
     public static Object concat(double left,double right,Environment env,TraceInfo trace){String a=doubleString(left,env,trace);String b=doubleString(right,env,trace);return a.concat(b);}
     public static Object concat(double left,boolean right,Environment env,TraceInfo trace){String a=doubleString(left,env,trace);String b=(right ? "1" : "");return a.concat(b);}
     public static Object concat(double left,char right,Environment env,TraceInfo trace){String a=doubleString(left,env,trace);String b=String.valueOf(right);return a.concat(b);}
-    public static Object concat(boolean left,long right,Environment env,TraceInfo trace){String a=(left ? "1" : "");String b=Long.toString(right);return a.concat(b);}
+    public static Object concat(boolean left,long right,Environment env,TraceInfo trace){String a=(left ? "1" : "");String b=LongMemory.toString(right);return a.concat(b);}
     public static Object concat(boolean left,double right,Environment env,TraceInfo trace){String a=(left ? "1" : "");String b=doubleString(right,env,trace);return a.concat(b);}
     public static Object concat(boolean left,boolean right,Environment env,TraceInfo trace){String a=(left ? "1" : "");String b=(right ? "1" : "");return a.concat(b);}
     public static Object concat(boolean left,char right,Environment env,TraceInfo trace){String a=(left ? "1" : "");String b=String.valueOf(right);return a.concat(b);}
-    public static Object concat(char left,long right,Environment env,TraceInfo trace){String a=String.valueOf(left);String b=Long.toString(right);return a.concat(b);}
+    public static Object concat(char left,long right,Environment env,TraceInfo trace){String a=String.valueOf(left);String b=LongMemory.toString(right);return a.concat(b);}
     public static Object concat(char left,double right,Environment env,TraceInfo trace){String a=String.valueOf(left);String b=doubleString(right,env,trace);return a.concat(b);}
     public static Object concat(char left,boolean right,Environment env,TraceInfo trace){String a=String.valueOf(left);String b=(right ? "1" : "");return a.concat(b);}
     public static Object concat(char left,char right,Environment env,TraceInfo trace){String a=String.valueOf(left);String b=String.valueOf(right);return a.concat(b);}

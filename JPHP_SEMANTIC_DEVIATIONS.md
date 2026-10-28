@@ -24,6 +24,27 @@ later product/user decision explicitly supersedes them; record that decision
 and migration here. Do not label an accidental bug as an intentional difference
 to avoid fixing it.
 
+## Performance policy reaffirmed on 2026-10-28
+
+**Accepted user decision:** JPHP may depart from PHP 8.5's internal execution
+model to improve measured performance. Familiar PHP syntax and language APIs
+remain the reference for authors; the JVM implementation may use its own value
+representation, specialization, call lowering, ownership and execution strategy.
+Reproducing Zend's internal mechanisms is not a product requirement.
+
+The current optimization work is authorized to implement bounded differences
+where useful. For an observable language difference, record the selected JPHP
+behavior, its rationale, measured benefit, affected programs, compatibility or
+version/profile boundary and regression evidence here. A proposed tradeoff
+becomes an implemented feature only after that behavior and its tests exist.
+Internal changes with equivalent observable results are optimizations rather
+than new language differences; record their supported subset and fallback.
+
+When adding support for a later PHP version, preserve these accepted JPHP rules
+and tests. Replace a decision through an explicit superseding ledger entry and
+migration, rather than automatically restoring PHP parity. Keep negative timing
+results and distinguish allocation rate from retained memory and game FPS.
+
 ## Status and compatibility boundary
 
 - **Proposed:** a possible optimization or language rule, not an implemented
@@ -370,7 +391,10 @@ not the older incremental scalar/ownership baseline. Verification receipts live
 in the coordinating IDE workspace under `build/jphp-general-perf-20261027-r1`.
 The frozen master is `eefaac6d8195025ba53c2b7b0996a9c128b2ffb7`; the frozen
 prechange current source is `0ddb33655da3c6f9c0e4f80acf123099ebfe6fb0`.
-No release or implementing commit is asserted for these uncommitted changes.
+The r5 capture preceded the later `d3b30922` checkpoint of this implementation.
+The frozen source manifest remains its reproduction identity; that checkpoint
+does not establish a released IDE build. Later follow-ups retain separate
+snapshots and verification rather than overwriting r5.
 
 - **OPT-006, general runtime paths:** bounded ASCII-name normalization reuse,
   ordinary cached static dispatch, lazy return-error naming, reflected-member
@@ -421,3 +445,240 @@ map/build/64-tick/state-serialization operation (28.33% less). Its timing median
 is 32.081 -> 25.366 ms, but one of three paired JVM comparisons reverses that
 direction, and external activity was observed. Treat timing as directional
 only. This neither establishes faster rendering nor reduced retained RAM.
+
+### Independent r5 verification received, 2026-10-27
+
+The independent unchanged 19-workload run completed nine fresh JVM processes
+with 1197 validated samples, three rotated forks per version, two-second warmup
+and seven samples of at least 200 ms. Every variant (master, prechange, r5)
+also passes 1519 boundary checks. Source/JAR/class bytes remain unchanged.
+
+By pooled median, r5 is over 5% faster on nine workloads and slower on ten
+against master 2020. Against prechange modern JPHP it improves sixteen, regresses
+two (strings and closures by pooled median) and leaves references approximately
+unchanged. Per-process directions matter: strings and closures are mixed against
+prechange, so their pooled regression alone does not prove a particular patch
+caused the slowdown. Against master, eight workloads improve in every paired
+fork, eight lose in every pair, and scalar composition/packed/associative arrays
+change direction. No universal language speedup is established.
+
+The machine was not isolated: observed CPU spans 15.0-91.8%, median 46.9%,
+including benchmark/JIT/GC. Keep background and per-fork spread with coefficients.
+The selected regression suite retains its identical prechange cycle failure.
+Detailed tables and raw samples are retained in the coordinating workspace as
+`build/jphp-general-perf-20261027-r1/jphp-r5-independent-report.txt`,
+`jphp-r5-independent-results.csv` and `jphp-r5-independent-results.json`.
+
+The next runtime-only candidate restores use of the existing integer decimal
+cache during concatenation, bounds closure diagnostic-name reuse, separates
+standard integer arithmetic from coercion and proves one plain reference hop
+before omitting sparse-CELL scans. These do not introduce new PHP divergences
+or change compiler ABI 32. Candidate r6 is separate from the independently
+measured r5; do not attach r5's timing coefficients to those new changes.
+
+### Selected runtime follow-up: r8
+
+The intermediate r6/r7 generic integer `binary` entry was not retained. R8
+restores the r5 generic binary body and applies the numeric shortcut only to
+compound assignment with a raw proof: exact ordinary `ReferenceMemory`, at
+most one exact ordinary alias, no sparse/foreign authority, exact `LongMemory`
+payload and right operand. Interned `plus`/`minus`/`mul` opcodes take that path;
+dynamic opcode strings, custom getters/subclasses, other types, longer chains
+and managed carriers use the original implementation. The result is published
+through ordinary `target.assign(result).toImmutable()`, including property,
+readonly and type checks. Existing numeric-profile/overflow rules remain.
+
+String concatenation reuses the *existing* decimal cache for integers 0-9999;
+its size and range are unchanged. Other integers retain standard conversion.
+Ordinary closure diagnostic names have a bounded 256-entry cache storing only
+file strings, line numbers and display strings, with file length at most 1024.
+Captured first-class callable names retain their own qualified-name path.
+These caches exchange bounded retained strings for fewer transient allocations;
+they are not evidence that retained application RAM shrank. The unmeasured
+shared-empty-argument-vector experiment was removed.
+
+The r8 local comparison uses six fresh JVMs, three alternating r5/r8 pairs and
+798 oracle-checked samples of the unchanged 19 workloads. Reference arithmetic
+improves in every pair (1.998x/2.320x/2.233x); string construction does too
+(1.251x/1.168x/1.203x). Closure timings remain mixed while allocated bytes change
+from 21136.5 to 12944.5 per 64-call operation. String allocation changes from
+14881.5 to 11809.5 bytes. Packed-array pooled allocation remains 4352.5 bytes;
+its transient-builder elimination varied across exploratory JVM processes, and
+the isolated arithmetic rollback did not establish a causal regression.
+Whole-machine CPU in the final control spans 14.0-60.3%, median 18.8%, including
+the benchmark/JIT/GC. Keep all workloads and per-process variation with results.
+
+Full selected SOURCE/PHB lanes each run 187 tests: 186 pass, the same prechange
+cycle-serialization failure remains, and none are skipped. Both directory and
+packaged-JAR runs pass 1519 boundary checks. In the unchanged Stonewatch model,
+all eight complete states agree across six JVMs and previous receipts. Allocation
+falls in all three pairs (9728280 -> 9199855 bytes/operation, 5.43% less), but
+application timing gain is **not established**: paired ratios are
+0.985x/1.020x/0.891x under observed 33-64% machine load. Preserve the earlier
+r7 negative application receipt as well. No FPS or retained-RAM claim follows.
+
+This is a sealed, uncommitted compiler/runtime candidate on top of checkpoint
+`d3b30922`, not an installed IDE release. ABI remains 32. Exact classpath, source
+and JAR hashes, all-workload CSV, raw samples, tests and negative observations
+are recorded at `build/jphp-general-perf-20261027-r1/independent-verification-handoff-r8.json`.
+Independent post-seal verification with renamed code and previously unseen inputs
+is completed below; its mixed timing results supersede general local claims.
+
+Pure sibling kernels do not construct a PHP call frame for each internal helper
+or recursive kernel call. Debug mode retains ordinary execution. Resource
+exhaustion depth and internal diagnostic stack shape need not match ordinary
+execution; do not extend the pure-path claim to exact diagnostic-stack parity.
+
+### Independent r8 verification (2026-10-27)
+
+The sealed r8 passed a post-seal holdout with renamed classes and new inputs:
+nine classes plus an interface, polymorphic methods, references, captured
+closures/cycles and COW checkpoints. All 36 full states match an independent
+Python oracle in each of three fresh JVMs for both r5 and r8. Allocations fall
+6.06%/6.32%/6.09% on small/medium/large cases. Small and medium are faster in
+all three paired processes; large has mixed timing directions. These are model
+operations including setup/export/oracle checks, not renderer FPS or retained RAM.
+
+The unchanged 19-workload independent control uses nine fresh JVMs and 1197
+checked samples. Against master 2020 r8 has eight pooled wins above 5% and eleven
+losses; against r5 it has four wins, ten losses and five near-equal cases.
+Reference arithmetic is about 2.035x faster than r5 with all three pairs winning.
+String/closure timing gains are mixed across pairs. oldLoop, numericFor,
+scalarAdd and scalarCompose regress against r5 in every pair; their cause remains
+under investigation. No universal runtime speedup is established.
+
+Master's full holdout changes original COW checkpoints with their copies and is
+excluded from holdout timing. Three smaller reductions pass on all versions,
+so this is a contextual observed mismatch with the selected array-copy contract,
+not a claim that all master array copies fail. Native PHP CLI was not run.
+Each version passes 1519 boundary checks. The independent audit read existing
+187-test SOURCE/PHB XML (186 pass, one identical known failure, zero skips);
+it did not rerun that suite. System CPU includes benchmark/JIT/GC and other work:
+microbench 23.9-88.8% (median 39.2%), holdout 12.1-64.5% (median 20.0%).
+
+The immutable audit, full tables, per-process directions and reproduction bundle
+are `C:/Users/ozlig/Documents/Codex/2026-10-27/x20/outputs/`
+`jphp-r8-independent-report.txt`, `jphp-r8-independent-results.json` and
+`jphp-r8-independent-proof.zip`. JAR SHA-256 remains
+`ae775f45d34ffd83cf2bfde98db3d8d91d65f71c089fa107efc20b171978c6ac`.
+The first holdout harness-context error and negative observations are preserved.
+R8 remains a candidate, not a replacement of the running IDE.
+
+### Rejected positional-preparation experiment (r9/r10, 2026-10-28)
+
+The r9 trial added a data-only proof for a full positional vector of exact
+scalar values and known pure parameter checkers. It preserved caller-vector
+cloning, existing frame-owned transfer and ordinary fallback. Adversarial tests
+cover custom metadata/default/checker effects, unusual boolean tags, coercion,
+references, names/unpacking and generator lifetime. Its 475-byte proof added
+another argument scan and did not establish a consistent general call benefit;
+scalarAdd was slower than r5 in all three paired processes. The proof and its
+delegate were removed from production, with the test retained as a regression
+contract. The exact rejected source and measurements remain in the laboratory.
+
+The nine-JVM r5/r9/r10 control checks all 19 unchanged workloads and all 1197
+samples. Whole-machine CPU was 14.5-97.6%, median 42.8%, including our benchmark,
+JIT and GC; many timing directions varied. Keep the full table and negative
+results in `build/jphp-general-perf-20261027-r1/r9-r10-local-report.txt` and
+`r9-r10-local-results.csv`. R9 and r10 are experiments, not installed releases.
+The follow-up r11 separates existing cold coercion/error handling and packed
+append fallback; its bytecode layout is recorded in `r11-method-layout.json`.
+Layout size and crossing an inlining heuristic do not establish acceleration;
+the separate r8/r11 control and rejection decision are recorded below.
+
+### R11 layout experiment rejected as the general default (2026-10-28)
+
+R11 split existing failed type-coercion/error handling from its successful path
+and tried a narrowly guarded ordinary packed append. The relevant hot Code
+sizes were 136 and 212 bytes, respectively. All 67 selected SOURCE tests and
+67 PHB tests pass with zero skips. A separate replay passes the 36 already-known
+independent model cases plus all eight historical Stonewatch full states; this
+replay is not a new unseen holdout.
+
+The r8/r11 all-19-workload control retains six JVMs, three pairs and all 798
+sample oracles. Numeric-loop, scalar-composition, associative-array and COW
+cases improve in all pairs, but several other timing directions vary. Packed
+array allocation increases from 4352.5 to 8448.5 bytes/operation and its pooled
+time worsens. A JIT/escape-analysis interaction is possible, not a proved cause.
+Whole-machine CPU spans 16.0-59.4%, median 31.4%, including our benchmark/JIT/GC.
+The actual-model AUTO comparison also has mixed paired timing and effectively
+unchanged allocation. R11 is therefore retained only as a laboratory experiment.
+
+Both production runtime files were restored surgically, and every current
+core/runtime source hash matches the previously sealed r8 snapshot. The two
+new regression test classes remain. See `selected-source-r8-after-r11.json`,
+`r11-local-report.txt`, `r11-local-results.csv`, `final-r11-summary.json` and
+`replay-r11-after-ownership/receipt.json` in the coordinating laboratory.
+The running IDE and original game projects were never replaced.
+
+### Ownership investigation boundary (2026-10-28)
+
+Ownership instrumentation is an implementation mechanism, not a requirement
+that every scalar or ordinary exclusive array must carry an active ownership
+graph. Eliding irrelevant work is permitted by the accepted performance policy.
+Existing DEV-002 OFF is the explicit module-level contract for omitting generated
+ownership lanes; its admission and lifecycle limits still apply. Ordinary COW,
+references, types and property rules remain separate from that instrumentation.
+
+Distinguish an active Session/Authority graph from passive generated guards.
+The ordinary Environment lazily allocates no ownership-context ThreadLocal and
+its current-session getter can simply return null. The model harness does not
+construct an explicit Session/Authority. AUTO/OFF model comparisons audit the
+cost of generated instrumentation; they do not prove the cost of an active
+ownership graph or that every IDE execution path is passive. Generated class
+bytes are neither executable-Code-only bytes nor retained process RAM.
+
+### Selected r8 AUTO/OFF actual-model audit (2026-10-28)
+
+A final same-engine comparison uses frozen r8 in both modes, six fresh JVMs,
+three alternating pairs, two seconds of warmup and seven samples of at least
+200 ms. The helper, four game model sources, actions and all eight full golden
+states are unchanged. Every measured invocation verifies its complete state.
+The scope, all five source Contexts and stored ModuleEntity metadata are checked
+for the selected mode. The exact compiled helper from the earlier r8/r11 mode
+control is reused, with its source/class hashes verified.
+
+OFF allocates 9217352 -> 8488691 bytes per model operation (7.905% less); all three
+pairs improve by 7.69-7.98%. The 12 generated class files total 1910845 -> 411367
+bytes (78.47% less, including metadata/attributes). This is not a process-RAM,
+renderer or FPS measurement. The pooled time is 28.284 -> 20.973 ms, but paired
+AUTO/OFF ratios are 1.484x/1.499x/0.577x: the third direction reverses. Stable
+application acceleration is not established. Whole-machine CPU full-window
+min/median/max is 43.9/68.6/97.1%, including benchmark/JIT/GC and other work.
+Do not discard the negative pair or transfer the earlier r11-only timing claim
+to r8. Existing OFF is a useful instrumentation/size tradeoff to evaluate within
+DEV-002's documented boundary, not permission to remove all ownership rules.
+
+Evidence is in the coordinating laboratory at
+`build/jphp-general-perf-20261027-r1/ownership-r8-auto-off/summary.json`,
+`config-manifest.json`, `notes.json` and the adjacent
+`ownership-r8-auto-off-cpu.json`. Earlier r8/r11/AUTO/OFF control and all negative
+candidates remain preserved. AUTO remains the default; original projects and
+the running IDE were not modified. The two newly retained regression classes
+also pass on the selected r8 itself: SOURCE 11/11 and PHB 11/11, zero skips,
+reusing the frozen compiled test classes without a compiler rebuild. See
+`selected-r8-regression-tests/receipt.json`.
+
+
+### ABI33: opt-in local integer array reductions (2026-10-28)
+
+`Context.setPhpArrayOptimizationEnabled` enables a conservative, complete-body
+proof for local unkeyed value-array sums in authored PHP_8_5 class methods.
+The original PHP method remains the fallback. Exact argument guards, checked
+addition/overflow fallback in COMPATIBLE, normal PHP binding/access/dispatch,
+and the existing FAST_INT64_WRAP contract remain authoritative. Debug and
+CHECKED compilation disable specialization. No new semantic deviation is intended.
+
+This first form accepts at most64 direct integer literal/parameter elements,
+zero accumulator, keyless by-value foreach addition and returning the sum.
+References, effects, escaped arrays and unsupported shapes retain ordinary PHP.
+Instance entries require a receiver-free whole-body proof. This is direct JVM
+lowering, not a PHP-to-Kotlin source translator or a universal array optimization.
+
+The option defaults false and participates in source cache identity. ABI33 PHB
+headers retain it, require PHP_8_5 and original ABI33 provenance; older headers
+default false. Compiled artifact policy is independent of later scope defaults.
+DevLine carries the same policy through worker/cache/build/run and authored
+source inventories; vendor and SDK sources remain excluded. See
+`ScalarArrayOptimizationTest` and the coordinating
+`docs/audits/php-numeric-arrays-20261028.md` / isolated evidence directory.

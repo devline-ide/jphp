@@ -33,7 +33,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
     // ABI29 preserves Deprecated invocation effects and lexical trait-use publication ordering.
     // ABI30 records the numeric optimization contract in the header and generated entry context.
     // ABI31 stores the generated ownership contract; older artifacts retain AUTO.
-    public final static int COMPILER_ABI_VERSION = 32;
+    // ABI33 records opt-in numeric-array lowering and admits its pure instance entries.
+    public final static int COMPILER_ABI_VERSION = 33;
     public final static int COMPILER_PROVENANCE_STAMP = 0x43414249; // CABI, in the existing reserved module tail.
     public final static int COMPILER_PROVENANCE_VERSION = 1;
 
@@ -49,8 +50,10 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         private final int compilerAbiVersion;
         private final PhpOptimizationProfile optimizationProfile;
         private final PhpRuntimeOwnershipMode ownershipMode;
+        private final boolean arrayOptimization;
 
-        private Header(PhpLanguageProfile profile, int compilerAbiVersion, PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode) {
+        private Header(PhpLanguageProfile profile, int compilerAbiVersion, PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode, boolean arrayOptimization) {
+            this.arrayOptimization = arrayOptimization;
             this.profile = profile;
             this.compilerAbiVersion = compilerAbiVersion;
             this.optimizationProfile = optimizationProfile;
@@ -62,6 +65,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         public int getCompilerAbiVersion() { return compilerAbiVersion; }
         public PhpOptimizationProfile getOptimizationProfile() { return optimizationProfile; }
         public PhpRuntimeOwnershipMode getOwnershipMode() { return ownershipMode; }
+        public boolean isArrayOptimizationEnabled() { return arrayOptimization; }
     }
 
     protected ConstantDumper constantDumper = new ConstantDumper(context, env, debugInformation);
@@ -107,6 +111,9 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
                 && (compilerAbi < 30 || entity.getPhpLanguageProfile() != PhpLanguageProfile.PHP_8_5))
             throw new DumpException("Fast numeric module requires original ABI30 and PHP_8_5 semantics");
 
+        if (entity.isArrayOptimizationEnabled() && (compilerAbi < 33 || entity.getPhpLanguageProfile() != PhpLanguageProfile.PHP_8_5))
+            throw new DumpException("Numeric array optimization requires ABI33 and PHP_8_5");
+
         // Attest before emitting transport bytes. Unknown/historical metadata remains explicitly unavailable.
         byte[] generatorLinkage = includeData && entity.hasValidatedGeneratorLinkage()
                 ? PhpGeneratorLinkageDumper.save(entity, this::resolveGeneratorDonor) : null;
@@ -120,6 +127,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         data.writeInt(entity.getPhpLanguageProfile().getId());
         data.writeInt(entity.getOptimizationProfile().getId());
         data.writeInt(entity.getOwnershipMode().getId());
+        data.writeBoolean(entity.isArrayOptimizationEnabled());
 
         // legacy code.
         data.writeEnum(LangMode.DEFAULT);
@@ -233,6 +241,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         PhpLanguageProfile profile = PhpLanguageProfile.JPHP_LEGACY;
         PhpOptimizationProfile optimizationProfile = PhpOptimizationProfile.COMPATIBLE;
         PhpRuntimeOwnershipMode ownershipMode = PhpRuntimeOwnershipMode.AUTO;
+        boolean arrayOptimization = false;
         int abi = 0;
         if (VERSION == DUMP_VERSION) {
             abi = data.readInt();
@@ -242,6 +251,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
                 profile = PhpLanguageProfile.fromId(data.readInt());
                 if (abi >= 30) optimizationProfile = PhpOptimizationProfile.fromId(data.readInt());
                 if (abi >= 31) ownershipMode = PhpRuntimeOwnershipMode.fromId(data.readInt());
+                if (abi >= 33) arrayOptimization = data.readBoolean();
             } catch (IllegalArgumentException e) {
                 throw new DumpException(e.getMessage());
             }
@@ -249,7 +259,9 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
 
         if (optimizationProfile != PhpOptimizationProfile.COMPATIBLE && profile != PhpLanguageProfile.PHP_8_5)
             throw new DumpException("Fast numeric optimization requires PHP_8_5 language semantics");
-        return new Header(profile, abi, optimizationProfile, ownershipMode);
+        if (arrayOptimization && profile != PhpLanguageProfile.PHP_8_5)
+            throw new DumpException("Numeric array optimization requires PHP_8_5");
+        return new Header(profile, abi, optimizationProfile, ownershipMode, arrayOptimization);
     }
 
     public static PhpLanguageProfile readLanguageProfileHeader(InputStream input) throws IOException {
@@ -287,6 +299,7 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         entity.setPhpLanguageProfile(profile);
         entity.setOptimizationProfile(header.getOptimizationProfile());
         entity.setOwnershipMode(header.getOwnershipMode());
+        entity.setArrayOptimizationEnabled(header.isArrayOptimizationEnabled());
         entity.setName(data.readName());
         entity.setInternalName(data.readName());
         entity.setStrictTypes(data.readBoolean());
@@ -377,6 +390,8 @@ public class ModuleDumper extends Dumper<ModuleEntity> {
         entity.setData(data.readRawData(Integer.MAX_VALUE));
 
         int compilerAbi = readCompilerProvenance(data.readRawData(1024 * 1024 * 5), header.getCompilerAbiVersion());
+        if (entity.isArrayOptimizationEnabled() && compilerAbi < 33)
+            throw new DumpException("Array optimization lacks original ABI33 provenance");
         if (entity.getOwnershipMode() != PhpRuntimeOwnershipMode.AUTO && compilerAbi < 31)
             throw new DumpException("Ownership mode lacks original ABI31 provenance");
         if (entity.getOptimizationProfile() != PhpOptimizationProfile.COMPATIBLE && compilerAbi < 30)

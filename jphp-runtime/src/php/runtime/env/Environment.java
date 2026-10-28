@@ -1784,7 +1784,7 @@ public class Environment {
     public ModuleEntity importModule(Context context) throws Throwable {
         try(var admission=enterCallbackDomain()) {
             context.freezeImplicitClassImports();String name=context.getModuleName();
-            ModuleEntity module=name==null?null:scope.findCachedModule(name,false,context.getPhpLanguageProfile(scope),context.getImplicitClassImportsFingerprint(),context.getPhpOptimizationProfile(scope),context.getPhpOwnershipMode(scope));
+            ModuleEntity module=name==null?null:scope.findCachedModule(name,false,context.getPhpLanguageProfile(scope),context.getImplicitClassImportsFingerprint(),context.getPhpOptimizationProfile(scope),context.getPhpOwnershipMode(scope),context.isPhpArrayOptimizationEnabled(scope));
             if(module==null)try(var loading=scope.beginModuleLoad(context,false)) {
                 AbstractCompiler compiler=scope.createCompiler(this,context);module=compiler.compile(false);
                 scope.loadModule(module);scope.addUserModule(module);

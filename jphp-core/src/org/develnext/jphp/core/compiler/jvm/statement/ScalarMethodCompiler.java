@@ -159,7 +159,7 @@ public final class ScalarMethodCompiler {
             }
             require(visiting.size()<16 && visiting.add(statement));
             try {
-                require(statement!=null && statement.getClazz()==clazz.statement && statement.isStatic() && !statement.isAbstract() && !statement.isGenerator()
+                require(statement!=null && statement.getClazz()==clazz.statement && !statement.isAbstract() && !statement.isGenerator()
                         && !statement.isReturnReference() && !statement.isReturnOptional() && !statement.isDynamicLocal()
                         && statement.getBody()!=null && statement.getPropertyHookName()==null
                         && (statement.getUses()==null || statement.getUses().isEmpty())
@@ -184,7 +184,13 @@ public final class ScalarMethodCompiler {
                         "__$scalar$"+php.runtime.common.PhpClassNames.canonicalKey(statement.getName().getName())+"$"+clazz.getCompiler().getModule().getOptimizationProfile().getId(),
                         result,parameters,null,new ArrayList<>(locals.values())));
                 ScalarControlFlowCompiler flow=new ScalarControlFlowCompiler(locals,result,this::expression,this::tokens,clazz.getCompiler().getScope().superGlobals);
-                ScalarControlFlowCompiler.Block body=flow.analyze(statement.getBody());
+                Value arraySum = clazz.getCompiler().getModule().isArrayOptimizationEnabled()
+                        ? ScalarArraySumCompiler.analyze(statement.getBody(), locals, this::tokens, this::expression,
+                                clazz.getCompiler().getScope().superGlobals) : null;
+                // Instance kernels are admitted only by the complete receiver-free reduction proof.
+                require(statement.isStatic() || arraySum != null);
+                ScalarControlFlowCompiler.Block body = arraySum == null ? flow.analyze(statement.getBody())
+                        : flow.reduction(arraySum, statement.getMeta().getStartLine());
                 require(!body.fallsThrough() && flow.result()!=null);
                 Plan plan=new Plan(clazz.node.name,"__$scalar$"+php.runtime.common.PhpClassNames.canonicalKey(statement.getName().getName())+"$"+clazz.getCompiler().getModule().getOptimizationProfile().getId(),flow.result(),parameters,body,flow.locals());
                 completed.put(statement,plan);return plan;
@@ -263,33 +269,37 @@ public final class ScalarMethodCompiler {
         kernel.instructions.add(end);
         for(Local local:plan.locals)kernel.localVariables.add(new LocalVariableNode(local.name,local.kind.descriptor,null,start,end,local.slot));
         clazz.node.methods.add(kernel);
-        MethodNode entry=new MethodNodeImpl();entry.access=ACC_PUBLIC|ACC_STATIC|ACC_SYNTHETIC;entry.name=ENTRY_PREFIX+method.node.name;entry.desc=PHP_DESCRIPTOR;
+        MethodNode entry=new MethodNodeImpl();entry.access=ACC_PUBLIC|ACC_SYNTHETIC|(method.statement.isStatic()?ACC_STATIC:0);entry.name=ENTRY_PREFIX+method.node.name;entry.desc=PHP_DESCRIPTOR;
         LabelNode fallback=new LabelNode(),invokeStart=new LabelNode(),invokeEnd=new LabelNode(),overflow=new LabelNode();InsnList code=entry.instructions;
-        code.add(new VarInsnNode(ALOAD,1));code.add(new JumpInsnNode(IFNULL,fallback));
-        code.add(new VarInsnNode(ALOAD,1));code.add(new InsnNode(ARRAYLENGTH));code.add(new LdcInsnNode(plan.parameters.size()));code.add(new JumpInsnNode(IF_ICMPNE,fallback));
+        int environmentSlot = method.statement.isStatic() ? 0 : 1;
+        int argumentsSlot = environmentSlot + 1;
+        code.add(new VarInsnNode(ALOAD,argumentsSlot));code.add(new JumpInsnNode(IFNULL,fallback));
+        code.add(new VarInsnNode(ALOAD,argumentsSlot));code.add(new InsnNode(ARRAYLENGTH));code.add(new LdcInsnNode(plan.parameters.size()));code.add(new JumpInsnNode(IF_ICMPNE,fallback));
         for(int i=0;i<plan.parameters.size();i++){
-            code.add(new VarInsnNode(ALOAD,1));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));code.add(new JumpInsnNode(IFNULL,fallback));
-            code.add(new VarInsnNode(ALOAD,1));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));
+            code.add(new VarInsnNode(ALOAD,argumentsSlot));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));code.add(new JumpInsnNode(IFNULL,fallback));
+            code.add(new VarInsnNode(ALOAD,argumentsSlot));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));
             code.add(new MethodInsnNode(INVOKEVIRTUAL,"java/lang/Object","getClass","()Ljava/lang/Class;",false));
             code.add(new LdcInsnNode(Type.getObjectType(plan.parameters.get(i).kind.box)));
             if(plan.parameters.get(i).kind==Kind.BOOLEAN){
                 LabelNode valid=new LabelNode();code.add(new JumpInsnNode(IF_ACMPEQ,valid));
-                code.add(new VarInsnNode(ALOAD,1));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));
+                code.add(new VarInsnNode(ALOAD,argumentsSlot));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));
                 code.add(new MethodInsnNode(INVOKEVIRTUAL,"java/lang/Object","getClass","()Ljava/lang/Class;",false));
                 code.add(new LdcInsnNode(Type.getObjectType("php/runtime/memory/FalseMemory")));code.add(new JumpInsnNode(IF_ACMPNE,fallback));code.add(valid);
             }else code.add(new JumpInsnNode(IF_ACMPNE,fallback));
         }
         code.add(invokeStart);
         for(int i=0;i<plan.parameters.size();i++){
-            Kind kind=plan.parameters.get(i).kind;code.add(new VarInsnNode(ALOAD,1));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));
+            Kind kind=plan.parameters.get(i).kind;code.add(new VarInsnNode(ALOAD,argumentsSlot));code.add(new LdcInsnNode(i));code.add(new InsnNode(AALOAD));
             code.add(new MethodInsnNode(INVOKEVIRTUAL,MEMORY,kind.conversion,"()"+kind.descriptor,false));
         }
         code.add(new MethodInsnNode(INVOKESTATIC,plan.owner,plan.kernelName,plan.descriptor,false));
         code.add(new MethodInsnNode(INVOKESTATIC,plan.result.box,"valueOf","("+plan.result.descriptor+")Lphp/runtime/Memory;",false));
         code.add(invokeEnd);code.add(new InsnNode(ARETURN));
         entry.tryCatchBlocks.add(new TryCatchBlockNode(invokeStart,invokeEnd,overflow,"java/lang/ArithmeticException"));code.add(overflow);code.add(new InsnNode(POP));
-        code.add(fallback);code.add(new VarInsnNode(ALOAD,0));code.add(new VarInsnNode(ALOAD,1));
-        code.add(new MethodInsnNode(INVOKESTATIC,clazz.node.name,method.node.name,PHP_DESCRIPTOR,false));code.add(new InsnNode(ARETURN));
+        code.add(fallback);
+        if (!method.statement.isStatic()) code.add(new VarInsnNode(ALOAD,0));
+        code.add(new VarInsnNode(ALOAD,environmentSlot));code.add(new VarInsnNode(ALOAD,argumentsSlot));
+        code.add(new MethodInsnNode(method.statement.isStatic()?INVOKESTATIC:INVOKEVIRTUAL,clazz.node.name,method.node.name,PHP_DESCRIPTOR,false));code.add(new InsnNode(ARETURN));
         clazz.node.methods.add(entry);
     }
 }

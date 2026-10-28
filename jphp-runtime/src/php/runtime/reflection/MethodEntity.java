@@ -219,14 +219,13 @@ public class MethodEntity extends AbstractFunctionEntity {
         if (nativeMethod != null) {
             nativeMethod.setAccessible(true);
             nativeInvocation = invocationHandle(nativeMethod);
-            if (java.lang.reflect.Modifier.isStatic(nativeMethod.getModifiers())
-                    && nativeMethod.getReturnType() == Memory.class
+            if (nativeMethod.getReturnType() == Memory.class
                     && java.util.Arrays.equals(nativeMethod.getParameterTypes(), new Class<?>[] {Environment.class, Memory[].class})) {
                 try {
                     Method candidate = nativeMethod.getDeclaringClass().getDeclaredMethod(
                             SCALAR_ENTRY_PREFIX + nativeMethod.getName(), Environment.class, Memory[].class);
                     if (candidate.isSynthetic() && java.lang.reflect.Modifier.isPublic(candidate.getModifiers())
-                            && java.lang.reflect.Modifier.isStatic(candidate.getModifiers())
+                            && java.lang.reflect.Modifier.isStatic(candidate.getModifiers()) == java.lang.reflect.Modifier.isStatic(nativeMethod.getModifiers())
                             && candidate.getReturnType() == Memory.class) {
                         candidate.setAccessible(true);
                         scalarEntry = candidate;
@@ -314,7 +313,7 @@ public class MethodEntity extends AbstractFunctionEntity {
             }
 
             Method entry = scalarEntry;
-            if (!isStatic || entry == null || clazz.getModule()!=null && clazz.getModule().getOwnershipMode()==php.runtime.common.PhpRuntimeOwnershipMode.CHECKED
+            if (entry == null || clazz.getModule()!=null && clazz.getModule().getOwnershipMode()==php.runtime.common.PhpRuntimeOwnershipMode.CHECKED
                     || php.runtime.PhpOwnershipExecution.current(env) != null
                     || php.runtime.PhpRuntimeOwnership.current(env) != null) entry = nativeMethod;
             java.lang.invoke.MethodHandle invocation = entry == scalarEntry ? scalarInvocation : nativeInvocation;

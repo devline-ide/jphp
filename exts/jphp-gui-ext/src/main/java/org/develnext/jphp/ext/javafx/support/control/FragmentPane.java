@@ -1,5 +1,6 @@
 package org.develnext.jphp.ext.javafx.support.control;
 
+import javafx.beans.binding.Bindings;
 import javafx.scene.Node;
 import javafx.scene.Parent;
 import javafx.scene.SubScene;
@@ -30,7 +31,14 @@ public class FragmentPane extends VBox {
     }
 
     public void applyFragment(Stage form) {
+        for (Node child : getChildren()) {
+            if (child instanceof SubScene scene) {
+                scene.widthProperty().unbind();
+                scene.heightProperty().unbind();
+            }
+        }
         this.getChildren().clear();
+        root = null;
 
         if (form != null) {
             root = form.getScene().getRoot();
@@ -40,8 +48,13 @@ public class FragmentPane extends VBox {
 
             SubScene scene = new SubScene(root, width, height);
 
-            scene.widthProperty().bind(widthProperty());
-            scene.heightProperty().bind(heightProperty());
+            // A full-size child plus VBox insets feeds its minimum size back into the host.
+            if (getMinWidth() == Region.USE_COMPUTED_SIZE) setMinWidth(0);
+            if (getMinHeight() == Region.USE_COMPUTED_SIZE) setMinHeight(0);
+            scene.widthProperty().bind(Bindings.createDoubleBinding(
+                    () -> Math.max(0, getWidth() - getInsets().getLeft() - getInsets().getRight()), widthProperty(), insetsProperty()));
+            scene.heightProperty().bind(Bindings.createDoubleBinding(
+                    () -> Math.max(0, getHeight() - getInsets().getTop() - getInsets().getBottom()), heightProperty(), insetsProperty()));
 
             VBox.setVgrow(scene, Priority.ALWAYS);
 

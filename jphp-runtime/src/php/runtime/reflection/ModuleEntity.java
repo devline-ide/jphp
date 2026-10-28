@@ -220,6 +220,12 @@ public class ModuleEntity extends Entity {
         optimizationProfile = Objects.requireNonNull(profile, "profile");
     }
 
+    private boolean arrayOptimizationEnabled;
+
+    public boolean isArrayOptimizationEnabled() { return arrayOptimizationEnabled; }
+
+    public void setArrayOptimizationEnabled(boolean enabled) { arrayOptimizationEnabled = enabled; }
+
     public PhpRuntimeOwnershipMode getOwnershipMode() { return ownershipMode; }
 
     public void setOwnershipMode(PhpRuntimeOwnershipMode mode) {

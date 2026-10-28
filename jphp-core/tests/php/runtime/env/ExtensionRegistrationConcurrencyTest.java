@@ -39,7 +39,7 @@ public class ExtensionRegistrationConcurrencyTest {
         var contender = new AtomicReference<Thread>();
         var registrations = new AtomicInteger();
         Extension extension = new Extension() {
-            @Override public String getName() { return "concurrent-registration-probe"; }
+            @Override public String getName() { return "Concurrent-Registration-Probe"; }
             @Override public Status getStatus() { return Status.EXPERIMENTAL; }
             @Override public void onRegister(CompileScope target) {
                 registrations.incrementAndGet();
