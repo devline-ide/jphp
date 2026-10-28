@@ -1,5 +1,6 @@
 dependencies {
     compileOnly project(":jphp-runtime")
+    testImplementation project(":jphp-runtime")
 
     compileOnly project(":jphp-core")
     api project(":exts:jphp-xml-ext")

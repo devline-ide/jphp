@@ -250,13 +250,19 @@ public class PhpRuntimeOwnershipModeTest extends JvmCompilerCase {
         try {
             ModuleEntity module=new JvmCompiler(env,context("return 1;",PhpRuntimeOwnershipMode.OFF)).compile(false);
             var bytes=new ByteArrayOutputStream();new ModuleDumper(module.getContext(),env,true).save(module,bytes);
-            byte[] encoded=bytes.toByteArray();assertEquals(32,ByteBuffer.wrap(encoded).getInt(8));
-            assertSame(PhpRuntimeOwnershipMode.OFF,ModuleDumper.readHeader(new ByteArrayInputStream(encoded)).getOwnershipMode());
+            byte[] encoded=bytes.toByteArray();assertEquals(34,ByteBuffer.wrap(encoded).getInt(8));
+            var header=ModuleDumper.readHeader(new ByteArrayInputStream(encoded));
+            assertSame(PhpRuntimeOwnershipMode.OFF,header.getOwnershipMode());
+            assertFalse(header.isArrayOptimizationEnabled());assertFalse(header.isStringOptimizationEnabled());
             ByteBuffer.wrap(encoded).putInt(20,99);assertThrows(DumpException.class,()->ModuleDumper.readHeader(new ByteArrayInputStream(encoded)));
-            for(int abi:new int[]{1,29,30}) {
+            for(int abi:new int[]{1,29,30,32,33}) {
                 bytes.reset();var old=new DataOutputStream(bytes);old.writeInt(ModuleDumper.DUMP_STAMP);old.writeInt(ModuleDumper.DUMP_VERSION);old.writeInt(abi);old.writeInt(PhpLanguageProfile.PHP_8_5.getId());
                 if(abi>=30)old.writeInt(PhpOptimizationProfile.COMPATIBLE.getId());
-                assertSame(PhpRuntimeOwnershipMode.AUTO,ModuleDumper.readHeader(new ByteArrayInputStream(bytes.toByteArray())).getOwnershipMode());
+                if(abi>=32)old.writeInt(PhpRuntimeOwnershipMode.AUTO.getId());
+                if(abi>=33)old.writeBoolean(false);
+                var oldHeader=ModuleDumper.readHeader(new ByteArrayInputStream(bytes.toByteArray()));
+                assertSame(PhpRuntimeOwnershipMode.AUTO,oldHeader.getOwnershipMode());
+                assertFalse(oldHeader.isArrayOptimizationEnabled());assertFalse(oldHeader.isStringOptimizationEnabled());
             }
         }finally{env.doFinal();}
     }

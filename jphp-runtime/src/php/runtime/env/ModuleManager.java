@@ -36,6 +36,8 @@ public class ModuleManager {
     private boolean sourceOwnershipModeResolverFrozen;
     private Function<String, Boolean> sourceArrayOptimizationResolver;
     private boolean sourceArrayOptimizationResolverFrozen;
+    private Function<String, Boolean> sourceStringOptimizationResolver;
+    private boolean sourceStringOptimizationResolverFrozen;
 
     public ModuleManager(Environment env) {
         this.env = env;
@@ -56,6 +58,8 @@ public class ModuleManager {
             this.sourceOwnershipModeResolverFrozen = parent.sourceOwnershipModeResolverFrozen;
             this.sourceArrayOptimizationResolver = parent.sourceArrayOptimizationResolver;
             this.sourceArrayOptimizationResolverFrozen = parent.sourceArrayOptimizationResolverFrozen;
+            this.sourceStringOptimizationResolver = parent.sourceStringOptimizationResolver;
+            this.sourceStringOptimizationResolverFrozen = parent.sourceStringOptimizationResolverFrozen;
         }
     }
 
@@ -163,6 +167,24 @@ public class ModuleManager {
         return !compiled && env.getScope().isPhpArrayOptimizationEnabled();
     }
 
+    public void setSourceStringOptimizationResolver(Function<String, Boolean> resolver) {
+        synchronized (this) {
+            if (sourceStringOptimizationResolverFrozen && sourceStringOptimizationResolver != resolver)
+                throw new IllegalStateException("Source string optimization resolver is frozen after the first fetch");
+            sourceStringOptimizationResolver = resolver;
+        }
+    }
+
+    private boolean resolveSourceStringOptimization(String path, boolean compiled) {
+        Function<String, Boolean> resolver;
+        synchronized (this) { sourceStringOptimizationResolverFrozen = true; resolver = sourceStringOptimizationResolver; }
+        if (!compiled && resolver != null) {
+            Boolean selected = resolver.apply(ModuleCacheKey.normalize(path));
+            if (selected != null) return selected;
+        }
+        return !compiled && env.getScope().isPhpStringOptimizationEnabled();
+    }
+
     public ModuleEntity fetchModule(String path, boolean compiled) throws Throwable {
         return fetchModule(path, compiled, env.getScope().getPhpLanguageProfile());
     }
@@ -178,11 +200,12 @@ public class ModuleManager {
                 PhpOptimizationProfile optimizationProfile = resolveSourceOptimizationProfile(path,compiled);
                 PhpRuntimeOwnershipMode ownershipMode = resolveSourceOwnershipMode(path,compiled);
                 boolean arrayOptimization = resolveSourceArrayOptimization(path,compiled);
-                ModuleCacheKey key=new ModuleCacheKey(path,compiled,profile,imports.getImplicitClassImportsFingerprint(),optimizationProfile,ownershipMode,arrayOptimization);ModuleEntity module;
+                boolean stringOptimization = resolveSourceStringOptimization(path,compiled);
+                ModuleCacheKey key=new ModuleCacheKey(path,compiled,profile,imports.getImplicitClassImportsFingerprint(),optimizationProfile,ownershipMode,arrayOptimization,stringOptimization);ModuleEntity module;
                 synchronized(this){module=cachedModules.get(key);}
                 if(module!=null && (module.getContext().getLastModified()==0 || module.getContext().getLastModified()==new File(key.getPath()).lastModified()))return module;
                 synchronized(this){cachedModules.remove(key);if(module!=null)modules.remove(key.getPath(),module);}
-                module=fetchTemporaryModule(path,compiled,profile,imports.getImplicitClassImports(),optimizationProfile,ownershipMode,arrayOptimization);
+                module=fetchTemporaryModule(path,compiled,profile,imports.getImplicitClassImports(),optimizationProfile,ownershipMode,arrayOptimization,stringOptimization);
                 if(module!=null)synchronized(this){cachedModules.put(key,module);modules.put(key.getPath(),module);}
                 return module;
             }finally{synchronized(this){pendingFetches.remove(pending);}}
@@ -201,13 +224,13 @@ public class ModuleManager {
             synchronized(this){if(!pendingFetches.add(pending))throw new IllegalStateException("Recursive source resolution before module publication");}
             try {
                 profile=resolveSourceLanguageProfile(path,compiled,profile);Context imports=resolveImplicitClassImports(path,compiled);
-                return fetchTemporaryModule(path,compiled,profile,imports.getImplicitClassImports(),resolveSourceOptimizationProfile(path,compiled),resolveSourceOwnershipMode(path,compiled),resolveSourceArrayOptimization(path,compiled));
+                return fetchTemporaryModule(path,compiled,profile,imports.getImplicitClassImports(),resolveSourceOptimizationProfile(path,compiled),resolveSourceOwnershipMode(path,compiled),resolveSourceArrayOptimization(path,compiled),resolveSourceStringOptimization(path,compiled));
             }finally{synchronized(this){pendingFetches.remove(pending);}}
         }
     }
 
     private ModuleEntity fetchTemporaryModule(String path, boolean compiled, PhpLanguageProfile profile,
-                                              Map<String, String> imports, PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode, boolean arrayOptimization) throws Throwable {
+                                              Map<String, String> imports, PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode, boolean arrayOptimization, boolean stringOptimization) throws Throwable {
         Stream stream = fetchStream(path);
 
         if (stream == null) {
@@ -226,6 +249,7 @@ public class ModuleManager {
                     context.setPhpOptimizationProfile(optimizationProfile);
                     context.setPhpOwnershipMode(ownershipMode);
                     context.setPhpArrayOptimizationEnabled(arrayOptimization);
+                    context.setPhpStringOptimizationEnabled(stringOptimization);
                     context.setImplicitClassImports(imports.values());
                 }
 
@@ -239,6 +263,7 @@ public class ModuleManager {
                 context.setPhpOptimizationProfile(module.getOptimizationProfile());
                 context.setPhpOwnershipMode(module.getOwnershipMode());
                 context.setPhpArrayOptimizationEnabled(module.isArrayOptimizationEnabled());
+                context.setPhpStringOptimizationEnabled(module.isStringOptimizationEnabled());
                 module.setTrace(new TraceInfo(context));
                 return module;
             }
@@ -279,7 +304,7 @@ public class ModuleManager {
     }
 
     public void addModule(String path, ModuleEntity module) {
-        ModuleCacheKey key=new ModuleCacheKey(path,module.isCompiledArtifact(),module.getPhpLanguageProfile(),module.getContext().getImplicitClassImportsFingerprint(),module.getOptimizationProfile(),module.getOwnershipMode(),module.isArrayOptimizationEnabled());
+        ModuleCacheKey key=new ModuleCacheKey(path,module.isCompiledArtifact(),module.getPhpLanguageProfile(),module.getContext().getImplicitClassImportsFingerprint(),module.getOptimizationProfile(),module.getOwnershipMode(),module.isArrayOptimizationEnabled(),module.isStringOptimizationEnabled());
         synchronized(this){modules.put(key.getPath(),module);cachedModules.put(key,module);}
     }
 

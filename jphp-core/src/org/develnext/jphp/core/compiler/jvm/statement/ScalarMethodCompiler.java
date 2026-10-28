@@ -187,9 +187,11 @@ public final class ScalarMethodCompiler {
                 Value arraySum = clazz.getCompiler().getModule().isArrayOptimizationEnabled()
                         ? ScalarArraySumCompiler.analyze(statement.getBody(), locals, this::tokens, this::expression,
                                 clazz.getCompiler().getScope().superGlobals) : null;
-                // Instance kernels are admitted only by the complete receiver-free reduction proof.
-                require(statement.isStatic() || arraySum != null);
-                ScalarControlFlowCompiler.Block body = arraySum == null ? flow.analyze(statement.getBody())
+                BodyStmtToken projection = arraySum == null && clazz.getCompiler().getModule().isArrayOptimizationEnabled()
+                        ? JvmOptimizationProvider.projectScalarBody(clazz, statement) : null;
+                // Optional projections still pass the complete scalar/receiver-free proof.
+                require(statement.isStatic() || arraySum != null || projection != null);
+                ScalarControlFlowCompiler.Block body = arraySum == null ? flow.analyze(projection == null ? statement.getBody() : projection)
                         : flow.reduction(arraySum, statement.getMeta().getStartLine());
                 require(!body.fallsThrough() && flow.result()!=null);
                 Plan plan=new Plan(clazz.node.name,"__$scalar$"+php.runtime.common.PhpClassNames.canonicalKey(statement.getName().getName())+"$"+clazz.getCompiler().getModule().getOptimizationProfile().getId(),flow.result(),parameters,body,flow.locals());

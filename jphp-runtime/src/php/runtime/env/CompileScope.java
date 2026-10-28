@@ -78,7 +78,7 @@ public class CompileScope {
     public ModuleLoad beginModuleLoad(Context context,boolean compiled)throws java.io.IOException {
         String name=context.getModuleName();
         Object key=name==null?new ModuleInputIdentity(context):new ModuleCacheKey(name,compiled,context.getPhpLanguageProfile(this),
-                compiled?"":context.getImplicitClassImportsFingerprint(), context.getPhpOptimizationProfile(this), context.getPhpOwnershipMode(this), context.isPhpArrayOptimizationEnabled(this));
+                compiled?"":context.getImplicitClassImportsFingerprint(), context.getPhpOptimizationProfile(this), context.getPhpOwnershipMode(this), context.isPhpArrayOptimizationEnabled(this), context.isPhpStringOptimizationEnabled(this));
         synchronized(loadingModules){if(!loadingModules.add(key))throw new IllegalStateException("Recursive module restoration before publication");}
         return new ModuleLoad(key);
     }
@@ -139,6 +139,7 @@ public class CompileScope {
     protected PhpOptimizationProfile phpOptimizationProfile = PhpOptimizationProfile.COMPATIBLE;
     protected PhpRuntimeOwnershipMode phpOwnershipMode = PhpRuntimeOwnershipMode.AUTO;
     protected boolean phpArrayOptimizationEnabled;
+    protected boolean phpStringOptimizationEnabled;
 
     public CompileScope(CompileScope parent) {
         id = scopeCount.getAndIncrement();
@@ -148,6 +149,7 @@ public class CompileScope {
         phpOptimizationProfile = parent.phpOptimizationProfile;
         phpOwnershipMode = parent.phpOwnershipMode;
         phpArrayOptimizationEnabled = parent.phpArrayOptimizationEnabled;
+        phpStringOptimizationEnabled = parent.phpStringOptimizationEnabled;
 
         moduleMap = new ConcurrentHashMap<>();
         moduleIndexMap = new ConcurrentHashMap<>();
@@ -328,6 +330,10 @@ public class CompileScope {
     public boolean isPhpArrayOptimizationEnabled() { return phpArrayOptimizationEnabled; }
 
     public void setPhpArrayOptimizationEnabled(boolean enabled) { phpArrayOptimizationEnabled = enabled; }
+
+    public boolean isPhpStringOptimizationEnabled() { return phpStringOptimizationEnabled; }
+
+    public void setPhpStringOptimizationEnabled(boolean enabled) { phpStringOptimizationEnabled = enabled; }
 
     public PhpRuntimeOwnershipMode getPhpOwnershipMode() { return phpOwnershipMode; }
 
@@ -630,7 +636,7 @@ public class CompileScope {
         moduleIndexMap.put(module.getInternalName(), module);
         String inputName = module.getContext().getModuleNameNoThrow();
         if (inputName != null) cachedModules.put(new ModuleCacheKey(inputName, module.isCompiledArtifact(),
-                module.getPhpLanguageProfile(), module.getContext().getImplicitClassImportsFingerprint(), module.getOptimizationProfile(), module.getOwnershipMode(), module.isArrayOptimizationEnabled()), module);
+                module.getPhpLanguageProfile(), module.getContext().getImplicitClassImportsFingerprint(), module.getOptimizationProfile(), module.getOwnershipMode(), module.isArrayOptimizationEnabled(), module.isStringOptimizationEnabled()), module);
     }
 
     public void registerFunction(FunctionEntity function){
@@ -665,7 +671,12 @@ public class CompileScope {
 
     public ModuleEntity findCachedModule(String name, boolean compiled, PhpLanguageProfile profile, String importsFingerprint,
                                          PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode, boolean arrayOptimization) {
-        ModuleCacheKey key = new ModuleCacheKey(name, compiled, profile, importsFingerprint, optimizationProfile, ownershipMode, arrayOptimization);
+        return findCachedModule(name, compiled, profile, importsFingerprint, optimizationProfile, ownershipMode, arrayOptimization, isPhpStringOptimizationEnabled());
+    }
+
+    public ModuleEntity findCachedModule(String name, boolean compiled, PhpLanguageProfile profile, String importsFingerprint,
+                                         PhpOptimizationProfile optimizationProfile, PhpRuntimeOwnershipMode ownershipMode, boolean arrayOptimization, boolean stringOptimization) {
+        ModuleCacheKey key = new ModuleCacheKey(name, compiled, profile, importsFingerprint, optimizationProfile, ownershipMode, arrayOptimization, stringOptimization);
         ModuleEntity module = cachedModules.get(key);
         if (module != null && module.getContext().getLastModified() != 0
                 && module.getContext().getLastModified() != new java.io.File(key.getPath()).lastModified()) {

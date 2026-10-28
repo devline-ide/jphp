@@ -927,12 +927,46 @@ public class UXNode<T extends Node> extends BaseWrapper<Node> implements Eventab
         return getWrappedObject().hashCode();
     }
 
+    private static final Pattern SIMPLE_ID_SELECTOR = Pattern.compile("#[A-Za-z_][A-Za-z0-9_-]*");
+    private static final ClassValue<Boolean> CUSTOM_LOOKUP = new ClassValue<Boolean>() {
+        @Override
+        protected Boolean computeValue(Class<?> type) {
+            try {
+                Class<?> owner = type.getMethod("lookup", String.class).getDeclaringClass();
+                return owner != Node.class && owner != Parent.class;
+            } catch (NoSuchMethodException failure) {
+                throw new IllegalStateException(failure);
+            }
+        }
+    };
+
+    private static Node lookupSimpleId(Node root, String id, String selector) {
+        if (CUSTOM_LOOKUP.get(root.getClass())) {
+            return root.lookup(selector);
+        }
+        if (id.equals(root.getId())) {
+            return root;
+        }
+        if (root instanceof Parent) {
+            for (Node child : ((Parent) root).getChildrenUnmodifiable()) {
+                Node found = lookupSimpleId(child, id, selector);
+                if (found != null) {
+                    return found;
+                }
+            }
+        }
+        return null;
+    }
+
     public static Node __globalLookup(Node parent, String select) {
         if (parent == null) { // fix null pointer exceptio
             return null;
         }
 
-        Node node = parent.lookup(select);
+        // A plain ID has the same scene-tree preorder without reparsing CSS on every form property read.
+        Node node = select != null && SIMPLE_ID_SELECTOR.matcher(select).matches()
+                ? lookupSimpleId(parent, select.substring(1), select)
+                : parent.lookup(select);
 
         if (node != null) {
             return node;

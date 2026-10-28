@@ -1015,6 +1015,7 @@ public class MethodStmtCompiler extends StmtCompiler<MethodEntity> {
             writePropertyWriteContext();
             writeFooter();
             ScalarMethodCompiler.emit(this);
+            JvmOptimizationProvider.emitEntries(this);
         }
         return entity;
     }

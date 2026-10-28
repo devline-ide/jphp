@@ -682,3 +682,31 @@ DevLine carries the same policy through worker/cache/build/run and authored
 source inventories; vendor and SDK sources remain excluded. See
 `ScalarArrayOptimizationTest` and the coordinating
 `docs/audits/php-numeric-arrays-20261028.md` / isolated evidence directory.
+
+
+### ABI34: optional Kotlin/JVM kernels (2026-10-28)
+
+The new string-kernel option is independent of ABI33's array option and defaults
+false. ABI34 stores both flags, requires original ABI34/PHP_8_5 provenance for
+the string flag, and keeps old headers disabled for that option. Source module
+and artifact cache identity includes both settings. Artifact policy remains
+authoritative after loading; SDK/vendor sources keep their own profiles.
+
+Public compiler/runtime SPIs are optional. The private DevLine module supplies
+bounded nonescaping array projections (still verified by the standard complete
+scalar proof) and whole integer string-building kernels on Kotlin/JVM primitives.
+It does not copy covered compiler implementations into private code. No source
+PHP is rewritten, and no new language deviation is intended. Ordinary PHP binding,
+access, dispatch, return checks, compatible overflow and unsupported/effectful
+bodies remain authoritative. FAST_INT64_WRAP retains its existing exception.
+Debug/CHECKED/active ownership paths retain ordinary execution.
+
+String entries call an optional pure runtime provider and fall back when absent,
+so generated PHB does not hard-link a proprietary implementation. Private limits
+(1 MiB result/iteration budget), raw-byte/non-ASCII cases, incompatible arguments,
+overflow and interruption request ordinary PHP execution; no answer cache or
+benchmark/class/seed-specific admission is used.
+
+See coordinating docs/php-kotlin-kernels.md, devline-php-optimizer tests,
+phpKotlinKernelsPipelineCheck and phpKernelSettingsPersistenceCheck. Timing
+receipts belong to build/php-numeric-arrays-20261028-r2 and are not game FPS.

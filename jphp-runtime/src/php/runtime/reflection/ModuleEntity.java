@@ -221,10 +221,15 @@ public class ModuleEntity extends Entity {
     }
 
     private boolean arrayOptimizationEnabled;
+    private boolean stringOptimizationEnabled;
 
     public boolean isArrayOptimizationEnabled() { return arrayOptimizationEnabled; }
 
     public void setArrayOptimizationEnabled(boolean enabled) { arrayOptimizationEnabled = enabled; }
+
+    public boolean isStringOptimizationEnabled() { return stringOptimizationEnabled; }
+
+    public void setStringOptimizationEnabled(boolean enabled) { stringOptimizationEnabled = enabled; }
 
     public PhpRuntimeOwnershipMode getOwnershipMode() { return ownershipMode; }
 
