@@ -187,7 +187,7 @@ public final class ScalarMethodCompiler {
                 Value arraySum = clazz.getCompiler().getModule().isArrayOptimizationEnabled()
                         ? ScalarArraySumCompiler.analyze(statement.getBody(), locals, this::tokens, this::expression,
                                 clazz.getCompiler().getScope().superGlobals) : null;
-                BodyStmtToken projection = arraySum == null && clazz.getCompiler().getModule().isArrayOptimizationEnabled()
+                BodyStmtToken projection = arraySum == null
                         ? JvmOptimizationProvider.projectScalarBody(clazz, statement) : null;
                 // Optional projections still pass the complete scalar/receiver-free proof.
                 require(statement.isStatic() || arraySum != null || projection != null);

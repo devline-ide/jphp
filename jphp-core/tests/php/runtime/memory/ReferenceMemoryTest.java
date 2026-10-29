@@ -13,6 +13,42 @@ import php.runtime.Memory;
 public class ReferenceMemoryTest {
 
     @Test
+    public void integerStoresPreserveTheSharedCellAcrossRebinding() {
+        ReferenceMemory cell = new ReferenceMemory(LongMemory.valueOf(10001));
+        ReferenceMemory first = new ReferenceMemory(), second = new ReferenceMemory();
+        first.assignRef(cell); second.assignRef(first);
+        Memory next = LongMemory.valueOf(20003);
+        Assert.assertSame(next, first.assign(next));
+        Assert.assertSame(cell, first.getReference());
+        Assert.assertSame(cell, second.getReference());
+        Assert.assertSame(next, cell.toValue());
+        Assert.assertEquals(20003, second.toLong());
+        ReferenceMemory replacement = new ReferenceMemory(LongMemory.valueOf(-10007));
+        first.assignRef(replacement);
+        first.assign((Memory) LongMemory.valueOf(30011));
+        Assert.assertEquals(30011, replacement.toLong());
+        Assert.assertEquals(20003, second.toLong());
+    }
+
+    @Test
+    public void integerAliasStoresKeepSubclassSettersAndNonIntegerTransitions() {
+        int[] stores = {0};
+        ReferenceMemory observed = new ReferenceMemory(LongMemory.valueOf(10001)) {
+            @Override public Memory assign(Memory value) { stores[0]++; return super.assign(value); }
+        };
+        ReferenceMemory alias = new ReferenceMemory(observed);
+        alias.assign((Memory) LongMemory.valueOf(20003));
+        Assert.assertEquals(1, stores[0]);
+        Assert.assertEquals(20003, observed.toLong());
+        alias.assign(DoubleMemory.valueOf(2.5));
+        Assert.assertEquals(2, stores[0]);
+        Assert.assertEquals(2.5, observed.toDouble(), 0);
+        alias.assign((Memory) LongMemory.valueOf(-10007));
+        Assert.assertEquals(3, stores[0]);
+        Assert.assertEquals(-10007, observed.toLong());
+    }
+
+    @Test
     public void testValueOf(){
         Memory memory = ReferenceMemory.valueOf(Memory.TRUE);
         Assert.assertTrue(memory instanceof ReferenceMemory);

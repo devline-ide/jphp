@@ -1616,6 +1616,25 @@ public class ReferenceMemory extends Memory {
 
     @Override
     public Memory assign(Memory memory) {
+        // Plain integer CELLs have no property coercion, virtual setter or
+        // sparse ownership publication. Keep the identity of the shared CELL.
+        if (getClass() == ReferenceMemory.class && memory != null && memory.getClass() == LongMemory.class
+                && (ownershipAuthority == null || ownershipAuthority == SHARED_REFERENCE)
+                && propertySource == null && propertySources == null) {
+            if (_value.getClass() == LongMemory.class) {
+                _value = memory;
+                return memory;
+            }
+            if (_value.getClass() == ReferenceMemory.class) {
+                ReferenceMemory cell = (ReferenceMemory) _value;
+                if ((cell.ownershipAuthority == null || cell.ownershipAuthority == SHARED_REFERENCE)
+                        && cell.propertySource == null && cell.propertySources == null
+                        && cell._value.getClass() == LongMemory.class) {
+                    cell._value = memory;
+                    return memory;
+                }
+            }
+        }
         if (getRuntimeHolder() != null) return getRuntimeHolder().assign(memory);
         rejectUnmanagedOwnershipMutation();
         if (guarded()) return assignProperty(memory, propertySource);

@@ -7,6 +7,8 @@ import java.util.ServiceLoader;
 
 /** Optional compiler extensions. Original PHP bodies remain available for guarded fallback. */
 public interface JvmOptimizationProvider {
+    /** Existing array providers remain governed by their original explicit flag. */
+    default boolean requiresArrayOptimization() { return true; }
     /** The standard scalar verifier proves this complete projection. Never mutate source nodes. */
     default BodyStmtToken project(ClassStmtCompiler owner, MethodStmtToken method) { return null; }
     /** Emit an additional guarded entry only after proving the entire original method. */
@@ -14,6 +16,7 @@ public interface JvmOptimizationProvider {
 
     static BodyStmtToken projectScalarBody(ClassStmtCompiler owner, MethodStmtToken method) {
         for (JvmOptimizationProvider provider : Providers.ALL) {
+            if (provider.requiresArrayOptimization() && !owner.getCompiler().getModule().isArrayOptimizationEnabled()) continue;
             BodyStmtToken body = provider.project(owner, method);
             if (body != null) return body;
         }

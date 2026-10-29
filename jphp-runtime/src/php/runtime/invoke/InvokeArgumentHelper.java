@@ -368,6 +368,9 @@ public class InvokeArgumentHelper {
         if (parameters == null) {
             return args;
         }
+        // The caller already owns this positional vector. Exact immutable
+        // integers need neither unpacking, conversion nor a defensive copy.
+        if (ownedVector && plainIntegerArguments(args, parameters)) return args;
         args = unpackArgs(env, trace, args, parameters);
         int suppliedCount = args == null ? 0 : args.length;
         Memory[] passed = argsToPassed(env, trace, args, parameters, ownedVector);
@@ -438,6 +441,17 @@ public class InvokeArgumentHelper {
         }
 
         return passed;
+    }
+
+    private static boolean plainIntegerArguments(Memory[] args, ParameterEntity[] parameters) {
+        if (args == null || args.length != parameters.length) return false;
+        for (int i = 0; i < args.length; i++) {
+            ParameterEntity parameter = parameters[i];
+            if (parameter == null || parameter.getClass() != ParameterEntity.class
+                    || parameter.isReference() || parameter.isVariadic() || parameter.getTypeChecker() != null
+                    || args[i] == null || args[i].getClass() != php.runtime.memory.LongMemory.class) return false;
+        }
+        return true;
     }
 
 
