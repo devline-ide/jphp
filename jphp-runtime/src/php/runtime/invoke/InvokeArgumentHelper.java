@@ -258,6 +258,10 @@ public class InvokeArgumentHelper {
     static Memory[] makeArguments(Environment env, Memory[] args, MethodEntity method,
                                    ParameterEntity[] parameters, String originClassName, String originMethodName,
                                    String staticClassName, TraceInfo trace, boolean internalCall, boolean ownedVector) {
+        if (method.acceptsBorrowedScalarArguments() && exactScalarArguments(args, parameters)
+                && php.runtime.PhpOwnershipExecution.current(env) == null
+                && php.runtime.PhpRuntimeOwnership.current(env) == null
+                && BoundArguments.current(env, args, method) == null) return args;
         if(php.runtime.PhpEnums.generatedMethod(method)) {
             var bound=BoundArguments.current(env,args,method);
             if(bound!=null && bound.signature().completeNames())bound.requirePreparation(parameters);
@@ -450,6 +454,31 @@ public class InvokeArgumentHelper {
             if (parameter == null || parameter.getClass() != ParameterEntity.class
                     || parameter.isReference() || parameter.isVariadic() || parameter.getTypeChecker() != null
                     || args[i] == null || args[i].getClass() != php.runtime.memory.LongMemory.class) return false;
+        }
+        return true;
+    }
+
+    /** Borrow only immutable exact values with builtin identity conversions, never arbitrary Java hooks. */
+    private static boolean exactScalarArguments(Memory[] args, ParameterEntity[] parameters) {
+        if (args == null || parameters == null || args.length != parameters.length) return false;
+        for (int i = 0; i < args.length; i++) {
+            ParameterEntity parameter = parameters[i];
+            Memory value = args[i];
+            if (parameter == null || parameter.getClass() != ParameterEntity.class
+                    || parameter.isReference() || parameter.isVariadic() || value == null) return false;
+            String expected = value.getClass() == php.runtime.memory.LongMemory.class ? "int"
+                    : value.getClass() == php.runtime.memory.DoubleMemory.class ? "float" : null;
+            if (expected == null) return false;
+            var checker = parameter.getTypeChecker();
+            if (checker == null) continue;
+            if (checker.getClass() == php.runtime.reflection.support.TypeChecker.Simple.class) {
+                if (((php.runtime.reflection.support.TypeChecker.Simple) checker).getType()
+                        != (expected.equals("int") ? HintType.INT : HintType.DOUBLE)) return false;
+            } else if (checker.getClass() == php.runtime.reflection.support.PhpTypeDeclaration.class) {
+                var alternatives = ((php.runtime.reflection.support.PhpTypeDeclaration) checker).getAlternatives();
+                if (alternatives.size() != 1 || alternatives.getFirst().size() != 1
+                        || !alternatives.getFirst().getFirst().equals(expected)) return false;
+            } else return false;
         }
         return true;
     }

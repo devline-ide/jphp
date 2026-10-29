@@ -35,6 +35,12 @@ public class MethodEntity extends AbstractFunctionEntity {
     private java.lang.invoke.MethodHandle nativeInvocation;
     private java.lang.invoke.MethodHandle scalarInvocation;
     public static final String SCALAR_ENTRY_PREFIX = "__$scalarEntry$";
+    private boolean borrowedScalarArguments;
+    /** Explicit entry contract; older PHB files and unmarked extension entries retain copies. */
+    public final boolean acceptsBorrowedScalarArguments() {
+        return getClass() == MethodEntity.class && borrowedScalarArguments && scalarEntry != null && nativeMethod != null
+                && nativeMethod.getDeclaringClass().getClassLoader() instanceof php.runtime.loader.RuntimeClassLoader;
+    }
 
     protected boolean isAbstract;
     protected boolean isFinal;
@@ -213,6 +219,7 @@ public class MethodEntity extends AbstractFunctionEntity {
     public void setNativeMethod(Method nativeMethod) {
         this.nativeMethod = nativeMethod;
         scalarEntry = null;
+        borrowedScalarArguments = false;
         nativeInvocation = null;
         scalarInvocation = null;
 
@@ -229,6 +236,7 @@ public class MethodEntity extends AbstractFunctionEntity {
                             && candidate.getReturnType() == Memory.class) {
                         candidate.setAccessible(true);
                         scalarEntry = candidate;
+                        borrowedScalarArguments = candidate.isAnnotationPresent(php.runtime.annotation.ReadOnlyArguments.class);
                         scalarInvocation = invocationHandle(candidate);
                     }
                 } catch (NoSuchMethodException ignored) {

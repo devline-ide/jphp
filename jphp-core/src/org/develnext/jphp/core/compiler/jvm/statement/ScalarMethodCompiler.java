@@ -272,6 +272,8 @@ public final class ScalarMethodCompiler {
         for(Local local:plan.locals)kernel.localVariables.add(new LocalVariableNode(local.name,local.kind.descriptor,null,start,end,local.slot));
         clazz.node.methods.add(kernel);
         MethodNode entry=new MethodNodeImpl();entry.access=ACC_PUBLIC|ACC_SYNTHETIC|(method.statement.isStatic()?ACC_STATIC:0);entry.name=ENTRY_PREFIX+method.node.name;entry.desc=PHP_DESCRIPTOR;
+        entry.visibleAnnotations=new ArrayList<>();
+        entry.visibleAnnotations.add(new AnnotationNode("Lphp/runtime/annotation/ReadOnlyArguments;"));
         LabelNode fallback=new LabelNode(),invokeStart=new LabelNode(),invokeEnd=new LabelNode(),overflow=new LabelNode();InsnList code=entry.instructions;
         int environmentSlot = method.statement.isStatic() ? 0 : 1;
         int argumentsSlot = environmentSlot + 1;
@@ -301,6 +303,10 @@ public final class ScalarMethodCompiler {
         code.add(fallback);
         if (!method.statement.isStatic()) code.add(new VarInsnNode(ALOAD,0));
         code.add(new VarInsnNode(ALOAD,environmentSlot));code.add(new VarInsnNode(ALOAD,argumentsSlot));
+        LabelNode fallbackArguments=new LabelNode();
+        code.add(new InsnNode(DUP));code.add(new JumpInsnNode(IFNULL,fallbackArguments));
+        code.add(new MethodInsnNode(INVOKEVIRTUAL,"[Lphp/runtime/Memory;","clone","()Ljava/lang/Object;",false));
+        code.add(new TypeInsnNode(CHECKCAST,"[Lphp/runtime/Memory;"));code.add(fallbackArguments);
         code.add(new MethodInsnNode(method.statement.isStatic()?INVOKESTATIC:INVOKEVIRTUAL,clazz.node.name,method.node.name,PHP_DESCRIPTOR,false));code.add(new InsnNode(ARETURN));
         clazz.node.methods.add(entry);
     }

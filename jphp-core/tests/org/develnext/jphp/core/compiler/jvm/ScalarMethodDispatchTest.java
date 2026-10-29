@@ -30,6 +30,7 @@ public class ScalarMethodDispatchTest extends JvmCompilerCase {
             try {
                 var fixture = fixture(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_SYNTHETIC);
                 var entity = entity(fixture, "original");
+                assertFalse("Unmarked extension entry must retain argument isolation", entity.acceptsBorrowedScalarArguments());
                 entity.getClazz().addMethod(entity, null).check(env);
                 env.getScope().registerClass(entity.getClazz());
                 var context = new Context("return DispatchFixture::original();");
